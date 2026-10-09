@@ -38,10 +38,12 @@
           </div>
           <p id="game-message" class="game-message" role="status" aria-live="polite"></p>
           <div class="board-frame">
-            <div class="axis axis-top" aria-hidden="true"><span></span><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span><span>I</span><span>J</span><span>K</span><span>L</span><span>M</span><span>N</span><span>O</span></div>
-            <div class="board-row">
-              <div class="axis axis-side" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span></div>
-              <div class="game-board" role="grid" aria-label="Поле 15 на 15"></div>
+            <div class="board-shell">
+              <div class="axis axis-top" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span><span>I</span><span>J</span><span>K</span><span>L</span><span>M</span><span>N</span><span>O</span></div>
+              <div class="board-row">
+                <div class="axis axis-side" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span></div>
+                <div class="game-board" role="grid" aria-label="Поле 15 на 15"></div>
+              </div>
             </div>
           </div>
           <div class="legend" aria-label="Обозначения">
@@ -72,6 +74,16 @@
     </section>
     <footer class="footer">Один экран · Два игрока · Одна цепная реакция</footer>
   </main>
+  <dialog id="result-modal" class="result-modal" aria-labelledby="result-title" aria-describedby="result-description">
+    <section class="result-card">
+      <p class="eyebrow result-eyebrow">Партия завершена</p>
+      <div class="result-emblem" aria-hidden="true">✦</div>
+      <h2 id="result-title" class="result-title">Победа!</h2>
+      <p id="result-description" class="result-description"></p>
+      <p id="result-roast" class="result-roast"></p>
+      <button id="result-new-game" class="button button-primary" type="button">Начать новую партию</button>
+    </section>
+  </dialog>
   <script src="/ui/script.js" defer></script>
 </body>
 </html>

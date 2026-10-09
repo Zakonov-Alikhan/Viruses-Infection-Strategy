@@ -17,6 +17,11 @@ const turnElement = document.querySelector("#turn-counter");
 const startButton = document.querySelector("#start-button");
 const sideTitle = document.querySelector("#side-title");
 const sideDescription = document.querySelector("#side-description");
+const resultModal = document.querySelector("#result-modal");
+const resultTitle = document.querySelector("#result-title");
+const resultDescription = document.querySelector("#result-description");
+const resultRoast = document.querySelector("#result-roast");
+const resultNewGameButton = document.querySelector("#result-new-game");
 
 let board;
 let phase;
@@ -77,6 +82,7 @@ function canCompleteTurn(player, count, sourceBoard = board) {
 }
 
 function setupGame() {
+  if (resultModal.open) resultModal.close();
   board = emptyBoard();
   phase = "setup-x";
   currentPlayer = "X";
@@ -170,8 +176,14 @@ function resolveContact(row, col, player) {
 
 function finishGame(winner, reason) {
   phase = "finished";
-  messageElement.textContent = "Игрок «" + winner + "» победил! " + reason;
+  const loser = winner === "X" ? "O" : "X";
+  messageElement.textContent = "Победил игрок «" + winner + "». " + reason;
+  resultTitle.textContent = "Победа игрока «" + winner + "»!";
+  resultDescription.textContent = "Поздравляем! Твоя цепочка выдержала битву. " + reason;
+  resultRoast.textContent = "Игрок «" + loser + "», клетки закончились быстрее твоих идей. Пора тренироваться и возвращаться за реваншем!";
   render();
+  resultModal.showModal();
+  resultNewGameButton.focus();
 }
 
 function handleMove(row, col) {
@@ -267,5 +279,7 @@ function render() {
   }
 }
 
+resultModal.addEventListener("cancel", (event) => event.preventDefault());
+resultNewGameButton.addEventListener("click", setupGame);
 startButton.addEventListener("click", setupGame);
 setupGame();
