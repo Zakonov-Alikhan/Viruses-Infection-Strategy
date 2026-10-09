@@ -15,6 +15,8 @@ const statusElement = document.querySelector("#game-status");
 const messageElement = document.querySelector("#game-message");
 const turnElement = document.querySelector("#turn-counter");
 const startButton = document.querySelector("#start-button");
+const sideTitle = document.querySelector("#side-title");
+const sideDescription = document.querySelector("#side-description");
 
 let board;
 let phase;
@@ -245,15 +247,23 @@ function render() {
   if (phase === "setup-x") {
     statusElement.textContent = "Игрок «Х»: выберите стартовую клетку";
     turnElement.textContent = "Подготовка к игре";
+    sideTitle.textContent = "Игрок X выбирает";
+    sideDescription.textContent = "Нажмите любую клетку, чтобы тайно выбрать стартовую позицию.";
   } else if (phase === "setup-o") {
     statusElement.textContent = "Игрок «О»: выберите стартовую клетку";
     turnElement.textContent = "Выбор позиций скрыт";
+    sideTitle.textContent = "Игрок O выбирает";
+    sideDescription.textContent = "Позиция X скрыта. Игрок O выбирает свою стартовую клетку.";
   } else if (phase === "playing") {
     statusElement.textContent = "Ход игрока «" + currentPlayer + "»";
     turnElement.textContent = "Осталось поставить фигур: " + piecesLeft + " из " + TURN_PIECES;
+    sideTitle.textContent = "Ход игрока " + currentPlayer;
+    sideDescription.textContent = "Поставьте три фигуры. Каждая должна соединяться с вашей цепочкой.";
   } else {
     statusElement.textContent = "Игра завершена";
     turnElement.textContent = "Нажмите «Новая игра», чтобы сыграть ещё раз";
+    sideTitle.textContent = "Партия завершена";
+    sideDescription.textContent = "Начните новую игру, чтобы выбрать стартовые позиции.";
   }
 }
 
