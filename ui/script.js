@@ -99,7 +99,7 @@ function placeInOppositeCorners() {
     board[0][BOARD_SIZE - 1] = "X";
     board[BOARD_SIZE - 1][0] = "O";
   }
-  beginPlay("Стартовые позиции выбраны автоматически: игроки находятся в противоположных углах.");
+  beginPlay("Была выбрана идентичная позиция три раза подряд. Игроки размещены в противоположных углах.");
 }
 
 function beginPlay(message = "") {
