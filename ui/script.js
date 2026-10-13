@@ -66,18 +66,19 @@ function columnLabel(index) {
 }
 
 function setAxisLabels() {
-  topAxis.replaceChildren();
-  sideAxis.replaceChildren();
-  for (let col = 0; col < settings.width; col += 1) {
+  const { width, height } = state.settings;
+  const columnLabels = Array.from({ length: width }, (_, col) => {
     const label = document.createElement("span");
     label.textContent = columnLabel(col);
-    topAxis.appendChild(label);
-  }
-  for (let row = 1; row <= settings.height; row += 1) {
+    return label;
+  });
+  const rowLabels = Array.from({ length: height }, (_, row) => {
     const label = document.createElement("span");
-    label.textContent = String(row);
-    sideAxis.appendChild(label);
-  }
+    label.textContent = String(row + 1);
+    return label;
+  });
+  topAxis.replaceChildren(...columnLabels);
+  sideAxis.replaceChildren(...rowLabels);
 }
 
 function syncBoardGeometry() {
@@ -140,6 +141,7 @@ function showResult() {
 
 function render() {
   boardElement.innerHTML = "";
+  const destroyedCells = new Set(state.lastDestroyed.map(({ row, col }) => row + "," + col));
   boardElement.style.setProperty("--board-width", state.settings.width);
   boardElement.style.setProperty("--board-height", state.settings.height);
   setAxisLabels();
