@@ -25,7 +25,10 @@
             <p class="eyebrow">Территория меняется с каждым ходом</p>
             <h1 id="page-title">Поле битвы</h1>
           </div>
-          <button id="start-button" class="button button-secondary" type="button">Новая игра</button>
+          <div class="heading-actions">
+            <button id="settings-button" class="button button-secondary settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-modal"><span aria-hidden="true">⚙</span> Настройки</button>
+            <button id="start-button" class="button button-secondary" type="button">Новая игра</button>
+          </div>
         </div>
 
         <section class="game-card" aria-label="Игровая доска">
@@ -39,10 +42,10 @@
           <p id="game-message" class="game-message" role="status" aria-live="polite"></p>
           <div class="board-frame">
             <div class="board-shell">
-              <div class="axis axis-top" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span><span>I</span><span>J</span><span>K</span><span>L</span><span>M</span><span>N</span><span>O</span></div>
+              <div class="axis axis-top" aria-hidden="true"></div>
               <div class="board-row">
-                <div class="axis axis-side" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span></div>
-                <div class="game-board" role="grid" aria-label="Поле 15 на 15"></div>
+                <div class="axis axis-side" aria-hidden="true"></div>
+                <div class="game-board" role="grid" aria-label="Игровое поле"></div>
               </div>
             </div>
           </div>
@@ -58,22 +61,64 @@
         <div class="side-card current-turn-card">
           <p class="eyebrow">Сейчас</p>
           <h2 id="side-title">Выберите старт</h2>
-          <p id="side-description">Игроки по очереди тайно выбирают по одной стартовой клетке. После выбора передайте устройство сопернику.</p>
+          <p id="side-description">При свободном расположении игроки выбирают старт по очереди. Передайте устройство сопернику после выбора.</p>
         </div>
         <div class="side-card rules-card">
           <p class="eyebrow">Коротко о правилах</p>
           <ol>
-            <li>Первым ходит X. За ход нужно поставить три фигуры.</li>
+            <li id="rules-turn-count">Первым ходит X. За ход нужно поставить три фигуры.</li>
             <li>Каждая новая фигура соединяется со своей цепочкой по вертикали, горизонтали или диагонали.</li>
             <li>При соприкосновении уничтожаются фигуры соперника и только первый прилегающий к ним слой.</li>
             <li>Освободившиеся клетки блокируются. Кто не может завершить ход тремя фигурами — проигрывает.</li>
           </ol>
         </div>
-        <p class="privacy-note"><span aria-hidden="true">◉</span> Стартовые позиции скрыты до начала партии.</p>
+        <p id="privacy-note" class="privacy-note"><span aria-hidden="true">◉</span> Стартовые позиции скрыты до начала партии.</p>
       </aside>
     </section>
     <footer class="footer">Один экран · Два игрока · Одна цепная реакция</footer>
   </main>
+  <dialog id="settings-modal" class="settings-modal" aria-labelledby="settings-title" aria-describedby="settings-summary">
+    <section class="settings-card">
+      <header class="settings-header">
+        <div>
+          <p class="eyebrow">Игровое поле</p>
+          <h2 id="settings-title">Настройки</h2>
+        </div>
+        <button id="settings-close" class="icon-button" type="button" aria-label="Закрыть настройки">×</button>
+      </header>
+      <p id="settings-summary" class="settings-summary">Применение настроек начнёт новую партию с выбранными параметрами.</p>
+      <form id="settings-form" class="settings-form" novalidate>
+        <div class="settings-section-title">Размер доски</div>
+        <div class="settings-dimensions">
+          <div class="settings-field">
+            <label for="board-width-input">Ширина</label>
+            <div class="number-control"><input id="board-width-input" aria-describedby="board-width-error" type="number" inputmode="numeric" min="10" max="50" step="1" required><span>клеток</span></div>
+            <span id="board-width-error" class="field-tooltip" role="tooltip" hidden></span>
+          </div>
+          <span class="dimension-separator" aria-hidden="true">×</span>
+          <div class="settings-field">
+            <label for="board-height-input">Высота</label>
+            <div class="number-control"><input id="board-height-input" aria-describedby="board-height-error" type="number" inputmode="numeric" min="10" max="50" step="1" required><span>клеток</span></div>
+            <span id="board-height-error" class="field-tooltip" role="tooltip" hidden></span>
+          </div>
+        </div>
+        <div class="settings-field settings-pieces-field">
+          <label for="pieces-per-turn-input">Фигур за ход</label>
+          <div class="number-control"><input id="pieces-per-turn-input" aria-describedby="pieces-per-turn-error" type="number" inputmode="numeric" min="1" max="2500" step="1" required><span id="pieces-max-hint">из 225 клеток максимум</span></div>
+          <span id="pieces-per-turn-error" class="field-tooltip" role="tooltip" hidden></span>
+        </div>
+        <label class="toggle-row" for="free-start-toggle">
+          <span class="toggle-copy"><strong>Свободное расположение в начале партии</strong><small>Игроки тайно выбирают стартовые клетки</small></span>
+          <input id="free-start-toggle" class="switch-input" type="checkbox" role="switch" checked>
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
+        <div class="settings-actions">
+          <button id="settings-cancel" class="button button-secondary" type="button">Отмена</button>
+          <button class="button button-primary" type="submit">Применить</button>
+        </div>
+      </form>
+    </section>
+  </dialog>
   <dialog id="result-modal" class="result-modal" aria-labelledby="result-title" aria-describedby="result-description">
     <section class="result-card">
       <p class="eyebrow result-eyebrow">Партия завершена</p>
