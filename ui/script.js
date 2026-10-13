@@ -23,6 +23,7 @@ const turnElement = document.querySelector("#turn-counter");
 const startButton = document.querySelector("#start-button");
 const sideTitle = document.querySelector("#side-title");
 const sideDescription = document.querySelector("#side-description");
+const currentTurnCard = document.querySelector("#current-turn-card");
 const privacyNote = document.querySelector("#privacy-note");
 const turnRule = document.querySelector("#rules-turn-count");
 const resultModal = document.querySelector("#result-modal");
@@ -80,6 +81,7 @@ function renderClock() {
   const oActive = state && state.phase === "playing" && state.currentPlayer === "O";
   clockPlayerX.classList.toggle("clock-active", xActive);
   clockPlayerO.classList.toggle("clock-active", oActive);
+  currentTurnCard.classList.toggle("turn-active", state && state.phase !== "finished");
   clockXElement.classList.toggle("clock-low", clockRemaining.X <= 10_000);
   clockOElement.classList.toggle("clock-low", clockRemaining.O <= 10_000);
   resignButton.disabled = !state || state.phase !== "playing";

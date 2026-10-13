@@ -57,7 +57,7 @@
         </section>
       </div>
 
-      <aside class="side-panel" aria-label="Правила и подсказки">
+      <aside class="side-panel" aria-label="Часы, информация об игроках и правила">
         <div class="side-card clock-card" aria-label="Игровые часы">
           <p class="eyebrow">Время партии</p>
           <p class="clock-control-summary" id="clock-control-summary">5 минут на игрока · добавка 0 секунд</p>
@@ -71,20 +71,20 @@
           </div>
           <button id="resign-button" class="button button-resign" type="button" disabled>Сдаться</button>
         </div>
-        <div class="side-card current-turn-card">
+        <div class="side-card current-turn-card" id="current-turn-card">
           <p class="eyebrow">Сейчас</p>
           <h2 id="side-title">Выберите старт</h2>
           <p id="side-description">При свободном расположении игроки выбирают старт по очереди. Передайте устройство сопернику после выбора.</p>
         </div>
-        <div class="side-card rules-card">
-          <p class="eyebrow">Коротко о правилах</p>
+        <details class="side-card rules-card">
+          <summary class="rules-summary">Коротко о правилах <span aria-hidden="true">⌄</span></summary>
           <ol>
             <li id="rules-turn-count">Первым ходит X. За ход нужно поставить три фигуры.</li>
             <li>Каждая новая фигура соединяется со своей цепочкой по вертикали, горизонтали или диагонали.</li>
             <li>При соприкосновении уничтожаются фигуры соперника и только первый прилегающий к ним слой.</li>
             <li>Освободившиеся клетки блокируются. Кто не может завершить ход тремя фигурами — проигрывает.</li>
           </ol>
-        </div>
+        </details>
         <p id="privacy-note" class="privacy-note"><span aria-hidden="true">◉</span> Стартовые позиции скрыты до начала партии.</p>
       </aside>
     </section>
