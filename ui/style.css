@@ -286,6 +286,14 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 .button-resign { width: 100%; min-height: 38px; border-color: rgba(255, 148, 127, .34); color: #ffb1a2; background: rgba(255, 148, 127, .08); }
 .button-resign:hover:not(:disabled) { border-color: var(--coral); background: rgba(255, 148, 127, .16); }
 .button-resign:disabled { opacity: .4; cursor: not-allowed; }
+.resign-confirm-modal { width: min(420px, calc(100% - 32px)); max-width: none; padding: 0; color: var(--text); border: 1px solid rgba(255, 148, 127, .3); border-radius: 18px; background: #172326; box-shadow: 0 28px 90px rgba(0, 0, 0, .5); }
+.resign-confirm-modal::backdrop { background: rgba(5, 12, 14, .78); backdrop-filter: blur(7px); }
+.resign-confirm-card { padding: 28px; }
+.resign-confirm-eyebrow { margin-bottom: 8px; color: var(--coral); }
+.resign-confirm-card h2 { margin-bottom: 8px; }
+.resign-confirm-card > p:not(.eyebrow) { margin: 0; color: #bdcbc6; font-size: 13px; line-height: 1.55; }
+.resign-confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.resign-confirm-actions .button-resign { width: auto; }
 @keyframes clock-pulse { from { filter: brightness(1); } to { filter: brightness(1.25); } }
 @media (max-width: 760px) {
   .heading-actions { gap: 6px; }

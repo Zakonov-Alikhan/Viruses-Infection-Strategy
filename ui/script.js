@@ -54,6 +54,9 @@ const clockPlayerX = document.querySelector("#clock-player-x");
 const clockPlayerO = document.querySelector("#clock-player-o");
 const clockControlSummary = document.querySelector("#clock-control-summary");
 const resignButton = document.querySelector("#resign-button");
+const resignConfirmModal = document.querySelector("#resign-confirm-modal");
+const resignCancelButton = document.querySelector("#resign-cancel");
+const resignConfirmButton = document.querySelector("#resign-confirm");
 const inventoryElements = {
   X: document.querySelector("#inventory-x"),
   O: document.querySelector("#inventory-o")
@@ -586,7 +589,17 @@ resultModal.addEventListener("cancel", (event) => event.preventDefault());
 resultNewGameButton.addEventListener("click", setupGame);
 resignButton.addEventListener("click", () => {
   if (state.phase !== "playing") return;
-  if (window.confirm("Сдаться? Победа будет засчитана сопернику.")) updateState(resign(state));
+  resignConfirmModal.showModal();
+  resignCancelButton.focus();
+});
+resignCancelButton.addEventListener("click", () => resignConfirmModal.close());
+resignConfirmButton.addEventListener("click", () => {
+  if (state.phase !== "playing") {
+    resignConfirmModal.close();
+    return;
+  }
+  resignConfirmModal.close();
+  updateState(resign(state));
 });
 for (const player of ["X", "O"]) {
   inventoryElements[player].addEventListener("click", (event) => {
