@@ -4,6 +4,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   width: 15,
   height: 15,
   piecesPerTurn: 3,
+  clockMinutes: 5,
+  incrementSeconds: 0,
   freeStartingPositions: true
 });
 export const EMPTY_CELL = "";
@@ -92,6 +94,18 @@ function resolveContact(row, col, player, board) {
 
 function finish(state, winner, reason) {
   return { ...state, phase: "finished", winner, finishReason: reason };
+}
+
+export function resign(state) {
+  if (state.phase !== "playing") return state;
+  const winner = state.currentPlayer === "X" ? "O" : "X";
+  return finish(state, winner, "Игрок «" + state.currentPlayer + "» сдался.");
+}
+
+export function flagFall(state) {
+  if (state.phase !== "playing") return state;
+  const winner = state.currentPlayer === "X" ? "O" : "X";
+  return finish(state, winner, "У игрока «" + state.currentPlayer + "» закончилось время.");
 }
 
 function beginPlay(state, board, message) {

@@ -6,8 +6,10 @@ import {
   EMPTY_CELL,
   chooseStart,
   createGameState,
+  flagFall,
   isLegalMove,
-  playMove
+  playMove,
+  resign
 } from "./game.js";
 
 const boardElement = document.querySelector(".game-board");
@@ -36,15 +38,82 @@ const settingsForm = document.querySelector("#settings-form");
 const widthInput = document.querySelector("#board-width-input");
 const heightInput = document.querySelector("#board-height-input");
 const piecesInput = document.querySelector("#pieces-per-turn-input");
+const clockMinutesInput = document.querySelector("#clock-minutes-input");
+const clockIncrementInput = document.querySelector("#clock-increment-input");
+const clockXElement = document.querySelector("#clock-x");
+const clockOElement = document.querySelector("#clock-o");
+const clockPlayerX = document.querySelector("#clock-player-x");
+const clockPlayerO = document.querySelector("#clock-player-o");
+const clockControlSummary = document.querySelector("#clock-control-summary");
+const resignButton = document.querySelector("#resign-button");
 const freeStartToggle = document.querySelector("#free-start-toggle");
 const piecesMaxHint = document.querySelector("#pieces-max-hint");
 const toggleHint = document.querySelector(".toggle-copy small");
 const widthError = document.querySelector("#board-width-error");
 const heightError = document.querySelector("#board-height-error");
 const piecesError = document.querySelector("#pieces-per-turn-error");
+const clockMinutesError = document.querySelector("#clock-minutes-error");
+const clockIncrementError = document.querySelector("#clock-increment-error");
 
 let settings = { ...DEFAULT_SETTINGS };
 let state;
+let clockRemaining = { X: settings.clockMinutes * 60_000, O: settings.clockMinutes * 60_000 };
+let clockInterval = null;
+let clockLastTick = null;
+
+function formatClock(milliseconds) {
+  const remaining = Math.max(0, milliseconds);
+  const wholeSeconds = Math.floor(remaining / 1000);
+  const minutes = Math.floor(wholeSeconds / 60);
+  const seconds = String(wholeSeconds % 60).padStart(2, "0");
+  if (remaining <= 10_000) {
+    return String(minutes).padStart(2, "0") + ":" + seconds + "." + Math.floor((remaining % 1000) / 100);
+  }
+  return String(minutes).padStart(2, "0") + ":" + seconds;
+}
+
+function renderClock() {
+  clockXElement.textContent = formatClock(clockRemaining.X);
+  clockOElement.textContent = formatClock(clockRemaining.O);
+  clockControlSummary.textContent = settings.clockMinutes + " мин на игрока · +" + settings.incrementSeconds + " с за полный ход";
+  const xActive = state && state.phase === "playing" && state.currentPlayer === "X";
+  const oActive = state && state.phase === "playing" && state.currentPlayer === "O";
+  clockPlayerX.classList.toggle("clock-active", xActive);
+  clockPlayerO.classList.toggle("clock-active", oActive);
+  clockXElement.classList.toggle("clock-low", clockRemaining.X <= 10_000);
+  clockOElement.classList.toggle("clock-low", clockRemaining.O <= 10_000);
+  resignButton.disabled = !state || state.phase !== "playing";
+}
+
+function stopClock() {
+  if (clockInterval !== null) window.clearInterval(clockInterval);
+  clockInterval = null;
+  clockLastTick = null;
+}
+
+function advanceClock(now = performance.now()) {
+  if (!state || state.phase !== "playing" || clockLastTick === null) return true;
+  const elapsed = now - clockLastTick;
+  clockLastTick = now;
+  const player = state.currentPlayer;
+  clockRemaining[player] = Math.max(0, clockRemaining[player] - elapsed);
+  renderClock();
+  if (clockRemaining[player] > 0) return true;
+
+  stopClock();
+  const previousState = state;
+  state = flagFall(state);
+  render();
+  if (previousState.phase !== "finished" && state.phase === "finished") showResult();
+  return false;
+}
+
+function startClock() {
+  if (clockInterval !== null || !state || state.phase !== "playing") return;
+  clockLastTick = performance.now();
+  clockInterval = window.setInterval(() => advanceClock(), 100);
+  renderClock();
+}
 
 function figureWord(count) {
   const lastTwo = count % 100;
@@ -117,14 +186,29 @@ function syncBoardGeometry() {
 }
 
 function setupGame() {
+  stopClock();
   if (resultModal.open) resultModal.close();
   state = createGameState(settings);
+  clockRemaining = {
+    X: settings.clockMinutes * 60_000,
+    O: settings.clockMinutes * 60_000
+  };
   render();
+  startClock();
 }
 
 function updateState(nextState) {
-  const gameJustEnded = state.phase !== "finished" && nextState.phase === "finished";
+  const previousState = state;
+  const now = performance.now();
+  if (previousState.phase === "playing" && !advanceClock(now)) return;
+  const completedTurn = previousState.phase === "playing"
+    && previousState.piecesLeft === 1
+    && (nextState.currentPlayer !== previousState.currentPlayer || (nextState.phase === "finished" && nextState.piecesLeft === 0));
+  if (completedTurn) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
+  const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
   state = nextState;
+  if (state.phase === "playing") startClock();
+  else stopClock();
   render();
   if (gameJustEnded) showResult();
 }
@@ -210,6 +294,7 @@ function render() {
 
   messageElement.textContent = state.message;
   syncBoardGeometry();
+  renderClock();
 }
 
 function clearFieldError(input, errorElement) {
@@ -264,6 +349,8 @@ function openSettings() {
   widthInput.value = String(settings.width);
   heightInput.value = String(settings.height);
   piecesInput.value = String(settings.piecesPerTurn);
+  clockMinutesInput.value = String(settings.clockMinutes);
+  clockIncrementInput.value = String(settings.incrementSeconds);
   freeStartToggle.checked = settings.freeStartingPositions;
   toggleHint.textContent = freeStartToggle.checked
     ? "Игроки тайно выбирают стартовые клетки"
@@ -272,6 +359,8 @@ function openSettings() {
   clearFieldError(widthInput, widthError);
   clearFieldError(heightInput, heightError);
   clearFieldError(piecesInput, piecesError);
+  clearFieldError(clockMinutesInput, clockMinutesError);
+  clearFieldError(clockIncrementInput, clockIncrementError);
   settingsModal.showModal();
   widthInput.focus();
 }
@@ -281,10 +370,14 @@ function applySettings(event) {
   clearFieldError(widthInput, widthError);
   clearFieldError(heightInput, heightError);
   clearFieldError(piecesInput, piecesError);
+  clearFieldError(clockMinutesInput, clockMinutesError);
+  clearFieldError(clockIncrementInput, clockIncrementError);
 
   const width = Number(widthInput.value);
   const height = Number(heightInput.value);
   const piecesPerTurn = Number(piecesInput.value);
+  const clockMinutes = Number(clockMinutesInput.value);
+  const incrementSeconds = Number(clockIncrementInput.value);
   let firstInvalid = null;
   if (!Number.isInteger(width) || width < MIN_BOARD_DIMENSION || width > MAX_BOARD_DIMENSION) {
     showFieldError(widthInput, widthError, "Введите целое число от " + MIN_BOARD_DIMENSION + " до " + MAX_BOARD_DIMENSION + ".");
@@ -299,6 +392,14 @@ function applySettings(event) {
     showFieldError(piecesInput, piecesError, "Количество фигур должно быть от 1 до " + (Number.isInteger(area) && area > 0 ? area : MAX_BOARD_DIMENSION * MAX_BOARD_DIMENSION) + ".");
     firstInvalid = firstInvalid || piecesInput;
   }
+  if (!Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60) {
+    showFieldError(clockMinutesInput, clockMinutesError, "Введите целое число от 1 до 60 минут.");
+    firstInvalid = firstInvalid || clockMinutesInput;
+  }
+  if (!Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60) {
+    showFieldError(clockIncrementInput, clockIncrementError, "Добавка должна быть целым числом от 0 до 60 секунд.");
+    firstInvalid = firstInvalid || clockIncrementInput;
+  }
 
   if (firstInvalid) {
     firstInvalid.focus();
@@ -309,6 +410,8 @@ function applySettings(event) {
     width,
     height,
     piecesPerTurn,
+    clockMinutes,
+    incrementSeconds,
     freeStartingPositions: freeStartToggle.checked
   };
   settingsModal.close();
@@ -326,6 +429,22 @@ heightInput.addEventListener("input", () => {
   validateField(piecesInput);
 });
 piecesInput.addEventListener("input", () => validateField(piecesInput));
+clockMinutesInput.addEventListener("input", () => {
+  const value = Number(clockMinutesInput.value);
+  if (!Number.isInteger(value) || value < 1 || value > 60) {
+    showFieldError(clockMinutesInput, clockMinutesError, "Введите целое число от 1 до 60 минут.");
+  } else {
+    clearFieldError(clockMinutesInput, clockMinutesError);
+  }
+});
+clockIncrementInput.addEventListener("input", () => {
+  const value = Number(clockIncrementInput.value);
+  if (!Number.isInteger(value) || value < 0 || value > 60) {
+    showFieldError(clockIncrementInput, clockIncrementError, "Добавка должна быть целым числом от 0 до 60 секунд.");
+  } else {
+    clearFieldError(clockIncrementInput, clockIncrementError);
+  }
+});
 freeStartToggle.addEventListener("change", () => {
   toggleHint.textContent = freeStartToggle.checked
     ? "Игроки тайно выбирают стартовые клетки"
@@ -337,6 +456,10 @@ settingsCancelButton.addEventListener("click", () => settingsModal.close());
 settingsForm.addEventListener("submit", applySettings);
 resultModal.addEventListener("cancel", (event) => event.preventDefault());
 resultNewGameButton.addEventListener("click", setupGame);
+resignButton.addEventListener("click", () => {
+  if (state.phase !== "playing") return;
+  if (window.confirm("Сдаться? Победа будет засчитана сопернику.")) updateState(resign(state));
+});
 startButton.addEventListener("click", setupGame);
 new ResizeObserver(syncBoardGeometry).observe(boardRow);
 setupGame();

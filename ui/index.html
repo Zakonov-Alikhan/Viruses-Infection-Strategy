@@ -58,6 +58,19 @@
       </div>
 
       <aside class="side-panel" aria-label="Правила и подсказки">
+        <div class="side-card clock-card" aria-label="Игровые часы">
+          <p class="eyebrow">Время партии</p>
+          <p class="clock-control-summary" id="clock-control-summary">5 минут на игрока · добавка 0 секунд</p>
+          <div class="clock-player" id="clock-player-x">
+            <span class="clock-player-name"><i aria-hidden="true"></i> Игрок X</span>
+            <time class="player-clock" id="clock-x" aria-label="Остаток времени игрока X">05:00</time>
+          </div>
+          <div class="clock-player" id="clock-player-o">
+            <span class="clock-player-name"><i aria-hidden="true"></i> Игрок O</span>
+            <time class="player-clock" id="clock-o" aria-label="Остаток времени игрока O">05:00</time>
+          </div>
+          <button id="resign-button" class="button button-resign" type="button" disabled>Сдаться</button>
+        </div>
         <div class="side-card current-turn-card">
           <p class="eyebrow">Сейчас</p>
           <h2 id="side-title">Выберите старт</h2>
@@ -106,6 +119,19 @@
           <label for="pieces-per-turn-input">Фигур за ход</label>
           <div class="number-control"><input id="pieces-per-turn-input" aria-describedby="pieces-per-turn-error" type="number" inputmode="numeric" min="1" max="2500" step="1" required><span id="pieces-max-hint">из 225 клеток максимум</span></div>
           <span id="pieces-per-turn-error" class="field-tooltip" role="tooltip" hidden></span>
+        </div>
+        <div class="settings-section-title">Контроль времени</div>
+        <div class="settings-time-control">
+          <div class="settings-field">
+            <label for="clock-minutes-input">Время каждому игроку</label>
+            <div class="number-control"><input id="clock-minutes-input" aria-describedby="clock-minutes-error" type="number" inputmode="numeric" min="1" max="60" step="1" required><span>минут</span></div>
+            <span id="clock-minutes-error" class="field-tooltip" role="tooltip" hidden></span>
+          </div>
+          <div class="settings-field">
+            <label for="clock-increment-input">Добавка за полный ход</label>
+            <div class="number-control"><input id="clock-increment-input" aria-describedby="clock-increment-error" type="number" inputmode="numeric" min="0" max="60" step="1" required><span>секунд</span></div>
+            <span id="clock-increment-error" class="field-tooltip" role="tooltip" hidden></span>
+          </div>
         </div>
         <label class="toggle-row" for="free-start-toggle">
           <span class="toggle-copy"><strong>Свободное расположение в начале партии</strong><small>Игроки тайно выбирают стартовые клетки</small></span>

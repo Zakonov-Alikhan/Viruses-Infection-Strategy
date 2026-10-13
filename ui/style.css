@@ -250,7 +250,27 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 .switch-input:focus-visible + .switch-track { outline: 2px solid #fff; outline-offset: 3px; }
 .settings-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
 .settings-actions .button-primary { min-height: 44px; }
+.settings-time-control { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: -12px; }
+.clock-card { display: grid; gap: 10px; }
+.clock-card .eyebrow { margin-bottom: -5px; }
+.clock-control-summary { margin: 0 0 2px; color: var(--muted); font-size: 11px; }
+.clock-player { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; border: 1px solid rgba(191, 225, 209, .12); border-radius: 10px; background: rgba(12, 20, 22, .45); transition: border-color .15s ease, background .15s ease; }
+.clock-player-name { display: inline-flex; align-items: center; gap: 8px; color: #c4d0cb; font-size: 12px; font-weight: 700; }
+.clock-player-name i { width: 8px; height: 8px; border-radius: 50%; background: #61716d; }
+.player-clock { min-width: 96px; padding: 5px 8px; border-radius: 7px; color: #eaf3ee; background: #263638; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 23px; font-variant-numeric: tabular-nums; font-weight: 750; letter-spacing: .04em; text-align: center; }
+.clock-player.clock-active { border-color: rgba(198, 243, 107, .48); background: rgba(198, 243, 107, .07); }
+.clock-player.clock-active .clock-player-name i { background: var(--lime); box-shadow: 0 0 10px rgba(198, 243, 107, .55); }
+.clock-player.clock-active .player-clock { color: #172012; background: var(--lime); }
+.player-clock.clock-low { color: #fff1ec; background: #803d35; animation: clock-pulse .8s ease-in-out infinite alternate; }
+.clock-player.clock-active .player-clock.clock-low { color: #fff; background: #c94d42; }
+.button-resign { width: 100%; min-height: 38px; border-color: rgba(255, 148, 127, .34); color: #ffb1a2; background: rgba(255, 148, 127, .08); }
+.button-resign:hover:not(:disabled) { border-color: var(--coral); background: rgba(255, 148, 127, .16); }
+.button-resign:disabled { opacity: .4; cursor: not-allowed; }
+@keyframes clock-pulse { from { filter: brightness(1); } to { filter: brightness(1.25); } }
 @media (max-width: 760px) {
   .heading-actions { gap: 6px; }
   .settings-button { gap: 5px; padding: 0 9px; font-size: 11px; }
+  .settings-time-control { gap: 8px; }
+  .clock-card { gap: 8px; }
+  .player-clock { min-width: 90px; font-size: 20px; }
 }
