@@ -41,6 +41,9 @@ const heightInput = document.querySelector("#board-height-input");
 const piecesInput = document.querySelector("#pieces-per-turn-input");
 const clockMinutesInput = document.querySelector("#clock-minutes-input");
 const clockIncrementInput = document.querySelector("#clock-increment-input");
+const unlimitedTimeToggle = document.querySelector("#unlimited-time-toggle");
+const timeLimitHint = document.querySelector("#time-limit-hint");
+const timeControlFields = document.querySelector(".settings-time-control");
 const clockXElement = document.querySelector("#clock-x");
 const clockOElement = document.querySelector("#clock-o");
 const clockPlayerX = document.querySelector("#clock-player-x");
@@ -49,7 +52,7 @@ const clockControlSummary = document.querySelector("#clock-control-summary");
 const resignButton = document.querySelector("#resign-button");
 const freeStartToggle = document.querySelector("#free-start-toggle");
 const piecesMaxHint = document.querySelector("#pieces-max-hint");
-const toggleHint = document.querySelector(".toggle-copy small");
+const toggleHint = document.querySelector("#free-start-hint");
 const widthError = document.querySelector("#board-width-error");
 const heightError = document.querySelector("#board-height-error");
 const piecesError = document.querySelector("#pieces-per-turn-error");
@@ -74,16 +77,18 @@ function formatClock(milliseconds) {
 }
 
 function renderClock() {
-  clockXElement.textContent = formatClock(clockRemaining.X);
-  clockOElement.textContent = formatClock(clockRemaining.O);
-  clockControlSummary.textContent = settings.clockMinutes + " мин на игрока · +" + settings.incrementSeconds + " с за полный ход";
+  clockXElement.textContent = settings.unlimitedTime ? "∞" : formatClock(clockRemaining.X);
+  clockOElement.textContent = settings.unlimitedTime ? "∞" : formatClock(clockRemaining.O);
+  clockControlSummary.textContent = settings.unlimitedTime
+    ? "Без ограничения времени"
+    : settings.clockMinutes + " мин на игрока · +" + settings.incrementSeconds + " с за полный ход";
   const xActive = state && state.phase === "playing" && state.currentPlayer === "X";
   const oActive = state && state.phase === "playing" && state.currentPlayer === "O";
   clockPlayerX.classList.toggle("clock-active", xActive);
   clockPlayerO.classList.toggle("clock-active", oActive);
   currentTurnCard.classList.toggle("turn-active", state && state.phase !== "finished");
-  clockXElement.classList.toggle("clock-low", clockRemaining.X <= 10_000);
-  clockOElement.classList.toggle("clock-low", clockRemaining.O <= 10_000);
+  clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.X <= 10_000);
+  clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.O <= 10_000);
   resignButton.disabled = !state || state.phase !== "playing";
 }
 
@@ -94,7 +99,7 @@ function stopClock() {
 }
 
 function advanceClock(now = performance.now()) {
-  if (!state || state.phase !== "playing" || clockLastTick === null) return true;
+  if (!state || state.phase !== "playing" || settings.unlimitedTime || clockLastTick === null) return true;
   const elapsed = now - clockLastTick;
   clockLastTick = now;
   const player = state.currentPlayer;
@@ -111,7 +116,7 @@ function advanceClock(now = performance.now()) {
 }
 
 function startClock() {
-  if (clockInterval !== null || !state || state.phase !== "playing") return;
+  if (clockInterval !== null || !state || state.phase !== "playing" || settings.unlimitedTime) return;
   clockLastTick = performance.now();
   clockInterval = window.setInterval(() => advanceClock(), 100);
   renderClock();
@@ -206,7 +211,7 @@ function updateState(nextState) {
   const completedTurn = previousState.phase === "playing"
     && previousState.piecesLeft === 1
     && (nextState.currentPlayer !== previousState.currentPlayer || (nextState.phase === "finished" && nextState.piecesLeft === 0));
-  if (completedTurn) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
+  if (completedTurn && !settings.unlimitedTime) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
   const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
   state = nextState;
   if (state.phase === "playing") startClock();
@@ -328,6 +333,20 @@ function updatePiecesLimit() {
   piecesMaxHint.textContent = "до " + maxPieces + " фигур (1/10 поля)";
 }
 
+function syncTimeLimitSettings() {
+  const unlimitedTime = unlimitedTimeToggle.checked;
+  clockMinutesInput.disabled = unlimitedTime;
+  clockIncrementInput.disabled = unlimitedTime;
+  timeControlFields.setAttribute("aria-disabled", String(unlimitedTime));
+  timeLimitHint.textContent = unlimitedTime
+    ? "Часы остановлены, время не ограничено"
+    : "Часы идут во время хода каждого игрока";
+  if (unlimitedTime) {
+    clearFieldError(clockMinutesInput, clockMinutesError);
+    clearFieldError(clockIncrementInput, clockIncrementError);
+  }
+}
+
 function validateField(input) {
   const value = Number(input.value);
   if (input === widthInput || input === heightInput) {
@@ -360,7 +379,9 @@ function openSettings() {
   piecesInput.value = String(settings.piecesPerTurn);
   clockMinutesInput.value = String(settings.clockMinutes);
   clockIncrementInput.value = String(settings.incrementSeconds);
+  unlimitedTimeToggle.checked = settings.unlimitedTime;
   freeStartToggle.checked = settings.freeStartingPositions;
+  syncTimeLimitSettings();
   toggleHint.textContent = freeStartToggle.checked
     ? "Игроки тайно выбирают стартовые клетки"
     : "Игроки автоматически занимают противоположные углы";
@@ -385,8 +406,9 @@ function applySettings(event) {
   const width = Number(widthInput.value);
   const height = Number(heightInput.value);
   const piecesPerTurn = Number(piecesInput.value);
-  const clockMinutes = Number(clockMinutesInput.value);
-  const incrementSeconds = Number(clockIncrementInput.value);
+  const unlimitedTime = unlimitedTimeToggle.checked;
+  const clockMinutes = unlimitedTime ? settings.clockMinutes : Number(clockMinutesInput.value);
+  const incrementSeconds = unlimitedTime ? settings.incrementSeconds : Number(clockIncrementInput.value);
   let firstInvalid = null;
   if (!Number.isInteger(width) || width < MIN_BOARD_DIMENSION || width > MAX_BOARD_DIMENSION) {
     showFieldError(widthInput, widthError, "Введите целое число от " + MIN_BOARD_DIMENSION + " до " + MAX_BOARD_DIMENSION + ".");
@@ -401,11 +423,11 @@ function applySettings(event) {
     showFieldError(piecesInput, piecesError, "Количество фигур должно быть от 1 до " + maxPieces + " (не больше 1/10 площади поля).");
     firstInvalid = firstInvalid || piecesInput;
   }
-  if (!Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60) {
+  if (!unlimitedTime && (!Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60)) {
     showFieldError(clockMinutesInput, clockMinutesError, "Введите целое число от 1 до 60 минут.");
     firstInvalid = firstInvalid || clockMinutesInput;
   }
-  if (!Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60) {
+  if (!unlimitedTime && (!Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60)) {
     showFieldError(clockIncrementInput, clockIncrementError, "Добавка должна быть целым числом от 0 до 60 секунд.");
     firstInvalid = firstInvalid || clockIncrementInput;
   }
@@ -421,6 +443,7 @@ function applySettings(event) {
     piecesPerTurn,
     clockMinutes,
     incrementSeconds,
+    unlimitedTime,
     freeStartingPositions: freeStartToggle.checked
   };
   settingsModal.close();
@@ -438,6 +461,7 @@ heightInput.addEventListener("input", () => {
   validateField(piecesInput);
 });
 piecesInput.addEventListener("input", () => validateField(piecesInput));
+unlimitedTimeToggle.addEventListener("change", syncTimeLimitSettings);
 clockMinutesInput.addEventListener("input", () => {
   const value = Number(clockMinutesInput.value);
   if (!Number.isInteger(value) || value < 1 || value > 60) {

@@ -133,8 +133,13 @@
             <span id="clock-increment-error" class="field-tooltip" role="tooltip" hidden></span>
           </div>
         </div>
+        <label class="toggle-row time-toggle-row" for="unlimited-time-toggle">
+          <span class="toggle-copy"><strong>Без ограничения по времени</strong><small id="time-limit-hint">Часы идут во время хода каждого игрока</small></span>
+          <input id="unlimited-time-toggle" class="switch-input" type="checkbox" role="switch">
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
         <label class="toggle-row" for="free-start-toggle">
-          <span class="toggle-copy"><strong>Свободное расположение в начале партии</strong><small>Игроки тайно выбирают стартовые клетки</small></span>
+          <span class="toggle-copy"><strong>Свободное расположение в начале партии</strong><small id="free-start-hint">Игроки тайно выбирают стартовые клетки</small></span>
           <input id="free-start-toggle" class="switch-input" type="checkbox" role="switch" checked>
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>

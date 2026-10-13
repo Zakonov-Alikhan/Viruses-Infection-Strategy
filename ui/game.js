@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   piecesPerTurn: 3,
   clockMinutes: 5,
   incrementSeconds: 0,
+  unlimitedTime: false,
   freeStartingPositions: true
 });
 export const EMPTY_CELL = "";
