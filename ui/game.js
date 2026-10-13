@@ -352,13 +352,14 @@ export function playMove(state, row, col, random = Math.random) {
   const player = state.currentPlayer;
   const selectedItem = state.inventory[player].find((item) => item.id === state.selectedAbility);
   const inventory = copyInventory(state.inventory);
-  if (selectedItem && selectedItem.type === "freePlacement") {
+  const isFreePlacement = selectedItem && selectedItem.type === "freePlacement";
+  if (isFreePlacement) {
     removeInventoryItem(inventory, player, selectedItem.id);
   }
 
   const board = copyBoard(state.board);
   board[row][col] = player;
-  const piecesLeft = state.piecesLeft - 1;
+  const piecesLeft = isFreePlacement ? state.piecesLeft : state.piecesLeft - 1;
   const lastDestroyed = resolveContact(row, col, player, board);
   const eventIndex = state.eventItems.findIndex((item) => item.row === row && item.col === col);
   const collectedItem = eventIndex >= 0 ? state.eventItems[eventIndex] : null;
@@ -382,7 +383,7 @@ export function playMove(state, row, col, random = Math.random) {
     next.message = appendMessage(next.message, "Игрок «" + player + "» получил способность «" + names[collectedItem.type] + "».");
   }
   if (selectedItem && selectedItem.type === "freePlacement") {
-    next.message = appendMessage(next.message, "Фигура размещена без ограничения по расстоянию.");
+    next.message = appendMessage(next.message, "Дополнительная фигура размещена без ограничения по расстоянию; число фигур хода не изменилось.");
   }
 
   const remainingFreePlacements = next.inventory[player].filter((ability) => ability.type === "freePlacement").length;

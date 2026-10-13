@@ -133,7 +133,11 @@ function renderInventories() {
       slot.appendChild(icon);
       slot.disabled = state.phase !== "playing" || state.currentPlayer !== player || item.type === "extraTurn";
       slot.setAttribute("aria-label", definition.name + (item.type === "extraTurn" ? " — сработает автоматически" : " — выбрать"));
-      slot.title = definition.name + (item.type === "extraTurn" ? " — дополнительный ход будет совершён сразу" : " — нажмите, чтобы применить");
+      slot.title = definition.name + (item.type === "extraTurn"
+        ? " — дополнительный ход будет совершён сразу"
+        : item.type === "freePlacement"
+          ? " — добавляет одну фигуру вне счётчика хода"
+          : " — можно применить в любой момент своего хода");
     });
   }
 }
