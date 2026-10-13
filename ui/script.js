@@ -8,8 +8,11 @@ import {
   createGameState,
   flagFall,
   isLegalMove,
+  isValidBombTarget,
   playMove,
-  resign
+  resign,
+  selectAbility,
+  useBomb
 } from "./game.js";
 
 const boardElement = document.querySelector(".game-board");
@@ -42,6 +45,7 @@ const piecesInput = document.querySelector("#pieces-per-turn-input");
 const clockMinutesInput = document.querySelector("#clock-minutes-input");
 const clockIncrementInput = document.querySelector("#clock-increment-input");
 const unlimitedTimeToggle = document.querySelector("#unlimited-time-toggle");
+const randomEventsToggle = document.querySelector("#random-events-toggle");
 const timeLimitHint = document.querySelector("#time-limit-hint");
 const timeControlFields = document.querySelector(".settings-time-control");
 const clockXElement = document.querySelector("#clock-x");
@@ -50,6 +54,19 @@ const clockPlayerX = document.querySelector("#clock-player-x");
 const clockPlayerO = document.querySelector("#clock-player-o");
 const clockControlSummary = document.querySelector("#clock-control-summary");
 const resignButton = document.querySelector("#resign-button");
+const inventoryElements = {
+  X: document.querySelector("#inventory-x"),
+  O: document.querySelector("#inventory-o")
+};
+const bombAimOverlay = document.createElement("div");
+bombAimOverlay.className = "bomb-aim-overlay";
+bombAimOverlay.hidden = true;
+bombAimOverlay.setAttribute("aria-hidden", "true");
+const EVENT_ITEM_DEFINITIONS = {
+  bomb: { name: "Бомба", icon: "/ui/assets/items/bomb.svg" },
+  freePlacement: { name: "Свободное расположение", icon: "/ui/assets/items/free-placement.svg" },
+  extraTurn: { name: "Дополнительный ход", icon: "/ui/assets/items/extra-turn.svg" }
+};
 const freeStartToggle = document.querySelector("#free-start-toggle");
 const piecesMaxHint = document.querySelector("#pieces-max-hint");
 const toggleHint = document.querySelector("#free-start-hint");
@@ -90,6 +107,35 @@ function renderClock() {
   clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.X <= 10_000);
   clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.O <= 10_000);
   resignButton.disabled = !state || state.phase !== "playing";
+}
+
+function renderInventories() {
+  for (const player of ["X", "O"]) {
+    const container = inventoryElements[player];
+    const items = state.inventory[player];
+    Array.from(container.children).forEach((slot, index) => {
+      const item = items[index];
+      slot.replaceChildren();
+      slot.classList.toggle("is-selected", Boolean(item && state.selectedAbility === item.id));
+      slot.dataset.itemId = item ? String(item.id) : "";
+      if (!item) {
+        slot.disabled = true;
+        slot.setAttribute("aria-label", "Пустой слот");
+        slot.removeAttribute("title");
+        return;
+      }
+
+      const definition = EVENT_ITEM_DEFINITIONS[item.type];
+      const icon = document.createElement("img");
+      icon.src = definition.icon;
+      icon.alt = "";
+      icon.setAttribute("aria-hidden", "true");
+      slot.appendChild(icon);
+      slot.disabled = state.phase !== "playing" || state.currentPlayer !== player || item.type === "extraTurn";
+      slot.setAttribute("aria-label", definition.name + (item.type === "extraTurn" ? " — сработает автоматически" : " — выбрать"));
+      slot.title = definition.name + (item.type === "extraTurn" ? " — дополнительный ход будет совершён сразу" : " — нажмите, чтобы применить");
+    });
+  }
 }
 
 function stopClock() {
@@ -240,13 +286,24 @@ function render() {
   for (let row = 0; row < state.settings.height; row += 1) {
     for (let col = 0; col < state.settings.width; col += 1) {
       const value = state.board[row][col];
+      const eventItem = state.eventItems.find((item) => item.row === row && item.col === col);
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className = "cell";
       cell.dataset.row = String(row);
       cell.dataset.col = String(col);
       cell.setAttribute("role", "gridcell");
-      cell.setAttribute("aria-label", "Ряд " + (row + 1) + ", столбец " + columnLabel(col) + (value === EMPTY_CELL ? ", пусто" : value === BLOCKED_CELL ? ", заблокировано" : ", игрок " + value));
+      const itemLabel = eventItem ? ", предмет: " + EVENT_ITEM_DEFINITIONS[eventItem.type].name : "";
+      cell.setAttribute("aria-label", "Ряд " + (row + 1) + ", столбец " + columnLabel(col) + (value === EMPTY_CELL ? ", пусто" : value === BLOCKED_CELL ? ", заблокировано" : ", игрок " + value) + itemLabel);
+
+      if (eventItem) {
+        const itemIcon = document.createElement("img");
+        itemIcon.src = EVENT_ITEM_DEFINITIONS[eventItem.type].icon;
+        itemIcon.alt = "";
+        itemIcon.setAttribute("aria-hidden", "true");
+        cell.classList.add("event-item", "event-item-" + eventItem.type);
+        cell.appendChild(itemIcon);
+      }
 
       if (value === "X" || value === "O") {
         cell.textContent = value;
@@ -264,12 +321,21 @@ function render() {
         cell.disabled = true;
       }
 
+      const selectedAbility = state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility);
+      if (state.phase === "playing" && selectedAbility && selectedAbility.type === "bomb") {
+        cell.classList.remove("legal");
+        cell.disabled = !isValidBombTarget(state, row, col);
+        if (!cell.disabled) cell.addEventListener("click", () => updateState(useBomb(state, selectedAbility.id, row, col)));
+      }
+
       if (destroyedCells.has(row + "," + col)) {
         cell.classList.add("just-destroyed");
       }
       boardElement.appendChild(cell);
     }
   }
+  bombAimOverlay.hidden = true;
+  boardElement.appendChild(bombAimOverlay);
 
   const piecesText = state.settings.piecesPerTurn + " " + figureWord(state.settings.piecesPerTurn);
   turnRule.textContent = "Первым ходит X. За ход нужно поставить " + piecesText + ".";
@@ -302,7 +368,29 @@ function render() {
   messageElement.textContent = state.message;
   syncBoardGeometry();
   renderClock();
+  renderInventories();
 }
+
+boardElement.addEventListener("pointermove", (event) => {
+  const selected = state && state.phase === "playing"
+    ? state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility && item.type === "bomb")
+    : null;
+  const cell = event.target.closest(".cell");
+  if (!selected || !cell) {
+    bombAimOverlay.hidden = true;
+    return;
+  }
+  const row = Number(cell.dataset.row);
+  const col = Number(cell.dataset.col);
+  if (!isValidBombTarget(state, row, col)) {
+    bombAimOverlay.hidden = true;
+    return;
+  }
+  bombAimOverlay.style.gridRow = (row + 1) + " / span 2";
+  bombAimOverlay.style.gridColumn = (col + 1) + " / span 2";
+  bombAimOverlay.hidden = false;
+});
+boardElement.addEventListener("pointerleave", () => { bombAimOverlay.hidden = true; });
 
 function clearFieldError(input, errorElement) {
   input.removeAttribute("aria-invalid");
@@ -380,6 +468,7 @@ function openSettings() {
   clockMinutesInput.value = String(settings.clockMinutes);
   clockIncrementInput.value = String(settings.incrementSeconds);
   unlimitedTimeToggle.checked = settings.unlimitedTime;
+  randomEventsToggle.checked = settings.randomEvents;
   freeStartToggle.checked = settings.freeStartingPositions;
   syncTimeLimitSettings();
   toggleHint.textContent = freeStartToggle.checked
@@ -407,6 +496,7 @@ function applySettings(event) {
   const height = Number(heightInput.value);
   const piecesPerTurn = Number(piecesInput.value);
   const unlimitedTime = unlimitedTimeToggle.checked;
+  const randomEvents = randomEventsToggle.checked;
   const clockMinutes = unlimitedTime ? settings.clockMinutes : Number(clockMinutesInput.value);
   const incrementSeconds = unlimitedTime ? settings.incrementSeconds : Number(clockIncrementInput.value);
   let firstInvalid = null;
@@ -444,6 +534,7 @@ function applySettings(event) {
     clockMinutes,
     incrementSeconds,
     unlimitedTime,
+    randomEvents,
     freeStartingPositions: freeStartToggle.checked
   };
   settingsModal.close();
@@ -493,6 +584,13 @@ resignButton.addEventListener("click", () => {
   if (state.phase !== "playing") return;
   if (window.confirm("Сдаться? Победа будет засчитана сопернику.")) updateState(resign(state));
 });
+for (const player of ["X", "O"]) {
+  inventoryElements[player].addEventListener("click", (event) => {
+    const slot = event.target.closest(".inventory-slot");
+    if (!slot || slot.disabled || state.currentPlayer !== player) return;
+    updateState(selectAbility(state, Number(slot.dataset.itemId)));
+  });
+}
 startButton.addEventListener("click", setupGame);
 new ResizeObserver(syncBoardGeometry).observe(boardRow);
 setupGame();
