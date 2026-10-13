@@ -311,13 +311,21 @@ function showFieldError(input, errorElement, message) {
   errorElement.hidden = false;
 }
 
+function maxPiecesFor(width, height) {
+  const dimensionsAreValid = [width, height].every((dimension) =>
+    Number.isInteger(dimension) && dimension >= MIN_BOARD_DIMENSION && dimension <= MAX_BOARD_DIMENSION
+  );
+  return dimensionsAreValid
+    ? Math.floor(width * height / 10)
+    : Math.floor(MAX_BOARD_DIMENSION * MAX_BOARD_DIMENSION / 10);
+}
+
 function updatePiecesLimit() {
   const width = Number(widthInput.value);
   const height = Number(heightInput.value);
-  const area = width * height;
-  const maxArea = MAX_BOARD_DIMENSION * MAX_BOARD_DIMENSION;
-  piecesInput.max = String(area > 0 ? area : maxArea);
-  piecesMaxHint.textContent = "из " + (area > 0 ? area : maxArea) + " клеток максимум";
+  const maxPieces = maxPiecesFor(width, height);
+  piecesInput.max = String(maxPieces);
+  piecesMaxHint.textContent = "до " + maxPieces + " фигур (1/10 поля)";
 }
 
 function validateField(input) {
@@ -334,8 +342,7 @@ function validateField(input) {
 
   const width = Number(widthInput.value);
   const height = Number(heightInput.value);
-  const area = width * height;
-  const maxPieces = Number.isInteger(area) && area > 0 ? area : MAX_BOARD_DIMENSION * MAX_BOARD_DIMENSION;
+  const maxPieces = maxPiecesFor(width, height);
   if (!Number.isInteger(value) || value < 1 || value > maxPieces) {
     showFieldError(input, piecesError, "Количество фигур должно быть от 1 до " + maxPieces + ".");
     return false;
@@ -389,9 +396,9 @@ function applySettings(event) {
     showFieldError(heightInput, heightError, "Введите целое число от " + MIN_BOARD_DIMENSION + " до " + MAX_BOARD_DIMENSION + ".");
     firstInvalid = firstInvalid || heightInput;
   }
-  const area = width * height;
-  if (!Number.isInteger(piecesPerTurn) || piecesPerTurn < 1 || piecesPerTurn > area) {
-    showFieldError(piecesInput, piecesError, "Количество фигур должно быть от 1 до " + (Number.isInteger(area) && area > 0 ? area : MAX_BOARD_DIMENSION * MAX_BOARD_DIMENSION) + ".");
+  const maxPieces = maxPiecesFor(width, height);
+  if (!Number.isInteger(piecesPerTurn) || piecesPerTurn < 1 || piecesPerTurn > maxPieces) {
+    showFieldError(piecesInput, piecesError, "Количество фигур должно быть от 1 до " + maxPieces + " (не больше 1/10 площади поля).");
     firstInvalid = firstInvalid || piecesInput;
   }
   if (!Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60) {
