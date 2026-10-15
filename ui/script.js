@@ -447,7 +447,6 @@ boardElement.addEventListener("pointermove", (event) => {
   bombAimOverlay.style.width = (bottomRightCell.offsetLeft + bottomRightCell.offsetWidth - cell.offsetLeft) + "px";
   bombAimOverlay.style.height = (bottomRightCell.offsetTop + bottomRightCell.offsetHeight - cell.offsetTop) + "px";
   bombAimOverlay.classList.toggle("is-antibomb", selected.type === "antiBomb");
-  bombAimOverlay.dataset.label = selected.type === "antiBomb" ? "АНТИ-БОМБА · 2×2" : "БОМБА · 2×2";
   bombAimOverlay.hidden = false;
 });
 boardElement.addEventListener("pointerleave", () => { bombAimOverlay.hidden = true; });

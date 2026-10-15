@@ -60,6 +60,7 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 .cell { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; padding: 0; overflow: hidden; border: 1px solid rgba(176, 205, 190, .1); border-radius: 3px; color: var(--text); background: #1a292c; cursor: pointer; font-size: var(--cell-font-size, clamp(8px, 1.25vw, 16px)); font-weight: 850; transition: background .12s ease, border-color .12s ease, transform .12s ease; }
 .cell:not(:disabled):hover { z-index: 1; border-color: #a5ca9c; background: #2b4140; transform: scale(1.08); }
 .game-board.is-aiming-area .cell:not(:disabled) { cursor: crosshair; }
+.game-board.is-aiming-area .cell:not(:disabled):hover { z-index: 0; border-color: rgba(176, 205, 190, .1); background: #1a292c; box-shadow: none; transform: none; }
 .cell:focus-visible, .button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .cell.legal::after { width: 24%; height: 24%; border-radius: 50%; background: rgba(198, 243, 107, .68); content: ""; }
 .cell.piece { cursor: default; }
@@ -313,6 +314,5 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 
 .game-board { position: relative; }
 .bomb-aim-overlay { position: absolute; z-index: 3; box-sizing: border-box; border: 4px solid rgba(255, 92, 82, .98); border-radius: 6px; background: rgba(255, 72, 64, .27); box-shadow: 0 0 20px rgba(255, 72, 64, .54), inset 0 0 18px rgba(255, 72, 64, .22); pointer-events: none; }
-.bomb-aim-overlay::after { position: absolute; top: 5px; left: 50%; padding: 3px 7px; border: 1px solid rgba(255, 255, 255, .48); border-radius: 5px; color: #fff; background: rgba(76, 24, 25, .92); content: attr(data-label); font-size: 10px; font-weight: 900; letter-spacing: .05em; line-height: 1.2; white-space: nowrap; text-shadow: 0 1px 2px #000; transform: translateX(-50%); }
 .bomb-aim-overlay.is-antibomb { border-color: rgba(255, 165, 79, .98); background: rgba(255, 110, 52, .3); box-shadow: 0 0 20px rgba(255, 110, 52, .56), inset 0 0 18px rgba(255, 110, 52, .24); }
 .bomb-aim-overlay[hidden] { display: none; }
