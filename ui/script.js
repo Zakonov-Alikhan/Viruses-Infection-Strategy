@@ -5,14 +5,18 @@ import {
   MIN_BOARD_DIMENSION,
   EMPTY_CELL,
   chooseStart,
+  chooseAbilityTarget,
   createGameState,
   flagFall,
   isLegalMove,
-  isValidBombTarget,
+  isValidAreaTarget,
+  isValidDebrisTarget,
+  isValidShieldTarget,
   playMove,
   resign,
   selectAbility,
-  useBomb
+  useBomb,
+  useAntiBomb
 } from "./game.js";
 
 const boardElement = document.querySelector(".game-board");
@@ -68,7 +72,11 @@ bombAimOverlay.setAttribute("aria-hidden", "true");
 const EVENT_ITEM_DEFINITIONS = {
   bomb: { name: "Бомба", icon: "/ui/assets/items/bomb.svg" },
   freePlacement: { name: "Свободное расположение", icon: "/ui/assets/items/free-placement.svg" },
-  extraTurn: { name: "Дополнительный ход", icon: "/ui/assets/items/extra-turn.svg" }
+  extraTurn: { name: "Дополнительный ход", icon: "/ui/assets/items/extra-turn.svg" },
+  antiBomb: { name: "Анти-бомба", icon: "/ui/assets/items/anti-bomb.svg" },
+  debris: { name: "Призыв обломков", icon: "/ui/assets/items/debris.svg" },
+  shield: { name: "Щит", icon: "/ui/assets/items/shield.svg" },
+  gangstaShield: { name: "Генгста-Щит", icon: "/ui/assets/items/gangsta-shield.svg" }
 };
 const freeStartToggle = document.querySelector("#free-start-toggle");
 const piecesMaxHint = document.querySelector("#pieces-max-hint");
@@ -312,6 +320,11 @@ function render() {
         cell.appendChild(itemIcon);
       }
 
+      const selectedAbility = state.phase === "playing"
+        ? state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility)
+        : null;
+      const isSelectedTarget = state.abilityTargets.some((target) => target.row === row && target.col === col);
+
       if (value === "X" || value === "O") {
         cell.textContent = value;
         cell.classList.add("piece", value === "X" ? "piece-x" : "piece-o");
@@ -319,20 +332,47 @@ function render() {
         cell.textContent = "×";
         cell.classList.add("blocked");
         cell.disabled = true;
+      }
+
+      if (state.phase === "setup-x" || state.phase === "setup-o") {
+        cell.disabled = value !== EMPTY_CELL;
+        if (!cell.disabled) cell.addEventListener("click", () => updateState(chooseStart(state, row, col)));
+      } else if (state.phase === "playing" && selectedAbility) {
+        if (selectedAbility.type === "bomb" || selectedAbility.type === "antiBomb") {
+          const valid = isValidAreaTarget(state, row, col);
+          cell.disabled = !valid;
+          if (valid) cell.addEventListener("click", () => updateState(selectedAbility.type === "bomb"
+            ? useBomb(state, selectedAbility.id, row, col)
+            : useAntiBomb(state, selectedAbility.id, row, col)));
+        } else if (selectedAbility.type === "debris") {
+          const valid = isValidDebrisTarget(state, row, col);
+          cell.disabled = !valid;
+          cell.classList.toggle("ability-target-selected", isSelectedTarget);
+          if (valid) cell.addEventListener("click", () => updateState(chooseAbilityTarget(state, selectedAbility.id, row, col)));
+        } else if (selectedAbility.type === "shield" || selectedAbility.type === "gangstaShield") {
+          const valid = isValidShieldTarget(state, row, col);
+          cell.disabled = !valid;
+          cell.classList.toggle("ability-target-selected", isSelectedTarget);
+          if (valid) cell.addEventListener("click", () => updateState(chooseAbilityTarget(state, selectedAbility.id, row, col)));
+        } else if (isLegalMove(state, row, col)) {
+          cell.disabled = false;
+          cell.classList.add("legal");
+          cell.addEventListener("click", () => updateState(playMove(state, row, col)));
+        } else {
+          cell.disabled = true;
+        }
       } else if (state.phase === "playing" && isLegalMove(state, row, col)) {
+        cell.disabled = false;
         cell.classList.add("legal");
         cell.addEventListener("click", () => updateState(playMove(state, row, col)));
-      } else if (state.phase === "setup-x" || state.phase === "setup-o") {
-        cell.addEventListener("click", () => updateState(chooseStart(state, row, col)));
       } else {
         cell.disabled = true;
       }
 
-      const selectedAbility = state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility);
-      if (state.phase === "playing" && selectedAbility && selectedAbility.type === "bomb") {
-        cell.classList.remove("legal");
-        cell.disabled = !isValidBombTarget(state, row, col);
-        if (!cell.disabled) cell.addEventListener("click", () => updateState(useBomb(state, selectedAbility.id, row, col)));
+      const protection = state.protections.find((shield) => shield.row === row && shield.col === col);
+      if (protection) {
+        cell.classList.add("protected-piece");
+        cell.title = protection.permanent ? "Генгста-Щит: защита до конца партии" : "Щит: защита до начала следующего хода игрока";
       }
 
       if (destroyedCells.has(row + "," + col)) {
@@ -380,7 +420,7 @@ function render() {
 
 boardElement.addEventListener("pointermove", (event) => {
   const selected = state && state.phase === "playing"
-    ? state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility && item.type === "bomb")
+    ? state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility && (item.type === "bomb" || item.type === "antiBomb"))
     : null;
   const cell = event.target.closest(".cell");
   if (!selected || !cell) {
@@ -389,12 +429,13 @@ boardElement.addEventListener("pointermove", (event) => {
   }
   const row = Number(cell.dataset.row);
   const col = Number(cell.dataset.col);
-  if (!isValidBombTarget(state, row, col)) {
+  if (!isValidAreaTarget(state, row, col)) {
     bombAimOverlay.hidden = true;
     return;
   }
   bombAimOverlay.style.gridRow = (row + 1) + " / span 2";
   bombAimOverlay.style.gridColumn = (col + 1) + " / span 2";
+  bombAimOverlay.classList.toggle("is-antibomb", selected.type === "antiBomb");
   bombAimOverlay.hidden = false;
 });
 boardElement.addEventListener("pointerleave", () => { bombAimOverlay.hidden = true; });
