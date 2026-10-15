@@ -294,6 +294,10 @@ function showResult() {
 function render() {
   boardElement.innerHTML = "";
   const destroyedCells = new Set(state.lastDestroyed.map(({ row, col }) => row + "," + col));
+  const activeAreaAbility = state.phase === "playing"
+    ? state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility && (item.type === "bomb" || item.type === "antiBomb"))
+    : null;
+  boardElement.classList.toggle("is-aiming-area", Boolean(activeAreaAbility));
   boardElement.style.setProperty("--board-width", state.settings.width);
   boardElement.style.setProperty("--board-height", state.settings.height);
   setAxisLabels();
@@ -433,9 +437,17 @@ boardElement.addEventListener("pointermove", (event) => {
     bombAimOverlay.hidden = true;
     return;
   }
-  bombAimOverlay.style.gridRow = (row + 1) + " / span 2";
-  bombAimOverlay.style.gridColumn = (col + 1) + " / span 2";
+  const bottomRightCell = boardElement.querySelector('.cell[data-row="' + (row + 1) + '"][data-col="' + (col + 1) + '"]');
+  if (!bottomRightCell) {
+    bombAimOverlay.hidden = true;
+    return;
+  }
+  bombAimOverlay.style.left = cell.offsetLeft + "px";
+  bombAimOverlay.style.top = cell.offsetTop + "px";
+  bombAimOverlay.style.width = (bottomRightCell.offsetLeft + bottomRightCell.offsetWidth - cell.offsetLeft) + "px";
+  bombAimOverlay.style.height = (bottomRightCell.offsetTop + bottomRightCell.offsetHeight - cell.offsetTop) + "px";
   bombAimOverlay.classList.toggle("is-antibomb", selected.type === "antiBomb");
+  bombAimOverlay.dataset.label = selected.type === "antiBomb" ? "АНТИ-БОМБА · 2×2" : "БОМБА · 2×2";
   bombAimOverlay.hidden = false;
 });
 boardElement.addEventListener("pointerleave", () => { bombAimOverlay.hidden = true; });
