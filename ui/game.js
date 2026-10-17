@@ -7,8 +7,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
   clockMinutes: 5,
   incrementSeconds: 0,
   unlimitedTime: false,
-  randomEvents: false,
-  freeStartingPositions: true
+  randomEvents: true,
+  animationsEnabled: true,
+  freeStartingPositions: true,
+  adminMode: false
+});
+export const PLAYER_ROLES = Object.freeze({ PLAYER: "player", ADMIN: "admin" });
+export const PLAYER_PERMISSIONS = Object.freeze({ USE_OWN_ITEMS: "items:use-owned", USE_ANY_ITEM: "items:use-any" });
+const ROLE_PERMISSIONS = Object.freeze({
+  [PLAYER_ROLES.PLAYER]: [PLAYER_PERMISSIONS.USE_OWN_ITEMS],
+  [PLAYER_ROLES.ADMIN]: [PLAYER_PERMISSIONS.USE_OWN_ITEMS, PLAYER_PERMISSIONS.USE_ANY_ITEM]
 });
 export const EMPTY_CELL = "";
 export const BLOCKED_CELL = "#";
@@ -18,7 +26,7 @@ const DIRECTIONS = [
 ];
 const ORTHOGONAL = new Set(["-1,0", "1,0", "0,-1", "0,1"]);
 export const EVENT_ITEMS = Object.freeze([
-  "bomb", "freePlacement", "extraTurn", "antiBomb", "debris", "shield", "gangstaShield"
+  "bomb", "freePlacement", "extraTurn", "antiBomb", "pointDestroy", "debris", "shield", "gangstaShield"
 ]);
 const EVENT_SPAWN_CHANCE = 0.3;
 const MAX_EVENT_ITEMS_ON_BOARD = 3;
@@ -110,19 +118,11 @@ function finish(state, winner, reason) {
   return { ...state, phase: "finished", winner, finishReason: reason };
 }
 
-function appendMessage(current, addition) {
-  return [current, addition].filter(Boolean).join(" ");
-}
+const message = (key, params = {}) => ({ key, params });
 
-const EVENT_ITEM_NAMES = Object.freeze({
-  bomb: "Бомба",
-  freePlacement: "Свободное расположение",
-  extraTurn: "Дополнительный ход",
-  antiBomb: "Анти-бомба",
-  debris: "Призыв обломков",
-  shield: "Щит",
-  gangstaShield: "Генгста-Щит"
-});
+function appendMessage(current, addition) {
+  return [...(Array.isArray(current) ? current : current ? [current] : []), addition];
+}
 
 function spawnEventItem(state, random, guaranteed = false) {
   if (!state.settings.randomEvents || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD) return state;
@@ -146,7 +146,7 @@ function spawnEventItem(state, random, guaranteed = false) {
     ...state,
     eventItems: [...state.eventItems, eventItem],
     nextEventItemId: state.nextEventItemId + 1,
-    message: appendMessage(state.message, "На поле появился предмет «" + EVENT_ITEM_NAMES[type] + "».")
+    message: appendMessage(state.message, message("message.spawn", { type }))
   };
 }
 
@@ -161,6 +161,24 @@ function copyInventory(inventory) {
 function removeInventoryItem(inventory, player, itemId) {
   const index = inventory[player].findIndex((item) => item.id === itemId);
   if (index >= 0) inventory[player].splice(index, 1);
+}
+
+export function hasPermission(state, player, permission) {
+  const role = state.playerRoles?.[player] || PLAYER_ROLES.PLAYER;
+  return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
+}
+
+function getAbility(state, player, itemId) {
+  const owned = state.inventory[player].find((item) => item.id === itemId);
+  if (owned) return owned;
+  if (typeof itemId !== "string" || !itemId.startsWith("admin:")
+    || !hasPermission(state, player, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return null;
+  const type = itemId.slice("admin:".length);
+  return EVENT_ITEMS.includes(type) ? { id: itemId, type, adminGranted: true } : null;
+}
+
+export function getSelectedAbility(state) {
+  return state.selectedAbility === null ? null : getAbility(state, state.currentPlayer, state.selectedAbility);
 }
 
 function acquireEventItem(state, player, eventItem) {
@@ -186,13 +204,13 @@ function acquireEventItem(state, player, eventItem) {
 export function resign(state) {
   if (state.phase !== "playing") return state;
   const winner = state.currentPlayer === "X" ? "O" : "X";
-  return finish(state, winner, "Игрок «" + state.currentPlayer + "» сдался.");
+  return finish(state, winner, message("message.resigned", { player: state.currentPlayer }));
 }
 
 export function flagFall(state) {
   if (state.phase !== "playing") return state;
   const winner = state.currentPlayer === "X" ? "O" : "X";
-  return finish(state, winner, "У игрока «" + state.currentPlayer + "» закончилось время.");
+  return finish(state, winner, message("message.timeUp", { player: state.currentPlayer }));
 }
 
 function beginPlay(state, board, message, random) {
@@ -225,6 +243,10 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
   const state = {
     board: emptyBoard(appliedSettings.width, appliedSettings.height),
     settings: appliedSettings,
+    // In multiplayer, derive these roles from the authenticated server session.
+    playerRoles: appliedSettings.adminMode
+      ? { X: PLAYER_ROLES.ADMIN, O: PLAYER_ROLES.ADMIN }
+      : { X: PLAYER_ROLES.PLAYER, O: PLAYER_ROLES.PLAYER },
     phase: "setup-x",
     currentPlayer: "X",
     piecesLeft: appliedSettings.piecesPerTurn,
@@ -239,16 +261,16 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
     abilityTargets: [],
     protections: [],
     pendingExtraTurn: null,
-    message: "",
+    message: [],
     winner: null,
-    finishReason: ""
+    finishReason: null
   };
 
   if (!appliedSettings.freeStartingPositions) {
     return beginPlay(
       state,
       placeInOppositeCorners(appliedSettings, random),
-      "Свободное расположение отключено. Игроки размещены в противоположных углах. Первый ход делает игрок «Х».",
+      message("message.fixedStart"),
       random
     );
   }
@@ -258,31 +280,44 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
 
 export function isLegalMove(state, row, col) {
   if (state.phase !== "playing" || !inBounds(row, col, state.board) || state.board[row][col] !== EMPTY_CELL) return false;
-  const selected = state.inventory[state.currentPlayer].find((item) => item.id === state.selectedAbility);
+  const reservation = state.protections.find((shield) => shield.row === row && shield.col === col);
+  if (reservation && reservation.owner !== state.currentPlayer) return false;
+  const selected = getSelectedAbility(state);
   if (selected) return selected.type === "freePlacement";
   return neighbors(row, col, state.board).some(({ row: nextRow, col: nextCol }) => state.board[nextRow][nextCol] === state.currentPlayer);
 }
 
 export function selectAbility(state, itemId) {
   if (state.phase !== "playing") return state;
-  const item = state.inventory[state.currentPlayer].find((candidate) => candidate.id === itemId);
-  if (!item || item.type === "extraTurn") return state;
+  const item = getAbility(state, state.currentPlayer, itemId);
+  if (!item) return state;
+  if (item.type === "extraTurn") {
+    if (!item.adminGranted) return state;
+    return {
+      ...state,
+      piecesLeft: state.piecesLeft + state.settings.piecesPerTurn,
+      message: message("message.adminExtra", { player: state.currentPlayer }),
+      selectedAbility: null,
+      abilityTargets: []
+    };
+  }
   const selectedAbility = state.selectedAbility === itemId ? null : itemId;
   const instructions = {
-    bomb: "Выберите верхнюю левую клетку области 2×2 для бомбы.",
-    freePlacement: "Выберите любую пустую клетку для дополнительной фигуры.",
-    antiBomb: "Выберите верхнюю левую клетку области 2×2 для анти-бомбы.",
-    debris: "Выберите три клетки без фигур, чтобы завалить их обломками.",
-    shield: "Выберите три свои фигуры для временной защиты.",
-    gangstaShield: "Выберите свою фигуру для постоянной защиты."
+    bomb: "select.bomb",
+    freePlacement: "select.free",
+    antiBomb: "select.antiBomb",
+    pointDestroy: "select.pointDestroy",
+    debris: "select.debris",
+    shield: "select.shield",
+    gangstaShield: "select.gangstaShield"
   };
   return {
     ...state,
     selectedAbility,
     abilityTargets: [],
     message: selectedAbility === null
-      ? "Способность отключена."
-      : instructions[item.type]
+      ? message("message.disabled")
+      : message(instructions[item.type])
   };
 }
 
@@ -316,7 +351,7 @@ function startTurn(state, player, piecesPerTurn) {
 }
 
 function useAreaAbility(state, itemId, row, col, type) {
-  const item = state.inventory[state.currentPlayer].find((candidate) => candidate.id === itemId);
+  const item = getAbility(state, state.currentPlayer, itemId);
   if (state.selectedAbility !== itemId || !item || item.type !== type || !isValidAreaTarget(state, row, col)) return state;
 
   const board = copyBoard(state.board);
@@ -329,7 +364,7 @@ function useAreaAbility(state, itemId, row, col, type) {
   }
 
   const inventory = copyInventory(state.inventory);
-  removeInventoryItem(inventory, state.currentPlayer, itemId);
+  if (!item.adminGranted) removeInventoryItem(inventory, state.currentPlayer, itemId);
   const isBomb = type === "bomb";
   const next = {
     ...state,
@@ -340,14 +375,12 @@ function useAreaAbility(state, itemId, row, col, type) {
     selectedAbility: null,
     abilityTargets: [],
     lastDestroyed: cleared,
-    message: isBomb
-      ? "Бомба очистила область 2×2. Все четыре клетки снова доступны."
-      : "Анти-бомба загрязнила область 2×2: фигуры уничтожены, клетки заблокированы."
+    message: message(isBomb ? "message.bomb" : "message.antiBomb")
   };
 
   if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
-    return finish(next, winner, "После применения способности игрок «" + state.currentPlayer + "» не смог завершить свой ход.");
+    return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
   return next;
 }
@@ -360,24 +393,56 @@ export function useAntiBomb(state, itemId, row, col) {
   return useAreaAbility(state, itemId, row, col, "antiBomb");
 }
 
+export function isValidPointDestroyTarget(state, row, col) {
+  return state.phase === "playing" && inBounds(row, col, state.board);
+}
+
+export function usePointDestroy(state, itemId, row, col) {
+  const item = getAbility(state, state.currentPlayer, itemId);
+  if (state.selectedAbility !== itemId || !item || item.type !== "pointDestroy"
+    || !isValidPointDestroyTarget(state, row, col)) return state;
+
+  const board = copyBoard(state.board);
+  board[row][col] = EMPTY_CELL;
+  const cleared = [{ row, col }];
+  const inventory = copyInventory(state.inventory);
+  if (!item.adminGranted) removeInventoryItem(inventory, state.currentPlayer, itemId);
+  const next = {
+    ...state,
+    board,
+    inventory,
+    eventItems: clearEventItemsAt(state, cleared),
+    protections: removeProtectionsAt(state, cleared),
+    selectedAbility: null,
+    abilityTargets: [],
+    lastDestroyed: cleared,
+    message: message("message.pointDestroy")
+  };
+
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+    const winner = state.currentPlayer === "X" ? "O" : "X";
+    return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
+  }
+  return next;
+}
+
 export function isValidDebrisTarget(state, row, col) {
   return state.phase === "playing"
     && inBounds(row, col, state.board)
-    && state.board[row][col] !== "X"
-    && state.board[row][col] !== "O"
+    && state.board[row][col] === EMPTY_CELL
     && !state.abilityTargets.some((target) => target.row === row && target.col === col);
 }
 
 export function isValidShieldTarget(state, row, col) {
   return state.phase === "playing"
     && inBounds(row, col, state.board)
-    && state.board[row][col] === state.currentPlayer
+    && (state.board[row][col] === "X" || state.board[row][col] === "O" || state.board[row][col] === EMPTY_CELL)
     && !isProtected(state, row, col)
     && !state.abilityTargets.some((target) => target.row === row && target.col === col);
 }
 
 export function chooseAbilityTarget(state, itemId, row, col) {
-  const item = state.inventory[state.currentPlayer].find((candidate) => candidate.id === itemId);
+  const item = getAbility(state, state.currentPlayer, itemId);
   if (state.phase !== "playing" || state.selectedAbility !== itemId || !item) return state;
 
   const targetableDebris = item.type === "debris" && isValidDebrisTarget(state, row, col);
@@ -391,14 +456,15 @@ export function chooseAbilityTarget(state, itemId, row, col) {
     return {
       ...state,
       abilityTargets,
-      message: targetableDebris
-        ? "Выбрано клеток под обломки: " + abilityTargets.length + " из 3."
-        : "Выбрано фигур под защиту: " + abilityTargets.length + " из " + targetCount + "."
+      message: message(targetableDebris ? "message.debrisSelected" : "message.shieldSelected", {
+        count: abilityTargets.length,
+        total: targetableDebris ? 3 : targetCount
+      })
     };
   }
 
   const inventory = copyInventory(state.inventory);
-  removeInventoryItem(inventory, state.currentPlayer, itemId);
+  if (!item.adminGranted) removeInventoryItem(inventory, state.currentPlayer, itemId);
   if (targetableDebris) {
     const board = copyBoard(state.board);
     for (const target of abilityTargets) board[target.row][target.col] = BLOCKED_CELL;
@@ -411,11 +477,11 @@ export function chooseAbilityTarget(state, itemId, row, col) {
       selectedAbility: null,
       abilityTargets: [],
       lastDestroyed: abilityTargets,
-      message: "Обломки заблокировали три выбранные клетки. Ход не расходуется."
+      message: message("message.debris")
     };
     if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
       const winner = state.currentPlayer === "X" ? "O" : "X";
-      return finish(next, winner, "После призыва обломков игрок «" + state.currentPlayer + "» не смог завершить свой ход.");
+      return finish(next, winner, message("message.cannotFinishDebris", { player: state.currentPlayer }));
     }
     return next;
   }
@@ -434,9 +500,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
     protections,
     selectedAbility: null,
     abilityTargets: [],
-    message: item.type === "gangstaShield"
-      ? "Генгста-Щит будет защищать выбранную фигуру до конца партии."
-      : "Щит защитит выбранные фигуры до начала вашего следующего хода."
+    message: message(item.type === "gangstaShield" ? "message.gangstaShield" : "message.shield")
   };
 }
 
@@ -450,7 +514,7 @@ export function chooseStart(state, row, col, random = Math.random) {
       startChoices: choices,
       setupPlayer: "O",
       phase: "setup-o",
-      message: "Позиция игрока «Х» сохранена скрыто. Передайте устройство игроку «О»."
+      message: message("message.startX")
     };
   }
 
@@ -462,7 +526,7 @@ export function chooseStart(state, row, col, random = Math.random) {
       return beginPlay(
         { ...state, collisionAttempts, startChoices: { X: null, O: null } },
         placeInOppositeCorners(state.settings, random),
-        "Была выбрана идентичная позиция три раза подряд. Игроки размещены в противоположных углах.",
+        message("message.collisionFallback"),
         random
       );
     }
@@ -473,24 +537,24 @@ export function chooseStart(state, row, col, random = Math.random) {
       startChoices: { X: null, O: null },
       setupPlayer: "X",
       phase: "setup-x",
-      message: "Была выбрана идентичная позиция. Оба игрока выбирают заново (попытка " + collisionAttempts + " из 3)."
+      message: message("message.collision", { attempt: collisionAttempts })
     };
   }
 
   const board = emptyBoard(state.settings.width, state.settings.height);
   board[xChoice.row][xChoice.col] = "X";
   board[oChoice.row][oChoice.col] = "O";
-  return beginPlay(state, board, "Стартовые позиции приняты. Первый ход делает игрок «Х».", random);
+  return beginPlay(state, board, message("message.startAccepted"), random);
 }
 
 export function playMove(state, row, col, random = Math.random) {
   if (!isLegalMove(state, row, col)) return state;
 
   const player = state.currentPlayer;
-  const selectedItem = state.inventory[player].find((item) => item.id === state.selectedAbility);
+  const selectedItem = getSelectedAbility(state);
   const inventory = copyInventory(state.inventory);
-  const isFreePlacement = selectedItem && selectedItem.type === "freePlacement";
-  if (isFreePlacement) {
+  const isFreePlacement = selectedItem?.type === "freePlacement";
+  if (isFreePlacement && !selectedItem.adminGranted) {
     removeInventoryItem(inventory, player, selectedItem.id);
   }
 
@@ -508,23 +572,21 @@ export function playMove(state, row, col, random = Math.random) {
     piecesLeft,
     selectedAbility: selectedItem && selectedItem.type === "freePlacement" ? null : state.selectedAbility,
     lastDestroyed,
-    message: lastDestroyed.length > 0
-      ? "Цепная реакция: уничтожено фигур противника — " + lastDestroyed.length + ". Освобождённые клетки заблокированы."
-      : ""
+    message: lastDestroyed.length > 0 ? message("message.destroyed", { count: lastDestroyed.length }) : []
   };
 
   if (collectedItem) {
     const acquired = acquireEventItem(next, player, collectedItem);
     next = { ...next, ...acquired };
-    next.message = appendMessage(next.message, "Игрок «" + player + "» получил способность «" + EVENT_ITEM_NAMES[collectedItem.type] + "».");
+    next.message = appendMessage(next.message, message("message.collected", { player, type: collectedItem.type }));
   }
   if (selectedItem && selectedItem.type === "freePlacement") {
-    next.message = appendMessage(next.message, "Дополнительная фигура размещена без ограничения по расстоянию; число фигур хода не изменилось.");
+    next.message = appendMessage(next.message, message("message.freePlacementUsed"));
   }
 
   if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board)) {
     const winner = player === "X" ? "O" : "X";
-    return finish(next, winner, "Игрок «" + player + "» не смог завершить ход из " + state.settings.piecesPerTurn + " фигур.");
+    return finish(next, winner, message("message.cannotFinish", { player, count: state.settings.piecesPerTurn }));
   }
 
   if (piecesLeft === 0) {
@@ -536,19 +598,19 @@ export function playMove(state, row, col, random = Math.random) {
         ...next,
         inventory: nextInventory,
         pendingExtraTurn: null,
-        message: appendMessage(next.message, "Дополнительный ход игрока «" + player + "» начинается сразу.")
+        message: appendMessage(next.message, message("message.extraTurn", { player }))
       };
       next = startTurn(next, player, state.settings.piecesPerTurn);
       if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board)) {
         const winner = player === "X" ? "O" : "X";
-        return finish(next, winner, "Игрок «" + player + "» не смог завершить дополнительный ход.");
+        return finish(next, winner, message("message.extraCannotFinish", { player }));
       }
       return maybeSpawnEventItem(next, random);
     }
 
     const nextPlayer = player === "X" ? "O" : "X";
     if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board)) {
-      return finish(next, player, "Соперник не может завершить ход из " + state.settings.piecesPerTurn + " фигур.");
+      return finish(next, player, message("message.opponentCannotFinish", { count: state.settings.piecesPerTurn }));
     }
     next = startTurn(next, nextPlayer, state.settings.piecesPerTurn);
     return maybeSpawnEventItem(next, random);

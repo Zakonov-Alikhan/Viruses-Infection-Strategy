@@ -4,40 +4,46 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#10191c">
-  <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков.">
+  <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css">
+  <link rel="stylesheet" href="/ui/style.css?v=20261017-i18n2">
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Вирусы — на главную">
+      <a class="brand" href="/" aria-label="Вирусы — на главную" data-i18n-aria-label="brand.home">
         <span class="brand-mark" aria-hidden="true">V</span>
-        <span>Вирусы<span class="brand-period">.</span></span>
+        <span><span data-i18n="brand.name">Вирусы</span><span class="brand-period">.</span></span>
       </a>
-      <span class="topbar-note">Стратегия для двух игроков</span>
+      <span class="topbar-note" data-i18n="brand.tagline">Стратегия для двух игроков</span>
+      <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">Русский</option><option value="en">English</option></select></label>
     </header>
 
     <section class="game-layout" aria-labelledby="page-title">
       <div class="game-column">
         <div class="game-heading">
           <div>
-            <p class="eyebrow">Территория меняется с каждым ходом</p>
-            <h1 id="page-title">Поле битвы</h1>
+            <p class="eyebrow" data-i18n="page.eyebrow">Территория меняется с каждым ходом</p>
+            <h1 id="page-title" data-i18n="page.title">Поле битвы</h1>
           </div>
           <div class="heading-actions">
-            <button id="settings-button" class="button button-secondary settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-modal"><span aria-hidden="true">⚙</span> Настройки</button>
-            <button id="start-button" class="button button-secondary" type="button">Новая игра</button>
+            <button id="settings-button" class="button button-secondary settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-modal"><span aria-hidden="true">⚙</span> <span data-i18n="action.settings">Настройки</span></button>
+            <button id="rules-button" class="button button-secondary rules-button" type="button" aria-haspopup="dialog" aria-controls="rules-modal" data-i18n="action.rules">Правила игры</button>
+            <button id="start-button" class="button button-secondary" type="button" data-i18n="action.newGame">Новая игра</button>
           </div>
         </div>
 
-        <section class="game-card" aria-label="Игровая доска">
+        <section class="game-card" aria-label="Игровая доска" data-i18n-aria-label="board.label">
           <div class="game-toolbar">
             <div class="player-indicator" aria-live="polite">
               <span class="live-dot" aria-hidden="true"></span>
-              <span id="game-status">Подготовка игры</span>
+              <span id="game-status" data-i18n="board.preparing">Подготовка игры</span>
             </div>
-            <div id="turn-counter" class="turn-counter">Подготовка к игре</div>
+            <div id="turn-counter" class="turn-counter" data-i18n="board.preparingTurn">Подготовка к игре</div>
+          </div>
+          <div id="turn-progress" class="turn-progress" aria-live="polite" hidden>
+            <div class="turn-progress-heading"><span><span data-i18n="turn.label">ХОД</span> <b id="turn-player-label">X</b></span><span class="turn-progress-amount"><strong id="pieces-left-count">—</strong><span> / <span id="pieces-total-count">—</span> <span data-i18n="turn.pieces">фигур</span></span></span></div>
+            <div class="turn-progress-track" role="progressbar" aria-label="Оставшиеся фигуры текущего хода" data-i18n-aria-label="turn.aria" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0"><span id="turn-progress-fill"></span></div>
           </div>
           <p id="game-message" class="game-message" role="status" aria-live="polite"></p>
           <div class="board-frame">
@@ -45,148 +51,205 @@
               <div class="axis axis-top" aria-hidden="true"></div>
               <div class="board-row">
                 <div class="axis axis-side" aria-hidden="true"></div>
-                <div class="game-board" role="grid" aria-label="Игровое поле"></div>
+                <div class="game-board" role="grid" aria-label="Игровое поле" data-i18n-aria-label="board.grid"></div>
               </div>
             </div>
           </div>
-          <div class="legend" aria-label="Обозначения">
-            <span><i class="legend-piece legend-x" aria-hidden="true">X</i> Игрок X</span>
-            <span><i class="legend-piece legend-o" aria-hidden="true">O</i> Игрок O</span>
-            <span><i class="legend-blocked" aria-hidden="true">×</i> Клетка заблокирована</span>
+          <div class="legend" aria-label="Обозначения" data-i18n-aria-label="board.legend">
+            <span><i class="legend-piece legend-x" aria-hidden="true">X</i> <span data-i18n="player.x">Игрок X</span></span>
+            <span><i class="legend-piece legend-o" aria-hidden="true">O</i> <span data-i18n="player.o">Игрок O</span></span>
+            <span><i class="legend-blocked" aria-hidden="true">×</i> <span data-i18n="board.blocked">Клетка заблокирована</span></span>
           </div>
         </section>
       </div>
 
-      <aside class="side-panel" aria-label="Часы, информация об игроках и правила">
-        <div class="side-card clock-card" aria-label="Игровые часы">
-          <p class="eyebrow">Время партии</p>
+      <aside class="side-panel" aria-label="Часы, информация об игроках и правила" data-i18n-aria-label="panel.label">
+        <div class="side-card clock-card" aria-label="Игровые часы" data-i18n-aria-label="clock.label">
+          <p class="eyebrow" data-i18n="clock.heading">Время партии</p>
           <p class="clock-control-summary" id="clock-control-summary">5 минут на игрока · добавка 0 секунд</p>
           <div class="clock-player" id="clock-player-x">
             <div class="clock-player-meta">
-              <span class="clock-player-name"><i aria-hidden="true"></i> Игрок X</span>
-              <div class="inventory-slots" id="inventory-x" aria-label="Способности игрока X">
-                <button class="inventory-slot" type="button" aria-label="Пустой слот" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" disabled></button>
+              <span class="clock-player-name"><i aria-hidden="true"></i> <span data-i18n="player.x">Игрок X</span></span>
+              <div class="inventory-slots" id="inventory-x" aria-label="Способности игрока X" data-i18n-aria-label="inventory.label" data-i18n-player="X">
+                <button class="inventory-slot" type="button" aria-label="Пустой слот" data-i18n-aria-label="inventory.empty" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" data-i18n-aria-label="inventory.empty" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" data-i18n-aria-label="inventory.empty" disabled></button>
               </div>
             </div>
-            <time class="player-clock" id="clock-x" aria-label="Остаток времени игрока X">05:00</time>
+            <time class="player-clock" id="clock-x" aria-label="Остаток времени игрока X" data-i18n-aria-label="clock.remaining" data-i18n-player="X">05:00</time>
           </div>
           <div class="clock-player" id="clock-player-o">
             <div class="clock-player-meta">
-              <span class="clock-player-name"><i aria-hidden="true"></i> Игрок O</span>
-              <div class="inventory-slots" id="inventory-o" aria-label="Способности игрока O">
-                <button class="inventory-slot" type="button" aria-label="Пустой слот" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" disabled></button>
+              <span class="clock-player-name"><i aria-hidden="true"></i> <span data-i18n="player.o">Игрок O</span></span>
+              <div class="inventory-slots" id="inventory-o" aria-label="Способности игрока O" data-i18n-aria-label="inventory.label" data-i18n-player="O">
+                <button class="inventory-slot" type="button" aria-label="Пустой слот" data-i18n-aria-label="inventory.empty" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" data-i18n-aria-label="inventory.empty" disabled></button><button class="inventory-slot" type="button" aria-label="Пустой слот" data-i18n-aria-label="inventory.empty" disabled></button>
               </div>
             </div>
-            <time class="player-clock" id="clock-o" aria-label="Остаток времени игрока O">05:00</time>
+            <time class="player-clock" id="clock-o" aria-label="Остаток времени игрока O" data-i18n-aria-label="clock.remaining" data-i18n-player="O">05:00</time>
           </div>
-          <button id="resign-button" class="button button-resign" type="button" disabled>Сдаться</button>
+          <button id="resign-button" class="button button-resign" type="button" disabled data-i18n="resign">Сдаться</button>
         </div>
         <div class="side-card current-turn-card" id="current-turn-card">
-          <p class="eyebrow">Сейчас</p>
+          <p class="eyebrow" data-i18n="status.now">Сейчас</p>
           <h2 id="side-title">Выберите старт</h2>
           <p id="side-description">При свободном расположении игроки выбирают старт по очереди. Передайте устройство сопернику после выбора.</p>
         </div>
+        <section class="side-card admin-tools" id="admin-tools" aria-label="Предметы администратора" data-i18n-aria-label="admin.label" hidden>
+          <p class="eyebrow" data-i18n="admin.mode">Режим администратора</p>
+          <h2 data-i18n="admin.title">Предметы для проверки</h2>
+          <p data-i18n="admin.help">Способности не расходуют обычный инвентарь.</p>
+          <div class="admin-item-list" id="admin-item-list"></div>
+        </section>
         <details class="side-card rules-card">
-          <summary class="rules-summary">Коротко о правилах <span aria-hidden="true">⌄</span></summary>
+          <summary class="rules-summary"><span data-i18n="rules.short">Коротко о правилах</span> <span aria-hidden="true">⌄</span></summary>
           <ol>
             <li id="rules-turn-count">Первым ходит X. За ход нужно поставить три фигуры.</li>
-            <li>Каждая новая фигура соединяется со своей цепочкой по вертикали, горизонтали или диагонали.</li>
-            <li>При соприкосновении уничтожаются фигуры соперника и только первый прилегающий к ним слой.</li>
-            <li>Освободившиеся клетки блокируются. Кто не может завершить ход тремя фигурами — проигрывает.</li>
-            <li>Включите случайные события в настройках, чтобы собирать способности: блокировать клетки, ставить дополнительную фигуру или защищать свои фигуры.</li>
+            <li data-i18n="rules.quickConnect">Каждая новая фигура соединяется со своей цепочкой по вертикали, горизонтали или диагонали.</li>
+            <li data-i18n="rules.quickContact">При соприкосновении уничтожаются фигуры соперника и только первый прилегающий к ним слой.</li>
+            <li data-i18n="rules.quickBlocked">Освободившиеся клетки блокируются. Кто не может завершить ход тремя фигурами — проигрывает.</li>
+            <li data-i18n="rules.quickEvents">Включите случайные события в настройках, чтобы собирать способности: блокировать клетки, ставить дополнительную фигуру или защищать свои фигуры.</li>
           </ol>
         </details>
         <p id="privacy-note" class="privacy-note"><span aria-hidden="true">◉</span> Стартовые позиции скрыты до начала партии.</p>
       </aside>
     </section>
-    <footer class="footer">Один экран · Два игрока · Одна цепная реакция</footer>
+    <footer class="footer" data-i18n="footer">Один экран · Два игрока · Одна цепная реакция</footer>
   </main>
   <dialog id="settings-modal" class="settings-modal" aria-labelledby="settings-title" aria-describedby="settings-summary">
     <section class="settings-card">
       <header class="settings-header">
         <div>
-          <p class="eyebrow">Игровое поле</p>
-          <h2 id="settings-title">Настройки</h2>
+          <p class="eyebrow" data-i18n="settings.field">Игровое поле</p>
+          <h2 id="settings-title" data-i18n="settings.title">Настройки</h2>
         </div>
-        <button id="settings-close" class="icon-button" type="button" aria-label="Закрыть настройки">×</button>
+        <button id="settings-close" class="icon-button" type="button" aria-label="Закрыть настройки" data-i18n-aria-label="settings.close">×</button>
       </header>
-      <p id="settings-summary" class="settings-summary">Применение настроек начнёт новую партию с выбранными параметрами.</p>
+      <p id="settings-summary" class="settings-summary" data-i18n="settings.summary">Применение настроек начнёт новую партию с выбранными параметрами.</p>
       <form id="settings-form" class="settings-form" novalidate>
-        <div class="settings-section-title">Размер доски</div>
+        <div class="settings-section-title" data-i18n="settings.size">Размер доски</div>
         <div class="settings-dimensions">
           <div class="settings-field">
-            <label for="board-width-input">Ширина</label>
-            <div class="number-control"><input id="board-width-input" aria-describedby="board-width-error" type="number" inputmode="numeric" min="10" max="50" step="1" required><span>клеток</span></div>
+            <label for="board-width-input" data-i18n="settings.width">Ширина</label>
+            <div class="number-control"><input id="board-width-input" aria-describedby="board-width-error" type="number" inputmode="numeric" min="10" max="50" step="1" required><span data-i18n="settings.cells">клеток</span></div>
             <span id="board-width-error" class="field-tooltip" role="tooltip" hidden></span>
           </div>
           <span class="dimension-separator" aria-hidden="true">×</span>
           <div class="settings-field">
-            <label for="board-height-input">Высота</label>
-            <div class="number-control"><input id="board-height-input" aria-describedby="board-height-error" type="number" inputmode="numeric" min="10" max="50" step="1" required><span>клеток</span></div>
+            <label for="board-height-input" data-i18n="settings.height">Высота</label>
+            <div class="number-control"><input id="board-height-input" aria-describedby="board-height-error" type="number" inputmode="numeric" min="10" max="50" step="1" required><span data-i18n="settings.cells">клеток</span></div>
             <span id="board-height-error" class="field-tooltip" role="tooltip" hidden></span>
           </div>
         </div>
         <div class="settings-field settings-pieces-field">
-          <label for="pieces-per-turn-input">Фигур за ход</label>
+          <label for="pieces-per-turn-input" data-i18n="settings.pieces">Фигур за ход</label>
           <div class="number-control"><input id="pieces-per-turn-input" aria-describedby="pieces-per-turn-error" type="number" inputmode="numeric" min="1" max="250" step="1" required><span id="pieces-max-hint">до 22 фигур (1/10 поля)</span></div>
           <span id="pieces-per-turn-error" class="field-tooltip" role="tooltip" hidden></span>
         </div>
-        <div class="settings-section-title">Контроль времени</div>
+        <div class="settings-section-title" data-i18n="settings.time">Контроль времени</div>
         <div class="settings-time-control">
           <div class="settings-field">
-            <label for="clock-minutes-input">Время каждому игроку</label>
-            <div class="number-control"><input id="clock-minutes-input" aria-describedby="clock-minutes-error" type="number" inputmode="numeric" min="1" max="60" step="1" required><span>минут</span></div>
+            <label for="clock-minutes-input" data-i18n="settings.each">Время каждому игроку</label>
+            <div class="number-control"><input id="clock-minutes-input" aria-describedby="clock-minutes-error" type="number" inputmode="numeric" min="1" max="60" step="1" required><span data-i18n="settings.minutes">минут</span></div>
             <span id="clock-minutes-error" class="field-tooltip" role="tooltip" hidden></span>
           </div>
           <div class="settings-field">
-            <label for="clock-increment-input">Добавка за полный ход</label>
-            <div class="number-control"><input id="clock-increment-input" aria-describedby="clock-increment-error" type="number" inputmode="numeric" min="0" max="60" step="1" required><span>секунд</span></div>
+            <label for="clock-increment-input" data-i18n="settings.increment">Добавка за полный ход</label>
+            <div class="number-control"><input id="clock-increment-input" aria-describedby="clock-increment-error" type="number" inputmode="numeric" min="0" max="60" step="1" required><span data-i18n="settings.seconds">секунд</span></div>
             <span id="clock-increment-error" class="field-tooltip" role="tooltip" hidden></span>
           </div>
         </div>
         <label class="toggle-row" for="random-events-toggle">
-          <span class="toggle-copy"><strong>Случайные события на карте</strong><small>Предметы и способности появляются во время партии</small></span>
-          <input id="random-events-toggle" class="switch-input" type="checkbox" role="switch">
+          <span class="toggle-copy"><strong data-i18n="settings.random">Случайные события на карте</strong><small data-i18n="settings.randomHelp">Предметы и способности появляются во время партии</small></span>
+          <input id="random-events-toggle" class="switch-input" type="checkbox" role="switch" checked>
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
+        <label class="toggle-row" for="animations-toggle">
+          <span class="toggle-copy"><strong data-i18n="settings.animations">Игровые анимации</strong><small data-i18n="settings.animationsHelp">Лёгкий вирусный эффект при постановке фигур; отключите, чтобы снизить нагрузку</small></span>
+          <input id="animations-toggle" class="switch-input" type="checkbox" role="switch" checked>
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>
         <label class="toggle-row time-toggle-row" for="unlimited-time-toggle">
-          <span class="toggle-copy"><strong>Без ограничения по времени</strong><small id="time-limit-hint">Часы идут во время хода каждого игрока</small></span>
+          <span class="toggle-copy"><strong data-i18n="settings.unlimited">Без ограничения по времени</strong><small id="time-limit-hint">Часы идут во время хода каждого игрока</small></span>
           <input id="unlimited-time-toggle" class="switch-input" type="checkbox" role="switch">
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>
         <label class="toggle-row" for="free-start-toggle">
-          <span class="toggle-copy"><strong>Свободное расположение в начале партии</strong><small id="free-start-hint">Игроки тайно выбирают стартовые клетки</small></span>
+          <span class="toggle-copy"><strong data-i18n="settings.freeStart">Свободное расположение в начале партии</strong><small id="free-start-hint">Игроки тайно выбирают стартовые клетки</small></span>
           <input id="free-start-toggle" class="switch-input" type="checkbox" role="switch" checked>
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>
+        <label class="toggle-row admin-mode-toggle" for="admin-mode-toggle">
+          <span class="toggle-copy"><strong data-i18n="settings.admin">Режим администратора</strong><small data-i18n="settings.adminHelp">Открывает все предметы обоим локальным игрокам для проверки</small></span>
+          <input id="admin-mode-toggle" class="switch-input" type="checkbox" role="switch">
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
         <div class="settings-actions">
-          <button id="settings-cancel" class="button button-secondary" type="button">Отмена</button>
-          <button class="button button-primary" type="submit">Применить</button>
+          <button id="settings-cancel" class="button button-secondary" type="button" data-i18n="settings.cancel">Отмена</button>
+          <button class="button button-primary" type="submit" data-i18n="settings.apply">Применить</button>
         </div>
       </form>
     </section>
   </dialog>
+  <dialog id="rules-modal" class="rules-modal" aria-labelledby="rules-title">
+    <section class="rules-dialog-card">
+      <header class="rules-dialog-header">
+        <div><p class="eyebrow" data-i18n="rules.playerCard">Памятка игрока</p><h2 id="rules-title" data-i18n="rules.title">Правила игры</h2></div>
+        <button id="rules-close" class="icon-button" type="button" aria-label="Закрыть правила" data-i18n-aria-label="rules.close">×</button>
+      </header>
+      <nav class="rules-nav" aria-label="Разделы правил" data-i18n-aria-label="rules.nav">
+        <a href="#rules-basics" data-i18n="rules.party">Партия</a><a href="#rules-contact" data-i18n="rules.contactTab">Контакт</a><a href="#rules-items" data-i18n="rules.itemsTab">Предметы</a><a href="#rules-victory" data-i18n="rules.winTab">Победа</a>
+      </nav>
+      <div class="rules-dialog-body">
+        <section id="rules-basics" class="rules-section">
+          <p class="rules-kicker" data-i18n="rules.section1">01 · Ход и размещение</p><h3 data-i18n="rules.build">Построй свою цепочку</h3>
+          <ul class="rules-facts"><li data-i18n="rules.first">Первым ходит X. Игроки ходят по очереди.</li><li data-i18n="rules.place">За ход нужно разместить заданное в настройках число фигур. Каждая новая фигура должна касаться своей цепочки по стороне или диагонали.</li><li data-i18n="rules.hidden">Если свободное начало включено, игроки тайно выбирают стартовые клетки. Совпадение позиций приводит к повторному выбору; после третьего совпадения старт назначается в противоположных углах.</li><li data-i18n="rules.corners">При фиксированном начале игроки стартуют в противоположных углах поля.</li></ul>
+        </section>
+        <section id="rules-contact" class="rules-section">
+          <p class="rules-kicker" data-i18n="rules.section2">02 · Контакт и цепная реакция</p><h3 data-i18n="rules.touch">Касание меняет поле</h3>
+          <div class="rules-contact-example"><span class="mini-piece mini-x">X</span><span class="mini-arrow">→</span><span class="mini-piece mini-o">O</span><span class="mini-piece mini-block">×</span><p data-i18n="rules.contact">Когда новая фигура касается фигур соперника, уничтожается соприкоснувшаяся фигура соперника и только первый слой соседних с ней фигур. Ваша фигура-инициатор остаётся.</p></div>
+          <p data-i18n="rules.multiple">Если касаний несколько одновременно, реакция начинается с фигур соперника, расположенных по горизонтали или вертикали. Клетки уничтоженных фигур становятся недоступными.</p>
+        </section>
+        <section id="rules-items" class="rules-section">
+          <p class="rules-kicker" data-i18n="rules.section3">03 · Предметы и способности</p><h3 data-i18n="rules.events">Случайные события</h3>
+          <p class="rules-intro" data-i18n="rules.pickup">Если случайные события включены, предметы появляются на пустых клетках. Поставьте на такую клетку фигуру, чтобы подобрать предмет. В инвентаре помещается до трёх предметов; новый заменяет самый старый.</p>
+          <div class="rules-item-grid">
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/bomb.svg" alt=""><div><h4 data-i18n="rules.item.bomb">Бомба</h4><p data-i18n="rules.desc.bomb">В свой ход выберите верхний левый угол области 2×2. Все клетки области освобождаются и снова доступны.</p></div><img class="rules-example-image" src="/ui/assets/rules/bomb.svg" alt="Схема: красная область 2 на 2 очищается бомбой" data-i18n-alt="rules.alt.bomb"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/point-destroy.svg" alt=""><div><h4 data-i18n="rules.item.pointDestroy">Точечное уничтожение</h4><p data-i18n="rules.desc.pointDestroy">В свой ход выберите одну клетку: фигура, предмет или обломок на ней будут уничтожены, а клетка освободится. Эффект сопровождается короткой вспышкой и тряской.</p></div><img class="rules-example-image" src="/ui/assets/rules/point-destroy.svg" alt="Схема: белая вспышка точечно очищает одну клетку" data-i18n-alt="rules.alt.pointDestroy"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/free-placement.svg" alt=""><div><h4 data-i18n="rules.item.freePlacement">Свободное расположение</h4><p data-i18n="rules.desc.freePlacement">Даёт поставить одну фигуру на любую свободную клетку. Фигура не заменяет размещение по обычному счётчику.</p></div><img class="rules-example-image" src="/ui/assets/rules/free-placement.svg" alt="Схема: фигура ставится вдали от цепочки" data-i18n-alt="rules.alt.freePlacement"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/extra-turn.svg" alt=""><div><h4 data-i18n="rules.item.extraTurn">Дополнительный ход</h4><p data-i18n="rules.desc.extraTurn">При подборе немедленно запускает ещё один полный ход. Предмет срабатывает автоматически.</p></div><img class="rules-example-image" src="/ui/assets/rules/extra-turn.svg" alt="Схема: после хода игрок сразу получает следующий" data-i18n-alt="rules.alt.extraTurn"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/anti-bomb.svg" alt=""><div><h4 data-i18n="rules.item.antiBomb">Анти-бомба</h4><p data-i18n="rules.desc.antiBomb">В свой ход загрязняет область 2×2: фигуры уничтожаются, а все четыре клетки становятся мёртвыми.</p></div><img class="rules-example-image" src="/ui/assets/rules/anti-bomb.svg" alt="Схема: оранжевая область 2 на 2 блокируется" data-i18n-alt="rules.alt.antiBomb"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/debris.svg" alt=""><div><h4 data-i18n="rules.item.debris">Призыв обломков</h4><p data-i18n="rules.desc.debris">Выберите три свободные клетки. Они блокируются, ход не тратится. Нельзя выбрать мёртвые клетки; клетку с предметом выбрать можно, и предмет будет погребён.</p></div><img class="rules-example-image" src="/ui/assets/rules/debris.svg" alt="Схема: обломки блокируют три клетки, включая клетку с предметом" data-i18n-alt="rules.alt.debris"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/shield.svg" alt=""><div><h4 data-i18n="rules.item.shield">Щит</h4><p data-i18n="rules.desc.shield">Защитите любые три свои или вражеские фигуры либо пустые клетки. Защита действует до начала вашего следующего хода. Пустую защищённую клетку может занять только владелец щита.</p></div><img class="rules-example-image" src="/ui/assets/rules/shield.svg" alt="Три фигуры X защищены одноразовыми щитами; щит не даёт уничтожить фигуру при касании O" data-i18n-alt="rules.alt.shield"></article>
+            <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/gangsta-shield.svg" alt=""><div><h4 data-i18n="rules.item.gangstaShield">Генгста-Щит</h4><p data-i18n="rules.desc.gangstaShield">Защитите любую свою или вражескую фигуру либо пустую клетку до конца партии. Пустую защищённую клетку может занять только владелец щита.</p></div><img class="rules-example-image" src="/ui/assets/rules/gangsta-shield.svg" alt="Фигура X с Генгста-Щитом выдерживает касание O" data-i18n-alt="rules.alt.gangstaShield"></article>
+          </div>
+          <p class="rules-note" data-i18n="rules.ignore">Щиты защищают от касаний фигур. Бомба и анти-бомба игнорируют защиту и действуют на клетки под щитом.</p>
+        </section>
+        <section id="rules-victory" class="rules-section rules-victory">
+          <p class="rules-kicker" data-i18n="rules.section4">04 · Конец партии</p><h3 data-i18n="rules.winner">Побеждает тот, кто может продолжать</h3>
+          <p data-i18n="rules.victory">Если игрок не может завершить ход, разместив все фигуры по правилам, он проигрывает. Можно также сдаться или играть с таймером: при окончании времени побеждает соперник.</p>
+        </section>
+      </div>
+    </section>
+  </dialog>
   <dialog id="resign-confirm-modal" class="resign-confirm-modal" aria-labelledby="resign-confirm-title" aria-describedby="resign-confirm-description">
     <section class="resign-confirm-card">
-      <p class="eyebrow resign-confirm-eyebrow">Подтверждение</p>
-      <h2 id="resign-confirm-title">Сдаться?</h2>
-      <p id="resign-confirm-description">Партия завершится, победа будет присуждена сопернику.</p>
+      <p class="eyebrow resign-confirm-eyebrow" data-i18n="dialog.confirm">Подтверждение</p>
+      <h2 id="resign-confirm-title" data-i18n="dialog.resignTitle">Сдаться?</h2>
+      <p id="resign-confirm-description" data-i18n="dialog.resignText">Партия завершится, победа будет присуждена сопернику.</p>
       <div class="resign-confirm-actions">
-        <button id="resign-cancel" class="button button-secondary" type="button">Продолжить партию</button>
-        <button id="resign-confirm" class="button button-resign" type="button">Сдаться</button>
+        <button id="resign-cancel" class="button button-secondary" type="button" data-i18n="dialog.continue">Продолжить партию</button>
+        <button id="resign-confirm" class="button button-resign" type="button" data-i18n="resign">Сдаться</button>
       </div>
     </section>
   </dialog>
   <dialog id="result-modal" class="result-modal" aria-labelledby="result-title" aria-describedby="result-description">
     <section class="result-card">
-      <p class="eyebrow result-eyebrow">Партия завершена</p>
+      <p class="eyebrow result-eyebrow" data-i18n="dialog.result">Партия завершена</p>
       <div class="result-emblem" aria-hidden="true">✦</div>
-      <h2 id="result-title" class="result-title">Победа!</h2>
+      <h2 id="result-title" class="result-title" data-i18n="dialog.winDefault">Победа!</h2>
       <p id="result-description" class="result-description"></p>
       <p id="result-roast" class="result-roast"></p>
-      <button id="result-new-game" class="button button-primary" type="button">Начать новую партию</button>
+      <button id="result-new-game" class="button button-primary" type="button" data-i18n="dialog.newGame">Начать новую партию</button>
     </section>
   </dialog>
-  <script type="module" src="/ui/script.js"></script>
+  <script type="module" src="/ui/script.js?v=20261017-i18n2"></script>
 </body>
 </html>
