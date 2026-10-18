@@ -23,8 +23,9 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=20261017-i18n2";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261017-i18n2";
+} from "./game.js?v=20261018-menu2";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261018-menu12";
+import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 
 const boardElement = document.querySelector(".game-board");
 const boardShell = document.querySelector(".board-shell");
@@ -42,8 +43,33 @@ const turnPlayerLabel = document.querySelector("#turn-player-label");
 const turnProgressBar = turnProgress.querySelector('[role="progressbar"]');
 const startButton = document.querySelector("#start-button");
 const languageSelect = document.querySelector("#language-select");
+const mainMenuScreen = document.querySelector("#main-menu-screen");
+const gameScreen = document.querySelector("#game-screen");
+const localGameButton = document.querySelector("#local-game-button");
+const trainingButton = document.querySelector("#training-mode-button");
+const returnMenuButton = document.querySelector("#return-menu-button");
+const menuSettingsButton = document.querySelector("#menu-settings-button");
+const menuSettingsModal = document.querySelector("#menu-settings-modal");
+const menuSettingsCloseButton = document.querySelector("#menu-settings-close");
+const menuSettingsDoneButton = document.querySelector("#menu-settings-done");
+const menuAnimationsToggle = document.querySelector("#menu-animations-toggle");
+const menuNotice = document.querySelector("#menu-notice");
+const accountActionButton = document.querySelector("#account-action");
+const menuCanvas = document.querySelector("#menu-ambient");
+const menuCanvasContext = menuCanvas.getContext("2d");
+const menuDuelCanvas = document.querySelector("#menu-duel");
+const menuDuelContext = menuDuelCanvas.getContext("2d");
 const sideTitle = document.querySelector("#side-title");
 const sideDescription = document.querySelector("#side-description");
+const pageTitle = document.querySelector("#page-title");
+const tutorialPanel = document.querySelector("#tutorial-panel");
+const tutorialStep = document.querySelector("#tutorial-step");
+const tutorialProgressFill = document.querySelector("#tutorial-progress-fill");
+const tutorialTitle = document.querySelector("#tutorial-title");
+const tutorialDescription = document.querySelector("#tutorial-description");
+const tutorialHint = document.querySelector("#tutorial-hint");
+const tutorialAction = document.querySelector("#tutorial-action");
+const clockHeading = document.querySelector(".clock-card > .eyebrow");
 const currentTurnCard = document.querySelector("#current-turn-card");
 const privacyNote = document.querySelector("#privacy-note");
 const turnRule = document.querySelector("#rules-turn-count");
@@ -70,6 +96,7 @@ const randomEventsToggle = document.querySelector("#random-events-toggle");
 const adminModeToggle = document.querySelector("#admin-mode-toggle");
 const adminTools = document.querySelector("#admin-tools");
 const adminItemList = document.querySelector("#admin-item-list");
+const adminHelp = document.querySelector("#admin-help");
 const animationsToggle = document.querySelector("#animations-toggle");
 const timeLimitHint = document.querySelector("#time-limit-hint");
 const timeControlFields = document.querySelector(".settings-time-control");
@@ -122,7 +149,40 @@ let bombAimCell = null;
 let clockRemaining = { X: settings.clockMinutes * 60_000, O: settings.clockMinutes * 60_000 };
 let clockInterval = null;
 let clockLastTick = null;
+let menuNoticeTimeout = null;
+let menuNoticeTranslation = null;
+let menuAnimationFrame = null;
+let menuAnimationLastFrame = 0;
+let ambientNodes = [];
+let duelPositions = { X: null, O: null };
+let duelDragPlayer = null;
+let duelLastTime = 0;
+let duelPhysicsLastTime = null;
+let duelDragPoint = null;
+let duelDragTarget = null;
+let duelDragAngle = 0;
+let ambientDragNode = null;
+let ambientDragPoint = null;
+let ambientDragTarget = null;
+let menuDragFrame = null;
+let menuDragLastTime = null;
+let trainingSession = null;
+let trainingSavedSettings = null;
+const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
+
+function scheduleMenuDragRender() {
+  const continuousAnimation = settings.animationsEnabled && !reduceMotionQuery.matches && menuAnimationFrame !== null;
+  if (continuousAnimation || menuDragFrame !== null) return;
+  menuDragFrame = requestAnimationFrame((timestamp) => {
+    menuDragFrame = null;
+    const elapsed = menuDragLastTime === null ? 0 : Math.min(50, timestamp - menuDragLastTime);
+    menuDragLastTime = timestamp;
+    if (ambientDragNode) advanceAmbientNodes(elapsed, timestamp);
+    drawMenuAmbient();
+    drawDuelScene(timestamp);
+  });
+}
 
 function formatClock(milliseconds) {
   const remaining = Math.max(0, milliseconds);
@@ -181,11 +241,12 @@ function renderInventories() {
         : item.type === "freePlacement" ? t("inventory.freeHelp") : t("inventory.useHelp"));
     });
   }
-  const canUseAdminTools = state.phase === "playing"
-    && hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM);
-  adminTools.hidden = !canUseAdminTools;
+  const hasAdminItemPermission = hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM);
+  const adminToolsReady = state.phase === "playing";
+  adminTools.hidden = !hasAdminItemPermission;
+  adminHelp.textContent = t(adminToolsReady ? "admin.help" : "admin.waiting");
   adminItemList.replaceChildren();
-  if (canUseAdminTools) {
+  if (hasAdminItemPermission) {
     for (const type of EVENT_ITEMS) {
       const definition = EVENT_ITEM_DEFINITIONS[type];
       const itemId = "admin:" + type;
@@ -193,9 +254,9 @@ function renderInventories() {
       button.type = "button";
       button.className = "admin-item-button" + (state.selectedAbility === itemId ? " is-selected" : "");
       button.dataset.itemId = itemId;
-      button.disabled = false;
+      button.disabled = !adminToolsReady;
       const itemName = t(definition.nameKey);
-      button.title = t("admin.item", { name: itemName });
+      button.title = t(adminToolsReady ? "admin.item" : "admin.itemWaiting", { name: itemName });
       const icon = document.createElement("img");
       icon.src = definition.icon;
       icon.alt = "";
@@ -295,6 +356,716 @@ function syncBoardGeometry() {
   sideAxis.style.marginTop = ((Number.parseFloat(boardStyle.borderTopWidth) || 0) + (Number.parseFloat(boardStyle.paddingTop) || 0)) + "px";
   sideAxis.style.marginBottom = sideAxis.style.marginTop;
   boardElement.setAttribute("aria-label", t("game.boardSize", { width, height }));
+}
+
+function drawMenuAmbient() {
+  if (!menuCanvasContext) return;
+  const { width, height } = menuCanvas;
+  menuCanvasContext.clearRect(0, 0, width, height);
+  for (let index = 0; index < ambientNodes.length; index += 1) {
+    const node = ambientNodes[index];
+    for (let otherIndex = index + 1; otherIndex < ambientNodes.length; otherIndex += 1) {
+      const other = ambientNodes[otherIndex];
+      const dx = node.x - other.x;
+      const dy = node.y - other.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > 178) continue;
+      const opacity = (1 - distance / 178) * 0.27;
+      menuCanvasContext.beginPath();
+      menuCanvasContext.moveTo(node.x, node.y);
+      menuCanvasContext.lineTo(other.x, other.y);
+      menuCanvasContext.strokeStyle = `rgba(133, 194, 164, ${opacity})`;
+      menuCanvasContext.lineWidth = 0.65;
+      menuCanvasContext.stroke();
+    }
+    menuCanvasContext.beginPath();
+    menuCanvasContext.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+    menuCanvasContext.fillStyle = node.tone === 0 ? "rgba(210,255,133,.7)" : "rgba(112,255,221,.62)";
+    menuCanvasContext.fill();
+  }
+}
+
+function advanceAmbientNodes(elapsed, time) {
+  if (!elapsed) return;
+  const seconds = elapsed / 1000;
+  for (const node of ambientNodes) {
+    if (node === ambientDragNode) {
+      const follow = Math.min(1, elapsed * 0.012);
+      node.x += (ambientDragTarget.x - node.x) * follow;
+      node.y += (ambientDragTarget.y - node.y) * follow;
+      continue;
+    }
+    node.vx += Math.sin(time * 0.00022 + node.phase) * 0.008 * seconds;
+    node.vy += Math.cos(time * 0.00019 + node.phase * 1.7) * 0.008 * seconds;
+    node.vx += (node.flowVx - node.vx) * Math.min(1, seconds * 0.18);
+    node.vy += (node.flowVy - node.vy) * Math.min(1, seconds * 0.18);
+    node.vx = Math.max(-0.06, Math.min(0.06, node.vx));
+    node.vy = Math.max(-0.06, Math.min(0.06, node.vy));
+    node.x += node.vx * elapsed;
+    node.y += node.vy * elapsed;
+    if (node.x < -12) node.x = menuCanvas.clientWidth + 12;
+    if (node.x > menuCanvas.clientWidth + 12) node.x = -12;
+    if (node.y < -12) node.y = menuCanvas.clientHeight + 12;
+    if (node.y > menuCanvas.clientHeight + 12) node.y = -12;
+  }
+}
+
+function findAmbientNode(point, threshold = 24) {
+  let closest = null;
+  let closestDistance = threshold;
+  for (const node of ambientNodes) {
+    const distance = Math.hypot(point.x - node.x, point.y - node.y);
+    if (distance < closestDistance) {
+      closest = node;
+      closestDistance = distance;
+    }
+  }
+  return closest;
+}
+
+menuCanvas.addEventListener("pointerdown", (event) => {
+  if (mainMenuScreen.hidden) return;
+  const rect = menuCanvas.getBoundingClientRect();
+  const node = findAmbientNode({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  if (!node) return;
+  ambientDragNode = node;
+  ambientDragTarget = { x: node.x, y: node.y };
+  ambientDragPoint = { x: event.clientX, y: event.clientY, time: event.timeStamp,
+    offsetX: node.x - (event.clientX - rect.left), offsetY: node.y - (event.clientY - rect.top) };
+  menuCanvas.setPointerCapture(event.pointerId);
+  menuCanvas.classList.add("is-dragging");
+  event.preventDefault();
+});
+menuCanvas.addEventListener("pointermove", (event) => {
+  if (!ambientDragNode) return;
+  const rect = menuCanvas.getBoundingClientRect();
+  const elapsed = Math.max(1, event.timeStamp - ambientDragPoint.time);
+  const dx = event.clientX - ambientDragPoint.x;
+  const dy = event.clientY - ambientDragPoint.y;
+  const padding = ambientDragNode.radius + 1;
+  ambientDragTarget.x = Math.max(padding, Math.min(rect.width - padding, event.clientX - rect.left + ambientDragPoint.offsetX));
+  ambientDragTarget.y = Math.max(padding, Math.min(rect.height - padding, event.clientY - rect.top + ambientDragPoint.offsetY));
+  ambientDragNode.vx = dx / elapsed;
+  ambientDragNode.vy = dy / elapsed;
+  ambientDragPoint = { ...ambientDragPoint, x: event.clientX, y: event.clientY, time: event.timeStamp };
+  scheduleMenuDragRender();
+});
+const endAmbientDrag = () => {
+  if (ambientDragNode && ambientDragTarget) {
+    ambientDragNode.vx += (ambientDragTarget.x - ambientDragNode.x) * 0.008;
+    ambientDragNode.vy += (ambientDragTarget.y - ambientDragNode.y) * 0.008;
+  }
+  ambientDragNode = null;
+  ambientDragPoint = null;
+  ambientDragTarget = null;
+  menuCanvas.classList.remove("is-dragging");
+};
+menuCanvas.addEventListener("pointerup", endAmbientDrag);
+menuCanvas.addEventListener("pointercancel", endAmbientDrag);
+
+function drawVirusSystem(context, x, y, radius, color, time, phase, drag = null) {
+  const pulse = 1 + Math.sin(time * 0.0012 + phase) * 0.035;
+  const size = radius * pulse;
+  const colorLight = color === "x" ? "rgba(202,255,129," : "rgba(255,153,133,";
+  const glow = context.createRadialGradient(x, y, size * 0.2, x, y, size * 1.85);
+  glow.addColorStop(0, colorLight + "0.22)");
+  glow.addColorStop(0.52, colorLight + "0.08)");
+  glow.addColorStop(1, colorLight + "0)");
+  context.fillStyle = glow;
+  context.beginPath();
+  context.arc(x, y, size * 1.85, 0, Math.PI * 2);
+  context.fill();
+
+  context.save();
+  context.translate(x, y);
+  if (drag?.active) {
+    context.rotate(drag.angle + Math.sin(time * 0.0012 + phase) * 0.018);
+    const stretch = Math.min(1, drag.tension * 5);
+    context.scale(1 + stretch * 0.22, 1 - stretch * 0.1 + Math.sin(time * 0.001 + phase) * 0.006);
+  } else {
+    context.rotate(time * 0.00006 * (color === "x" ? 1 : -1) + phase);
+  }
+  const spikeCount = 15;
+  context.lineWidth = 2;
+  context.strokeStyle = color === "x" ? "rgba(203,255,133,.85)" : "rgba(255,167,148,.82)";
+  for (let index = 0; index < spikeCount; index += 1) {
+    const angle = (Math.PI * 2 * index) / spikeCount;
+    const innerRadius = size * 0.77;
+    const outerRadius = size * (1.03 + 0.11 * Math.sin(index * 2.17 + phase));
+    context.beginPath();
+    context.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+    context.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+    context.stroke();
+    context.beginPath();
+    context.arc(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius, 2.1, 0, Math.PI * 2);
+    context.fillStyle = color === "x" ? "rgba(218,255,171,.9)" : "rgba(255,191,173,.9)";
+    context.fill();
+  }
+
+  context.beginPath();
+  for (let index = 0; index <= 60; index += 1) {
+    const angle = (Math.PI * 2 * index) / 60;
+    const irregularity = 1 + 0.055 * Math.sin(angle * 5 + phase) + 0.035 * Math.cos(angle * 8 - phase);
+    const edgeRadius = size * 0.78 * irregularity;
+    const px = Math.cos(angle) * edgeRadius;
+    const py = Math.sin(angle) * edgeRadius;
+    if (index === 0) context.moveTo(px, py);
+    else context.lineTo(px, py);
+  }
+  context.closePath();
+  context.fillStyle = color === "x" ? "rgba(47,75,46,.95)" : "rgba(83,49,45,.96)";
+  context.fill();
+  context.lineWidth = 2;
+  context.strokeStyle = color === "x" ? "rgba(203,255,133,.88)" : "rgba(255,167,148,.84)";
+  context.stroke();
+
+  const core = context.createRadialGradient(-size * 0.25, -size * 0.28, size * 0.04, 0, 0, size * 0.68);
+  if (color === "x") {
+    core.addColorStop(0, "rgba(223,255,180,.92)");
+    core.addColorStop(0.34, "rgba(158,220,91,.68)");
+    core.addColorStop(1, "rgba(84,135,70,.12)");
+  } else {
+    core.addColorStop(0, "rgba(255,222,196,.9)");
+    core.addColorStop(0.35, "rgba(244,128,105,.68)");
+    core.addColorStop(1, "rgba(158,76,66,.13)");
+  }
+  context.beginPath();
+  context.arc(0, 0, size * 0.66, 0, Math.PI * 2);
+  context.fillStyle = core;
+  context.fill();
+  for (let index = 0; index < 5; index += 1) {
+    const angle = index * 2.399 + phase;
+    const organelleX = Math.cos(angle) * size * (0.18 + (index % 2) * 0.2);
+    const organelleY = Math.sin(angle) * size * (0.16 + (index % 3) * 0.12);
+    context.beginPath();
+    context.ellipse(organelleX, organelleY, size * 0.07, size * 0.045, angle, 0, Math.PI * 2);
+    context.fillStyle = color === "x" ? "rgba(232,255,190,.64)" : "rgba(255,214,195,.58)";
+    context.fill();
+  }
+  context.restore();
+}
+
+function drawDuelScene(time = 0) {
+  if (!menuDuelContext) return;
+  const width = menuDuelCanvas.clientWidth;
+  const height = menuDuelCanvas.clientHeight;
+  menuDuelContext.clearRect(0, 0, width, height);
+  const scale = Math.min(width / 500, height / 330, 1.15);
+  const radius = Math.max(35, 51 * scale);
+  duelLastTime = time;
+  const drift = Math.sin(time * 0.00025);
+  const defaults = {
+    X: { x: 0.275 + drift * 11 * scale / width, y: 0.49 + Math.sin(time * 0.00038) * 8 * scale / height },
+    O: { x: 0.725 - drift * 11 * scale / width, y: 0.51 - Math.sin(time * 0.00034 + 1.2) * 8 * scale / height }
+  };
+  const elapsed = duelPhysicsLastTime === null ? 0 : Math.min(0.06, Math.max(0, time - duelPhysicsLastTime) / 1000);
+  duelPhysicsLastTime = time;
+  for (const [player, fallback] of Object.entries(defaults)) {
+    if (!duelPositions[player]) {
+      duelPositions[player] = { ...fallback, vx: 0, vy: 0, phase: player === "X" ? 0.4 : 2.1 };
+      continue;
+    }
+    const body = duelPositions[player];
+    if (elapsed > 0 && duelDragPlayer === player && duelDragTarget) {
+      const follow = 1 - Math.exp(-elapsed * 7.5);
+      body.x += (duelDragTarget.x - body.x) * follow;
+      body.y += (duelDragTarget.y - body.y) * follow;
+    } else if (elapsed > 0) {
+      body.vx += Math.sin(time * 0.00043 + body.phase) * 0.018 * elapsed;
+      body.vy += Math.cos(time * 0.00037 + body.phase * 1.3) * 0.018 * elapsed;
+      const damping = Math.pow(0.91, elapsed);
+      body.vx *= damping;
+      body.vy *= damping;
+      body.x += body.vx * elapsed;
+      body.y += body.vy * elapsed;
+    }
+    const constrained = constrainDuelPosition(body.x, body.y, width, height, radius);
+    if (constrained.x !== body.x || constrained.y !== body.y) {
+      body.vx *= -0.72;
+      body.vy *= -0.72;
+      body.x = constrained.x;
+      body.y = constrained.y;
+    }
+  }
+  const left = { x: duelPositions.X.x * width, y: duelPositions.X.y * height };
+  const right = { x: duelPositions.O.x * width, y: duelPositions.O.y * height };
+  const contactX = width * 0.5;
+  const contactY = height * 0.5;
+
+  const centralGlow = menuDuelContext.createRadialGradient(contactX, contactY, 0, contactX, contactY, radius * 2.8);
+  centralGlow.addColorStop(0, "rgba(219,243,210,.13)");
+  centralGlow.addColorStop(1, "rgba(219,243,210,0)");
+  menuDuelContext.fillStyle = centralGlow;
+  menuDuelContext.fillRect(contactX - radius * 2.8, contactY - radius * 2.8, radius * 5.6, radius * 5.6);
+
+  const drawStrands = (origin, direction, color, phase) => {
+    for (let index = 0; index < 4; index += 1) {
+      const offset = (index - 1.5) * radius * 0.46;
+      const startX = origin.x + direction * radius * 0.67;
+      const startY = origin.y + offset * 0.65;
+      const endX = contactX - direction * (5 + (index % 2) * 5);
+      const endY = contactY + offset * 0.43;
+      const controlX = startX + (endX - startX) * 0.56;
+      const controlY = (startY + endY) / 2 + Math.sin(time * 0.0006 + phase + index) * 17 * scale;
+      menuDuelContext.beginPath();
+      menuDuelContext.moveTo(startX, startY);
+      menuDuelContext.quadraticCurveTo(controlX, controlY, endX, endY);
+      menuDuelContext.lineWidth = (index === 1 || index === 2 ? 2.4 : 1.35) * scale;
+      menuDuelContext.strokeStyle = color === "x" ? "rgba(197,255,127,.48)" : "rgba(255,151,131,.45)";
+      menuDuelContext.stroke();
+
+      const progress = (time * 0.00012 + index * 0.21 + phase) % 1;
+      const inverse = 1 - progress;
+      const pulseX = inverse * inverse * startX + 2 * inverse * progress * controlX + progress * progress * endX;
+      const pulseY = inverse * inverse * startY + 2 * inverse * progress * controlY + progress * progress * endY;
+      menuDuelContext.beginPath();
+      menuDuelContext.arc(pulseX, pulseY, (2 + (index % 2)) * scale, 0, Math.PI * 2);
+      menuDuelContext.fillStyle = color === "x" ? "rgba(221,255,173,.95)" : "rgba(255,203,184,.92)";
+      menuDuelContext.fill();
+    }
+  };
+  drawStrands(left, 1, "x", 0.2);
+  drawStrands(right, -1, "o", 0.65);
+
+  const fieldPulse = 0.5 + 0.5 * Math.sin(time * 0.00135);
+  menuDuelContext.beginPath();
+  menuDuelContext.moveTo(contactX, contactY - radius * 1.5);
+  menuDuelContext.quadraticCurveTo(contactX + Math.sin(time * 0.0008) * 5, contactY, contactX, contactY + radius * 1.5);
+  menuDuelContext.lineWidth = 1.5 + fieldPulse * 1.4;
+  menuDuelContext.strokeStyle = `rgba(231,255,235,${0.2 + fieldPulse * 0.28})`;
+  menuDuelContext.shadowColor = "rgba(217,255,224,.7)";
+  menuDuelContext.shadowBlur = (9 + fieldPulse * 13) * scale;
+  menuDuelContext.stroke();
+  menuDuelContext.shadowBlur = 0;
+
+  const pulsePhase = (time % 2300) / 2300;
+  for (let index = 0; index < 2; index += 1) {
+    const progress = (pulsePhase + index * 0.5) % 1;
+    menuDuelContext.beginPath();
+    menuDuelContext.arc(contactX, contactY, (8 + progress * radius * 0.74) * scale, 0, Math.PI * 2);
+    menuDuelContext.lineWidth = 1.2 * scale;
+    menuDuelContext.strokeStyle = `rgba(224,247,228,${(1 - progress) * 0.24})`;
+    menuDuelContext.stroke();
+  }
+
+  const dragState = (player) => {
+    const body = duelPositions[player];
+    const tension = duelDragPlayer === player && duelDragTarget
+      ? Math.hypot(duelDragTarget.x - body.x, duelDragTarget.y - body.y)
+      : 0;
+    return { active: duelDragPlayer === player, tension, angle: duelDragAngle };
+  };
+  drawVirusSystem(menuDuelContext, left.x, left.y, radius, "x", time, 0.2, dragState("X"));
+  drawVirusSystem(menuDuelContext, right.x, right.y, radius, "o", time, 1.15, dragState("O"));
+  drawSymbioticBacteria(menuDuelContext, contactX, contactY, radius * 0.58, time);
+}
+
+function constrainDuelPosition(x, y, width, height, radius) {
+  const padding = radius * 1.42;
+  const rx = Math.max(1, width / 2 - padding) / width;
+  const ry = Math.max(1, height / 2 - padding) / height;
+  const dx = (x - 0.5) / rx;
+  const dy = (y - 0.5) / ry;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 1) return { x, y };
+  return { x: 0.5 + dx / distance * rx, y: 0.5 + dy / distance * ry };
+}
+
+function drawSymbioticBacteria(context, x, y, radius, time) {
+  context.save();
+  context.translate(x, y);
+  const wobble = Math.sin(time * 0.0011) * radius * 0.045;
+  const drawCell = (side, phase) => {
+    context.save();
+    context.rotate(side * (0.1 + Math.sin(time * 0.00042 + phase) * 0.035));
+    context.translate(side * radius * 0.14, 0);
+    const color = side < 0 ? "#c6f36b" : "#ff917e";
+    const dark = side < 0 ? "rgba(86,126,55,.48)" : "rgba(149,73,66,.48)";
+    const tilt = side * 0.13;
+    context.rotate(tilt);
+    context.shadowColor = side < 0 ? "rgba(198,243,107,.48)" : "rgba(255,145,126,.43)";
+    context.shadowBlur = radius * 0.28;
+    context.beginPath();
+    if (side < 0) {
+      context.moveTo(radius * 0.22, -radius * 0.94);
+      context.bezierCurveTo(-radius * 0.48, -radius * 1.02, -radius * 1.03, -radius * 0.42, -radius * 0.85, radius * 0.2 + wobble);
+      context.bezierCurveTo(-radius * 0.7, radius * 0.82, -radius * 0.12, radius * 1.02, radius * 0.34, radius * 0.69);
+      context.bezierCurveTo(radius * 0.65, radius * 0.45, radius * 0.5, radius * 0.18, radius * 0.12, radius * 0.02);
+      context.bezierCurveTo(-radius * 0.24, -radius * 0.13, -radius * 0.3, -radius * 0.48, radius * 0.22, -radius * 0.94);
+    } else {
+      context.moveTo(-radius * 0.22, radius * 0.94);
+      context.bezierCurveTo(radius * 0.48, radius * 1.02, radius * 1.03, radius * 0.42, radius * 0.85, -radius * 0.2 - wobble);
+      context.bezierCurveTo(radius * 0.7, -radius * 0.82, radius * 0.12, -radius * 1.02, -radius * 0.34, -radius * 0.69);
+      context.bezierCurveTo(-radius * 0.65, -radius * 0.45, -radius * 0.5, -radius * 0.18, -radius * 0.12, -radius * 0.02);
+      context.bezierCurveTo(radius * 0.24, radius * 0.13, radius * 0.3, radius * 0.48, -radius * 0.22, radius * 0.94);
+    }
+    context.closePath();
+    context.fillStyle = side < 0 ? "rgba(44,72,43,.98)" : "rgba(79,47,45,.98)";
+    context.fill();
+    context.lineWidth = Math.max(1.4, radius * 0.045);
+    context.strokeStyle = color;
+    context.stroke();
+    context.shadowBlur = 0;
+
+    context.beginPath();
+    context.ellipse(side * radius * 0.2, -side * radius * 0.05, radius * 0.35, radius * 0.17, side * 0.55, 0, Math.PI * 2);
+    context.fillStyle = dark;
+    context.fill();
+    for (let index = 0; index < 4; index += 1) {
+      const organelleX = side * radius * (0.08 + index * 0.095);
+      const organelleY = Math.sin(time * 0.0008 + phase + index * 1.9) * radius * 0.28;
+      context.beginPath();
+      context.ellipse(organelleX, organelleY, radius * 0.042, radius * 0.022, side * 0.4, 0, Math.PI * 2);
+      context.fillStyle = color;
+      context.fill();
+    }
+    context.restore();
+  };
+  drawCell(-1, 0.3);
+  drawCell(1, 1.8);
+
+  // Waving flagella make the paired cells read as living bacteria, not a flat emblem.
+  for (let side of [-1, 1]) {
+    for (let index = 0; index < 3; index += 1) {
+      const startX = side * radius * (0.62 + index * 0.09);
+      const startY = (index - 1) * radius * 0.42;
+      const sway = Math.sin(time * 0.0012 + index * 1.8 + side) * radius * 0.18;
+      context.beginPath();
+      context.moveTo(startX, startY);
+      context.bezierCurveTo(startX + side * radius * 0.28, startY - radius * 0.18 + sway,
+        startX + side * radius * 0.44, startY + radius * 0.21 - sway,
+        startX + side * radius * 0.68, startY + sway);
+      context.lineWidth = Math.max(0.8, radius * 0.025);
+      context.strokeStyle = side < 0 ? "rgba(198,243,107,.72)" : "rgba(255,145,126,.7)";
+      context.stroke();
+    }
+  }
+
+  // A fine membrane filament loops between the two cells and gently pulses.
+  context.beginPath();
+  context.moveTo(-radius * 0.12, -radius * 0.44);
+  context.bezierCurveTo(radius * (0.48 + wobble / radius), -radius * 0.2, -radius * 0.48, radius * 0.18, radius * 0.12, radius * 0.44);
+  context.lineWidth = Math.max(0.9, radius * 0.025);
+  context.strokeStyle = `rgba(222,245,211,${0.42 + (Math.sin(time * 0.0014) + 1) * 0.12})`;
+  context.stroke();
+  context.restore();
+}
+
+function getDuelPointer(event) {
+  const rect = menuDuelCanvas.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height };
+}
+
+menuDuelCanvas.addEventListener("pointerdown", (event) => {
+  if (menuDuelCanvas.closest(".main-menu-screen").hidden) return;
+  const point = getDuelPointer(event);
+  const scale = Math.min(point.width / 500, point.height / 330, 1.15);
+  const radius = Math.max(35, 51 * scale);
+  const time = duelLastTime;
+  const drift = Math.sin(time * 0.00025);
+  const defaults = {
+    X: duelPositions.X || { x: 0.275 + drift * 11 * scale / point.width, y: 0.49 + Math.sin(time * 0.00038) * 8 * scale / point.height },
+    O: duelPositions.O || { x: 0.725 - drift * 11 * scale / point.width, y: 0.51 - Math.sin(time * 0.00034 + 1.2) * 8 * scale / point.height }
+  };
+  const candidates = ["X", "O"].map((player) => ({
+    player,
+    distance: Math.hypot(point.x - (duelPositions[player]?.x ?? defaults[player].x) * point.width,
+      point.y - (duelPositions[player]?.y ?? defaults[player].y) * point.height)
+  })).sort((a, b) => a.distance - b.distance);
+  if (candidates[0].distance > radius * 1.45) return;
+  duelDragPlayer = candidates[0].player;
+  const body = duelPositions[duelDragPlayer];
+  duelDragTarget = { x: body.x, y: body.y };
+  duelDragPoint = { x: point.x, y: point.y, time: event.timeStamp,
+    offsetX: body.x - point.x / point.width, offsetY: body.y - point.y / point.height };
+  menuDuelCanvas.setPointerCapture(event.pointerId);
+  menuDuelCanvas.classList.add("is-dragging");
+  event.preventDefault();
+});
+menuDuelCanvas.addEventListener("pointermove", (event) => {
+  if (!duelDragPlayer) return;
+  const point = getDuelPointer(event);
+  const body = duelPositions[duelDragPlayer];
+  const elapsed = Math.max(1, event.timeStamp - duelDragPoint.time) / 1000;
+  duelDragTarget = constrainDuelPosition(
+    point.x / point.width + duelDragPoint.offsetX,
+    point.y / point.height + duelDragPoint.offsetY,
+    point.width,
+    point.height,
+    Math.max(35, 51 * Math.min(point.width / 500, point.height / 330, 1.15))
+  );
+  const deltaX = point.x - duelDragPoint.x;
+  const deltaY = point.y - duelDragPoint.y;
+  body.vx = Math.max(-0.5, Math.min(0.5, deltaX / point.width / elapsed));
+  body.vy = Math.max(-0.5, Math.min(0.5, deltaY / point.height / elapsed));
+  if (Math.hypot(deltaX, deltaY) > 0.75) {
+    const targetAngle = Math.atan2(deltaY, deltaX);
+    const angleDelta = Math.atan2(Math.sin(targetAngle - duelDragAngle), Math.cos(targetAngle - duelDragAngle));
+    duelDragAngle += angleDelta * 0.16;
+  }
+  duelDragPoint = { ...duelDragPoint, x: point.x, y: point.y, time: event.timeStamp };
+  scheduleMenuDragRender();
+});
+const endDuelDrag = () => {
+  duelDragPlayer = null;
+  duelDragPoint = null;
+  duelDragTarget = null;
+  menuDuelCanvas.classList.remove("is-dragging");
+};
+menuDuelCanvas.addEventListener("pointerup", endDuelDrag);
+menuDuelCanvas.addEventListener("pointercancel", endDuelDrag);
+
+function resizeDuelCanvas() {
+  if (!menuDuelContext) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.35);
+  const width = Math.max(1, Math.round(menuDuelCanvas.clientWidth * ratio));
+  const height = Math.max(1, Math.round(menuDuelCanvas.clientHeight * ratio));
+  if (menuDuelCanvas.width !== width || menuDuelCanvas.height !== height) {
+    menuDuelCanvas.width = width;
+    menuDuelCanvas.height = height;
+    menuDuelContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+  drawDuelScene();
+}
+
+function resizeMenuAmbient() {
+  if (!menuCanvasContext) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.35);
+  const width = Math.max(1, Math.round(menuCanvas.clientWidth * ratio));
+  const height = Math.max(1, Math.round(menuCanvas.clientHeight * ratio));
+  if (menuCanvas.width === width && menuCanvas.height === height) return;
+  menuCanvas.width = width;
+  menuCanvas.height = height;
+  menuCanvasContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const logicalWidth = menuCanvas.clientWidth;
+  const logicalHeight = menuCanvas.clientHeight;
+  const count = Math.min(44, Math.max(22, Math.round((logicalWidth * logicalHeight) / 34000)));
+  ambientNodes = Array.from({ length: count }, () => ({
+    x: Math.random() * logicalWidth,
+    y: Math.random() * logicalHeight,
+    vx: (Math.random() - 0.5) * 0.015,
+    vy: (Math.random() - 0.5) * 0.015,
+    flowVx: (Math.random() - 0.5) * 0.015,
+    flowVy: (Math.random() - 0.5) * 0.015,
+    phase: Math.random() * Math.PI * 2,
+    radius: 1 + Math.random() * 1.15,
+    tone: Math.random() < 0.5 ? 0 : 1
+  }));
+  drawMenuAmbient();
+  resizeDuelCanvas();
+}
+
+function syncMenuAmbient() {
+  if (menuAnimationFrame !== null) cancelAnimationFrame(menuAnimationFrame);
+  menuAnimationFrame = null;
+  if (mainMenuScreen.hidden || !settings.animationsEnabled || reduceMotionQuery.matches) {
+    drawMenuAmbient();
+    drawDuelScene();
+    return;
+  }
+
+  const animate = (timestamp) => {
+    if (mainMenuScreen.hidden || !settings.animationsEnabled || reduceMotionQuery.matches) {
+      menuAnimationFrame = null;
+      drawMenuAmbient();
+      drawDuelScene();
+      return;
+    }
+    const frameInterval = duelDragPlayer || ambientDragNode ? 16 : 42;
+    if (timestamp - menuAnimationLastFrame >= frameInterval) {
+      const elapsed = Math.min(timestamp - (menuAnimationLastFrame || timestamp), 50);
+      menuAnimationLastFrame = timestamp;
+      advanceAmbientNodes(elapsed, timestamp);
+      drawMenuAmbient();
+      drawDuelScene(timestamp);
+    }
+    menuAnimationFrame = requestAnimationFrame(animate);
+  };
+  menuAnimationFrame = requestAnimationFrame(animate);
+}
+
+function showMenuNotice(key, params = {}) {
+  menuNoticeTranslation = { key, params };
+  menuNotice.textContent = t(key, params);
+  menuNotice.hidden = false;
+  window.clearTimeout(menuNoticeTimeout);
+  menuNoticeTimeout = window.setTimeout(() => {
+    menuNotice.hidden = true;
+    menuNoticeTranslation = null;
+  }, 3600);
+}
+
+function openLocalGame() {
+  leaveTraining(true);
+  mainMenuScreen.hidden = true;
+  gameScreen.hidden = false;
+  syncMenuAmbient();
+  setupGame();
+  startButton.focus();
+}
+
+function returnToMainMenu() {
+  leaveTraining(true);
+  stopClock();
+  gameScreen.hidden = true;
+  mainMenuScreen.hidden = false;
+  syncMenuAmbient();
+}
+
+function leaveTraining(restoreSettings) {
+  if (!trainingSession) return;
+  trainingSession = null;
+  if (restoreSettings && trainingSavedSettings) settings = { ...trainingSavedSettings };
+  trainingSavedSettings = null;
+  document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
+}
+
+function startTraining(lessonIndex = 0) {
+  stopClock();
+  if (trainingSession && trainingSavedSettings) settings = { ...trainingSavedSettings };
+  else trainingSavedSettings = { ...settings };
+  const lesson = TRAINING_LESSONS[lessonIndex];
+  const trainingPiecesPerTurn = lesson.objective === "shield" ? 2 : 1;
+  settings = { ...settings, width: TRAINING_BOARD_SIZE, height: TRAINING_BOARD_SIZE, piecesPerTurn: trainingPiecesPerTurn,
+    unlimitedTime: true, randomEvents: false, freeStartingPositions: false, adminMode: false };
+  document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
+  state = createGameState(settings);
+  state = {
+    ...state,
+    board: createTrainingBoard(lessonIndex),
+    phase: "playing",
+    currentPlayer: "X",
+    piecesLeft: trainingPiecesPerTurn,
+    inventory: { X: lesson.item ? [{ id: "tutorial-shield", type: lesson.item }] : [], O: [] },
+    nextEventItemId: 1,
+    eventItems: [],
+    selectedAbility: null,
+    abilityTargets: [],
+    protections: [],
+    lastDestroyed: [],
+    pendingExtraTurn: null,
+    message: []
+  };
+  trainingSession = { lessonIndex, completed: false, feedbackKey: null, hintShown: false, piecePlaced: false };
+  clockRemaining = { X: 0, O: 0 };
+  mainMenuScreen.hidden = true;
+  gameScreen.hidden = false;
+  syncMenuAmbient();
+  render();
+}
+
+function completeTrainingLesson() {
+  if (!trainingSession || trainingSession.completed) return;
+  trainingSession.completed = true;
+  trainingSession.feedbackKey = TRAINING_LESSONS[trainingSession.lessonIndex].successKey;
+  render();
+}
+
+function handleTrainingMove(row, col) {
+  if (!trainingSession) return updateState(playMove(state, row, col));
+  const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
+  if (lesson.objective === "shield" && trainingSession.piecePlaced) {
+    trainingSession.feedbackKey = "training.lesson.shield.useItem";
+    renderTrainingPanel();
+    return;
+  }
+  if (!lesson.targets.some((target) => target.row === row && target.col === col)) {
+    trainingSession.feedbackKey = "training.tryTarget";
+    renderTrainingPanel();
+    return;
+  }
+  const previous = state;
+  updateState(playMove(state, row, col));
+  if (lesson.objective === "piece" && state.board !== previous.board) completeTrainingLesson();
+  if (lesson.objective === "reaction" && state.lastDestroyed.length > 0) completeTrainingLesson();
+  if (lesson.objective === "shield" && state.board !== previous.board) {
+    trainingSession.piecePlaced = true;
+    trainingSession.feedbackKey = "training.lesson.shield.useItem";
+    render();
+  }
+}
+
+function handleTrainingAbilityTarget(itemId, row, col) {
+  if (!trainingSession) return updateState(chooseAbilityTarget(state, itemId, row, col));
+  const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
+  if (!lesson.targets.some((target) => target.row === row && target.col === col)) {
+    trainingSession.feedbackKey = "training.tryTarget";
+    renderTrainingPanel();
+    return;
+  }
+  updateState(chooseAbilityTarget(state, itemId, row, col));
+  if (lesson.objective === "shield" && state.protections.length >= lesson.targets.length) completeTrainingLesson();
+}
+
+function handleTrainingAreaTarget(itemId, row, col) {
+  if (!trainingSession) return updateState(useBomb(state, itemId, row, col));
+  const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
+  if (lesson.objective !== "bomb" || !lesson.targets.some((target) => target.row === row && target.col === col)) {
+    trainingSession.feedbackKey = "training.tryTarget";
+    renderTrainingPanel();
+    return;
+  }
+  const previous = state;
+  updateState(useBomb(state, itemId, row, col));
+  if (state.board !== previous.board) completeTrainingLesson();
+}
+
+function renderTrainingPanel() {
+  const active = Boolean(trainingSession);
+  tutorialPanel.hidden = !active;
+  gameScreen.classList.toggle("is-training", active);
+  if (!active) {
+    pageTitle.textContent = t("page.title");
+    clockHeading.textContent = t("clock.heading");
+    return;
+  }
+  const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
+  const current = trainingSession.lessonIndex + 1;
+  tutorialStep.textContent = t("training.step", { current, total: TRAINING_LESSONS.length });
+  tutorialProgressFill.style.width = (current / TRAINING_LESSONS.length * 100) + "%";
+  tutorialTitle.textContent = t(lesson.titleKey);
+  tutorialDescription.textContent = t(lesson.descriptionKey);
+  const feedback = trainingSession.feedbackKey || (trainingSession.hintShown ? lesson.hintKey : null);
+  tutorialHint.hidden = !feedback;
+  tutorialHint.textContent = feedback ? t(feedback) : "";
+  tutorialAction.textContent = trainingSession.completed
+    ? t(current === TRAINING_LESSONS.length ? "training.finish" : "training.next")
+    : t(trainingSession.hintShown ? "training.hideHint" : "training.showHint");
+  pageTitle.textContent = t("training.title");
+  clockHeading.textContent = t("training.inventoryTitle");
+}
+
+function advanceTraining() {
+  if (!trainingSession) return;
+  if (!trainingSession.completed) {
+    trainingSession.hintShown = !trainingSession.hintShown;
+    trainingSession.feedbackKey = null;
+    renderTrainingPanel();
+    return;
+  }
+  if (trainingSession.lessonIndex + 1 < TRAINING_LESSONS.length) {
+    startTraining(trainingSession.lessonIndex + 1);
+  } else {
+    leaveTraining(true);
+    gameScreen.hidden = true;
+    mainMenuScreen.hidden = false;
+    syncMenuAmbient();
+  }
+}
+
+function openMenuSettings() {
+  menuAnimationsToggle.checked = settings.animationsEnabled;
+  menuSettingsModal.showModal();
+  menuSettingsDoneButton.focus();
+}
+
+function saveMenuSettings() {
+  settings.animationsEnabled = menuAnimationsToggle.checked;
+  animationsToggle.checked = settings.animationsEnabled;
+  if (state) state.settings = { ...state.settings, animationsEnabled: settings.animationsEnabled };
+  document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
+  menuSettingsModal.close();
+  syncMenuAmbient();
 }
 
 function setupGame() {
@@ -470,36 +1241,42 @@ function render() {
         if (!cell.disabled) cell.addEventListener("click", () => updateState(chooseStart(state, row, col)));
       } else if (state.phase === "playing" && selectedAbility) {
         if (selectedAbility.type === "bomb" || selectedAbility.type === "antiBomb") {
-          const valid = isValidAreaTarget(state, row, col);
+          const lessonAllowsArea = !trainingSession || TRAINING_LESSONS[trainingSession.lessonIndex].objective !== "bomb"
+            || TRAINING_LESSONS[trainingSession.lessonIndex].targets.some((target) => target.row === row && target.col === col);
+          const valid = isValidAreaTarget(state, row, col) && lessonAllowsArea;
           cell.disabled = !valid;
-          if (valid) cell.addEventListener("click", () => updateState(selectedAbility.type === "bomb"
-            ? useBomb(state, selectedAbility.id, row, col)
-            : useAntiBomb(state, selectedAbility.id, row, col)));
+          if (valid) cell.addEventListener("click", () => selectedAbility.type === "bomb"
+            ? handleTrainingAreaTarget(selectedAbility.id, row, col)
+            : updateState(useAntiBomb(state, selectedAbility.id, row, col)));
         } else if (selectedAbility.type === "debris") {
           const valid = isValidDebrisTarget(state, row, col);
           cell.disabled = !valid;
           cell.classList.toggle("ability-target-selected", isSelectedTarget);
-          if (valid) cell.addEventListener("click", () => updateState(chooseAbilityTarget(state, selectedAbility.id, row, col)));
+          if (valid) cell.addEventListener("click", () => handleTrainingAbilityTarget(selectedAbility.id, row, col));
         } else if (selectedAbility.type === "shield" || selectedAbility.type === "gangstaShield") {
           const valid = isValidShieldTarget(state, row, col);
           cell.disabled = !valid;
           cell.classList.toggle("ability-target-selected", isSelectedTarget);
-          if (valid) cell.addEventListener("click", () => updateState(chooseAbilityTarget(state, selectedAbility.id, row, col)));
+          if (valid) cell.addEventListener("click", () => handleTrainingAbilityTarget(selectedAbility.id, row, col));
         } else if (selectedAbility.type === "pointDestroy") {
           const valid = isValidPointDestroyTarget(state, row, col);
           cell.disabled = !valid;
           if (valid) cell.addEventListener("click", () => updateState(usePointDestroy(state, selectedAbility.id, row, col)));
+        } else if (trainingSession?.piecePlaced && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "shield") {
+          cell.disabled = true;
         } else if (isLegalMove(state, row, col)) {
           cell.disabled = false;
           markLegalCell(cell, state.currentPlayer);
-          cell.addEventListener("click", () => updateState(playMove(state, row, col)));
+          cell.addEventListener("click", () => handleTrainingMove(row, col));
         } else {
           cell.disabled = true;
         }
+      } else if (state.phase === "playing" && trainingSession?.piecePlaced && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "shield") {
+        cell.disabled = true;
       } else if (state.phase === "playing" && isLegalMove(state, row, col)) {
         cell.disabled = false;
         markLegalCell(cell, state.currentPlayer);
-        cell.addEventListener("click", () => updateState(playMove(state, row, col)));
+        cell.addEventListener("click", () => handleTrainingMove(row, col));
       } else {
         cell.disabled = true;
       }
@@ -515,6 +1292,17 @@ function render() {
         icon.setAttribute("aria-hidden", "true");
         cell.appendChild(icon);
         cell.title = t(protection.permanent ? "shield.permanent" : "shield.temporary");
+      }
+
+      if (trainingSession) {
+        const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
+        const isLessonTarget = lesson.objective === "bomb"
+          ? lesson.targets.some((target) => row >= target.row && row < target.row + 2 && col >= target.col && col < target.col + 2)
+          : lesson.targets.some((target) => target.row === row && target.col === col);
+        if (!trainingSession.completed && isLessonTarget) {
+          cell.classList.add("training-target");
+        }
+        if (trainingSession.completed) cell.disabled = true;
       }
 
       if (destroyedCells.has(row + "," + col)) {
@@ -590,6 +1378,7 @@ function render() {
   syncBoardGeometry();
   renderClock();
   renderInventories();
+  renderTrainingPanel();
 }
 
 function updateBombAim() {
@@ -603,6 +1392,11 @@ function updateBombAim() {
   }
   const row = Number(cell.dataset.row);
   const col = Number(cell.dataset.col);
+  if (trainingSession && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "bomb"
+    && !TRAINING_LESSONS[trainingSession.lessonIndex].targets.some((target) => target.row === row && target.col === col)) {
+    bombAimOverlay.hidden = true;
+    return;
+  }
   if (!isValidAreaTarget(state, row, col)) {
     bombAimOverlay.hidden = true;
     return;
@@ -834,6 +1628,19 @@ freeStartToggle.addEventListener("change", () => {
   toggleHint.textContent = t(freeStartToggle.checked ? "start.hidden" : "start.corners");
 });
 settingsButton.addEventListener("click", openSettings);
+localGameButton.addEventListener("click", openLocalGame);
+trainingButton.addEventListener("click", () => startTraining(0));
+ tutorialAction.addEventListener("click", advanceTraining);
+returnMenuButton.addEventListener("click", returnToMainMenu);
+menuSettingsButton.addEventListener("click", openMenuSettings);
+menuSettingsCloseButton.addEventListener("click", () => menuSettingsModal.close());
+menuSettingsDoneButton.addEventListener("click", saveMenuSettings);
+accountActionButton.addEventListener("click", () => showMenuNotice("menu.profileSoon"));
+document.querySelectorAll("[data-mode]").forEach((button) => {
+  button.addEventListener("click", () => {
+    showMenuNotice("menu.missing", { feature: t("menu." + button.dataset.mode) });
+  });
+});
 rulesButton.addEventListener("click", () => rulesModal.showModal());
 rulesCloseButton.addEventListener("click", () => rulesModal.close());
 settingsCloseButton.addEventListener("click", () => settingsModal.close());
@@ -859,7 +1666,8 @@ for (const player of ["X", "O"]) {
   inventoryElements[player].addEventListener("click", (event) => {
     const slot = event.target.closest(".inventory-slot");
     if (!slot || slot.disabled || state.currentPlayer !== player) return;
-    updateState(selectAbility(state, Number(slot.dataset.itemId)));
+    const item = state.inventory[player].find((candidate) => String(candidate.id) === slot.dataset.itemId);
+    if (item) updateState(selectAbility(state, item.id));
   });
 }
 languageSelect.value = getLanguage();
@@ -868,6 +1676,10 @@ languageSelect.addEventListener("change", () => setLanguage(languageSelect.value
 document.addEventListener("languagechange", () => {
   applyTranslations();
   languageSelect.value = getLanguage();
+  if (menuNoticeTranslation) {
+    menuNotice.textContent = t(menuNoticeTranslation.key, menuNoticeTranslation.params);
+  }
+  syncMenuAmbient();
   if (state) {
     render();
     if (state.phase === "finished" && resultModal.open) showResult();
@@ -885,15 +1697,29 @@ document.addEventListener("languagechange", () => {
     showFieldError(clockIncrementInput, clockIncrementError, t("validation.increment"));
   }
 });
+reduceMotionQuery.addEventListener?.("change", syncMenuAmbient);
 adminItemList.addEventListener("click", (event) => {
   const button = event.target.closest(".admin-item-button");
   if (!button || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
   updateState(selectAbility(state, button.dataset.itemId));
 });
 startButton.addEventListener("click", setupGame);
-setupGame();
+resizeMenuAmbient();
+resizeDuelCanvas();
+syncMenuAmbient();
+window.addEventListener("resize", resizeMenuAmbient);
+window.addEventListener("resize", resizeDuelCanvas);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) syncMenuAmbient();
+  else if (menuAnimationFrame !== null) {
+    cancelAnimationFrame(menuAnimationFrame);
+    menuAnimationFrame = null;
+  }
+});
 if (typeof ResizeObserver === "function") {
   new ResizeObserver(syncBoardGeometry).observe(boardRow);
+  new ResizeObserver(resizeMenuAmbient).observe(mainMenuScreen);
+  new ResizeObserver(resizeDuelCanvas).observe(menuDuelCanvas);
 } else {
   window.addEventListener("resize", syncBoardGeometry);
 }

@@ -6,17 +6,68 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=20261017-i18n2">
+  <link rel="stylesheet" href="/ui/style.css?v=20261018-menu12">
 </head>
 <body>
-  <main class="app-shell">
+  <div class="main-menu-screen" id="main-menu-screen">
+    <canvas class="menu-ambient" id="menu-ambient" aria-hidden="true"></canvas>
+    <div class="menu-vignette" aria-hidden="true"></div>
+    <header class="menu-topbar">
+      <a class="brand" href="/" aria-label="Вирусы — на главную" data-i18n-aria-label="brand.home">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <span><span data-i18n="brand.name">Вирусы</span><span class="brand-period">.</span></span>
+      </a>
+      <div class="menu-account-area">
+        <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">Русский</option><option value="en">English</option></select></label>
+        <div class="account-chip" aria-label="Гостевой профиль" data-i18n-aria-label="menu.account">
+          <span class="account-avatar" aria-hidden="true">◉</span>
+          <span class="account-copy"><strong data-i18n="menu.guest">Гость</strong><small data-i18n="menu.guestStatus">Локальный профиль</small></span>
+          <button class="account-action" id="account-action" type="button" data-i18n="menu.accountAction">Профиль</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="menu-content">
+      <section class="menu-hero" aria-labelledby="menu-title">
+        <div class="menu-duel-frame"><canvas class="menu-duel" id="menu-duel" role="img" aria-label="Перетаскиваемые вирусные колонии разделены бактериальным инь-ян" data-i18n-aria-label="menu.duelLabel"></canvas><div class="duel-label duel-label-x" aria-hidden="true">X / 01</div><div class="duel-label duel-label-o" aria-hidden="true">O / 02</div><span class="duel-drag-hint" data-i18n="menu.dragHint">Перетащите колонии</span></div>
+        <p class="menu-eyebrow"><span class="menu-eyebrow-dot" aria-hidden="true"></span><span data-i18n="menu.eyebrow">Живая симуляция</span></p>
+        <h1 id="menu-title" data-i18n="menu.title">Две системы. Ни одна не уступает.</h1>
+        <p class="menu-description" data-i18n="menu.description">Они растут, атакуют и встречают сопротивление. Выбери режим и измени равновесие.</p>
+        <div class="menu-art-note"><span aria-hidden="true">✳</span><span data-i18n="menu.artNote">Атака. Ответ. Равновесие.</span></div>
+      </section>
+
+      <section class="menu-launcher" aria-label="Режимы игры" data-i18n-aria-label="menu.modes">
+        <p class="menu-section-label" data-i18n="menu.modes">РЕЖИМЫ ИГРЫ</p>
+        <button class="mode-button mode-button-local mode-button-featured" id="local-game-button" type="button">
+          <span class="mode-icon" aria-hidden="true">◈</span><span class="mode-copy"><strong data-i18n="menu.local">На одном устройстве</strong><small data-i18n="menu.localHelp">Два игрока · один экран</small></span><span class="mode-arrow" aria-hidden="true">→</span>
+        </button>
+        <button class="mode-button" type="button" data-mode="online">
+          <span class="mode-icon" aria-hidden="true">⌁</span><span class="mode-copy"><strong data-i18n="menu.online">Сетевая игра</strong><small data-i18n="menu.onlineHelp">Сразись с игроками по всему миру</small></span><span class="mode-soon" data-i18n="menu.soon">Скоро</span>
+        </button>
+        <button class="mode-button" id="training-mode-button" type="button">
+          <span class="mode-icon" aria-hidden="true">◇</span><span class="mode-copy"><strong data-i18n="menu.training">Обучение</strong><small data-i18n="menu.trainingHelp">Освой механику на практике</small></span><span class="mode-arrow" aria-hidden="true">↗</span>
+        </button>
+        <button class="mode-button" type="button" data-mode="computer">
+          <span class="mode-icon" aria-hidden="true">◎</span><span class="mode-copy"><strong data-i18n="menu.computer">Против компьютера</strong><small data-i18n="menu.computerHelp">Проверь стратегию в одиночку</small></span><span class="mode-soon" data-i18n="menu.soon">Скоро</span>
+        </button>
+        <div class="menu-launcher-footer">
+          <span class="menu-status-dot" aria-hidden="true"></span><span data-i18n="menu.localReady">Локальная партия уже доступна</span>
+          <button class="menu-settings-button" id="menu-settings-button" type="button"><span aria-hidden="true">⚙</span><span data-i18n="menu.settings">Общие настройки</span></button>
+        </div>
+        <p class="menu-notice" id="menu-notice" role="status" aria-live="polite" hidden></p>
+      </section>
+    </main>
+    <footer class="menu-footer"><span data-i18n="menu.footer">Создано для тех, кто мыслит на ход вперёд.</span><span class="menu-footer-mark" aria-hidden="true">V / 01</span></footer>
+  </div>
+
+  <main class="app-shell" id="game-screen" hidden>
     <header class="topbar">
       <a class="brand" href="/" aria-label="Вирусы — на главную" data-i18n-aria-label="brand.home">
         <span class="brand-mark" aria-hidden="true">V</span>
         <span><span data-i18n="brand.name">Вирусы</span><span class="brand-period">.</span></span>
       </a>
       <span class="topbar-note" data-i18n="brand.tagline">Стратегия для двух игроков</span>
-      <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">Русский</option><option value="en">English</option></select></label>
+      <button id="return-menu-button" class="button button-secondary return-menu-button" type="button"><span aria-hidden="true">←</span><span data-i18n="menu.back">В главное меню</span></button>
     </header>
 
     <section class="game-layout" aria-labelledby="page-title">
@@ -92,10 +143,18 @@
           <h2 id="side-title">Выберите старт</h2>
           <p id="side-description">При свободном расположении игроки выбирают старт по очереди. Передайте устройство сопернику после выбора.</p>
         </div>
+        <section class="side-card tutorial-panel" id="tutorial-panel" aria-live="polite" hidden>
+          <p class="eyebrow" id="tutorial-step"></p>
+          <div class="tutorial-progress-track" aria-hidden="true"><span id="tutorial-progress-fill"></span></div>
+          <h2 id="tutorial-title"></h2>
+          <p id="tutorial-description"></p>
+          <p class="tutorial-feedback" id="tutorial-hint" hidden></p>
+          <button class="button button-primary tutorial-action" id="tutorial-action" type="button"></button>
+        </section>
         <section class="side-card admin-tools" id="admin-tools" aria-label="Предметы администратора" data-i18n-aria-label="admin.label" hidden>
           <p class="eyebrow" data-i18n="admin.mode">Режим администратора</p>
           <h2 data-i18n="admin.title">Предметы для проверки</h2>
-          <p data-i18n="admin.help">Способности не расходуют обычный инвентарь.</p>
+          <p id="admin-help" data-i18n="admin.help">Способности не расходуют обычный инвентарь.</p>
           <div class="admin-item-list" id="admin-item-list"></div>
         </section>
         <details class="side-card rules-card">
@@ -113,6 +172,21 @@
     </section>
     <footer class="footer" data-i18n="footer">Один экран · Два игрока · Одна цепная реакция</footer>
   </main>
+  <dialog id="menu-settings-modal" class="settings-modal menu-settings-modal" aria-labelledby="menu-settings-title">
+    <section class="settings-card">
+      <header class="settings-header">
+        <div><p class="eyebrow" data-i18n="menu.settings">Общие настройки</p><h2 id="menu-settings-title" data-i18n="menu.settingsTitle">Настройки приложения</h2></div>
+        <button id="menu-settings-close" class="icon-button" type="button" aria-label="Закрыть настройки" data-i18n-aria-label="settings.close">×</button>
+      </header>
+      <p class="settings-summary" data-i18n="menu.settingsHelp">Настройки интерфейса и отображения игры.</p>
+      <label class="toggle-row menu-animation-setting" for="menu-animations-toggle">
+        <span class="toggle-copy"><strong data-i18n="settings.animations">Игровые анимации</strong><small data-i18n="settings.animationsHelp">Лёгкий вирусный эффект при постановке фигур; отключите, чтобы снизить нагрузку</small></span>
+        <input class="toggle-input" id="menu-animations-toggle" type="checkbox" role="switch" checked>
+        <span class="toggle-switch" aria-hidden="true"></span>
+      </label>
+      <div class="settings-actions"><button id="menu-settings-done" class="button button-primary" type="button" data-i18n="settings.apply">Применить</button></div>
+    </section>
+  </dialog>
   <dialog id="settings-modal" class="settings-modal" aria-labelledby="settings-title" aria-describedby="settings-summary">
     <section class="settings-card">
       <header class="settings-header">
@@ -250,6 +324,6 @@
       <button id="result-new-game" class="button button-primary" type="button" data-i18n="dialog.newGame">Начать новую партию</button>
     </section>
   </dialog>
-  <script type="module" src="/ui/script.js?v=20261017-i18n2"></script>
+  <script type="module" src="/ui/script.js?v=20261018-menu12"></script>
 </body>
 </html>
