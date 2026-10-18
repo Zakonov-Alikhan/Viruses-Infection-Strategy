@@ -42,6 +42,25 @@ function makeBlockedState() {
   return { ...state, board, piecesLeft: 1, selectedAbility: null, protections: [] };
 }
 
+function makeAttackState({ items, piecesLeft = 1, piecesPerTurn = 1, pieces, protections = [], eventItems = [] }) {
+  const state = makeState({ settings: { piecesPerTurn } });
+  const board = Array.from({ length: 10 }, () => Array(10).fill(EMPTY_CELL));
+  for (const { row, col, player } of pieces) board[row][col] = player;
+  return {
+    ...state,
+    board,
+    phase: "playing",
+    currentPlayer: "X",
+    piecesLeft,
+    inventory: { X: items, O: [] },
+    eventItems,
+    selectedAbility: null,
+    abilityTargets: [],
+    protections,
+    lastDestroyed: []
+  };
+}
+
 function applyPlacement(state, action) {
   const prepared = action.abilityId === null
     ? state
@@ -77,7 +96,7 @@ test("reports setup, terminal, and no-placement states explicitly", () => {
   assert.equal(getLegalMoves(blocked).length, 0);
   assert.deepEqual(chooseComputerAction(blocked, "medium"), {
     type: "no-legal-move",
-    reason: "no-legal-placement"
+    reason: "no-legal-action"
   });
 
   assert.deepEqual(chooseComputerAction({ ...blocked, phase: "finished" }, "hard"), {
@@ -234,15 +253,270 @@ test("hard search stays under its fixed budget on a 50 by 50 board", () => {
   assert.equal(state.board[analysis.action.row][analysis.action.col], EMPTY_CELL);
 });
 
-test("non-placement ability selection returns an explicit targeting result", () => {
+test("non-attacking selected ability returns an explicit targeting result", () => {
   const state = makeState({
     state: {
-      inventory: { X: [{ id: "bomb-test", type: "bomb" }], O: [] },
-      selectedAbility: "bomb-test"
+      inventory: { X: [{ id: "debris-test", type: "debris" }], O: [] },
+      selectedAbility: "debris-test"
     }
   });
   assert.deepEqual(chooseComputerAction(state, "easy"), {
     type: "no-legal-move",
     reason: "ability-targeting"
   });
+});
+
+test("medium uses a bomb when it removes several enemy figures and consumes it correctly", () => {
+  const bomb = { id: "bomb-1", type: "bomb" };
+  const state = makeAttackState({
+    items: [bomb],
+    pieces: [
+      { row: 0, col: 0, player: "X" },
+      { row: 4, col: 4, player: "O" },
+      { row: 4, col: 5, player: "O" }
+    ]
+  });
+  const before = JSON.stringify(state);
+  const action = chooseComputerAction(state, "medium");
+
+  assert.equal(action.type, "attack");
+  assert.equal(action.abilityId, bomb.id);
+  const next = applyComputerAction(state, action, () => 1);
+  assert.notEqual(next, state);
+  assert.equal(JSON.stringify(state), before);
+  assert.equal(next.inventory.X.some((item) => item.id === bomb.id), false);
+  assert.equal(next.piecesLeft, state.piecesLeft);
+  assert.equal(next.board[4][4], EMPTY_CELL);
+  assert.equal(next.board[4][5], EMPTY_CELL);
+});
+
+test("medium preserves a low-count point target with strategic shield value among many alternatives", () => {
+  const pointDestroy = { id: "point-1", type: "pointDestroy" };
+  const pieces = [{ row: 0, col: 0, player: "X" }];
+  for (let row = 1; row < 10; row += 2) {
+    for (let col = 1; col < 10; col += 2) pieces.push({ row, col, player: "O" });
+  }
+  const protectedTarget = { row: 9, col: 9 };
+  const state = makeAttackState({
+    items: [pointDestroy],
+    pieces,
+    protections: [{ ...protectedTarget, owner: "O", permanent: true }]
+  });
+
+  const action = chooseComputerAction(state, "medium");
+  assert.deepEqual(action, {
+    type: "attack",
+    abilityId: pointDestroy.id,
+    ...protectedTarget
+  });
+});
+
+test("easy uses an anti-bomb for an obvious multi-figure hit", () => {
+  const antiBomb = { id: "anti-1", type: "antiBomb" };
+  const state = makeAttackState({
+    items: [antiBomb],
+    pieces: [
+      { row: 0, col: 0, player: "X" },
+      { row: 4, col: 4, player: "O" },
+      { row: 4, col: 5, player: "O" }
+    ]
+  });
+  const action = chooseComputerAction(state, "easy", { random: () => 0 });
+  assert.equal(action.type, "attack");
+  assert.equal(action.abilityId, antiBomb.id);
+
+  const next = applyComputerAction(state, action);
+  assert.equal(next.board[action.row][action.col], BLOCKED_CELL);
+  assert.equal(next.inventory.X.length, 0);
+  assert.equal(next.piecesLeft, state.piecesLeft);
+});
+
+test("medium keeps a bomb when its area would destroy more of its own figures", () => {
+  const state = makeAttackState({
+    items: [{ id: "bomb-1", type: "bomb" }],
+    pieces: [
+      { row: 0, col: 0, player: "X" },
+      { row: 3, col: 4, player: "X" },
+      { row: 3, col: 5, player: "X" },
+      { row: 4, col: 3, player: "X" },
+      { row: 4, col: 5, player: "X" },
+      { row: 5, col: 3, player: "X" },
+      { row: 5, col: 4, player: "X" },
+      { row: 5, col: 5, player: "X" },
+      { row: 4, col: 4, player: "O" },
+      { row: 8, col: 8, player: "X" },
+      { row: 8, col: 9, player: "X" },
+      { row: 9, col: 8, player: "X" },
+      { row: 9, col: 9, player: "O" }
+    ]
+  });
+  const action = chooseComputerAction(state, "medium");
+
+  assert.equal(action.type, "place");
+  assert.equal(state.inventory.X.length, 1);
+});
+
+test("attacks ignore shields and remove their protection from affected cells", () => {
+  const pointDestroy = { id: "point-1", type: "pointDestroy" };
+  const state = makeAttackState({
+    items: [pointDestroy],
+    pieces: [
+      { row: 0, col: 0, player: "X" },
+      { row: 4, col: 4, player: "O" }
+    ],
+    protections: [{ row: 4, col: 4, owner: "O", permanent: true }]
+  });
+  const action = chooseComputerAction(state, "easy", { random: () => 0 });
+  assert.deepEqual(action, { type: "attack", abilityId: pointDestroy.id, row: 4, col: 4 });
+
+  const next = applyComputerAction(state, action);
+  assert.equal(next.board[4][4], EMPTY_CELL);
+  assert.equal(next.protections.length, 0);
+  assert.equal(next.inventory.X.length, 0);
+  assert.equal(next.piecesLeft, state.piecesLeft);
+});
+
+test("a visually attractive shielded target does not justify an area attack that loses own pieces", () => {
+  const antiBomb = { id: "anti-1", type: "antiBomb" };
+  const state = makeAttackState({
+    items: [antiBomb],
+    pieces: [
+      { row: 0, col: 0, player: "X" },
+      { row: 3, col: 4, player: "X" },
+      { row: 3, col: 5, player: "X" },
+      { row: 4, col: 3, player: "X" },
+      { row: 4, col: 4, player: "O" },
+      { row: 4, col: 5, player: "X" },
+      { row: 5, col: 3, player: "X" },
+      { row: 5, col: 4, player: "X" },
+      { row: 5, col: 5, player: "X" }
+    ],
+    protections: [{ row: 4, col: 4, owner: "O", permanent: true }],
+    eventItems: [{ id: 8, type: "shield", row: 3, col: 3 }]
+  });
+  const action = chooseComputerAction(state, "medium");
+  assert.equal(action.type, "place");
+
+  const forcedAttack = applyComputerAction(state, {
+    type: "attack", abilityId: antiBomb.id, row: 3, col: 3
+  });
+  assert.equal(forcedAttack.board[4][4], BLOCKED_CELL);
+  assert.equal(forcedAttack.board[3][3], BLOCKED_CELL);
+  assert.equal(forcedAttack.eventItems.some((item) => item.id === 8), false);
+  assert.equal(forcedAttack.protections.length, 0);
+  assert.equal(forcedAttack.inventory.X.length, 0);
+  assert.equal(forcedAttack.piecesLeft, state.piecesLeft);
+});
+
+test("anti-bomb ranking avoids sealing the computer's only legal placement", () => {
+  const antiBomb = { id: "anti-1", type: "antiBomb" };
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[3][3] = "X";
+  board[3][4] = EMPTY_CELL;
+  board[4][4] = "O";
+  const state = {
+    ...makeAttackState({ items: [antiBomb], pieces: [] }),
+    board,
+    piecesLeft: 1,
+    settings: { ...DEFAULT_SETTINGS, width: 10, height: 10, piecesPerTurn: 1 }
+  };
+
+  assert.deepEqual(getLegalMoves(state), [{ row: 3, col: 4 }]);
+  const action = chooseComputerAction(state, "medium");
+  assert.deepEqual(action, { type: "place", row: 3, col: 4, abilityId: null });
+});
+
+test("medium accounts for the full first-layer chain reaction when comparing with a bomb", () => {
+  const state = makeAttackState({
+    items: [{ id: "bomb-1", type: "bomb" }],
+    pieces: [
+      { row: 2, col: 2, player: "X" },
+      { row: 2, col: 4, player: "O" },
+      { row: 1, col: 4, player: "O" },
+      { row: 3, col: 4, player: "O" }
+    ]
+  });
+  const action = chooseComputerAction(state, "medium");
+
+  assert.equal(action.type, "place");
+  const next = applyComputerAction(state, action);
+  assert.equal(next.winner, "X");
+  assert.equal(next.lastDestroyed.length, 3);
+  assert.equal(next.board[2][4], BLOCKED_CELL);
+  assert.equal(next.board[1][4], BLOCKED_CELL);
+  assert.equal(next.board[3][4], BLOCKED_CELL);
+  assert.equal(next.inventory.X.length, 1);
+});
+
+test("without a direct-damage target, the bot chooses a legal placement or reports no action", () => {
+  const noEnemy = makeAttackState({
+    items: [{ id: "bomb-1", type: "bomb" }],
+    pieces: [{ row: 0, col: 0, player: "X" }]
+  });
+  const action = chooseComputerAction(noEnemy, "hard");
+  assert.equal(action.type, "place");
+  assert.ok(getLegalMoves(noEnemy).some(({ row, col }) => row === action.row && col === action.col));
+
+  const blocked = {
+    ...noEnemy,
+    board: noEnemy.board.map((row) => row.map(() => BLOCKED_CELL))
+  };
+  blocked.board[0][0] = "X";
+  assert.deepEqual(chooseComputerAction(blocked, "medium"), {
+    type: "no-legal-move",
+    reason: "no-legal-action"
+  });
+});
+
+test("hard includes attack candidates without exceeding its existing node budget", () => {
+  const state = makeAttackState({
+    items: [
+      { id: "bomb-1", type: "bomb" },
+      { id: "point-1", type: "pointDestroy" },
+      { id: "anti-1", type: "antiBomb" }
+    ],
+    pieces: [
+      { row: 0, col: 0, player: "X" },
+      { row: 4, col: 4, player: "O" },
+      { row: 6, col: 6, player: "O" }
+    ]
+  });
+  const before = JSON.stringify(state);
+  const result = analyzeComputerAction(state, "hard");
+
+  assert.ok(result.nodesSearched <= AI_SEARCH_LIMITS.hard.maxNodes);
+  assert.ok(["place", "attack"].includes(result.action.type));
+  assert.equal(JSON.stringify(state), before);
+});
+
+test("attack target generation remains bounded on a densely occupied 50 by 50 board", () => {
+  const base = makeState({
+    settings: { width: 50, height: 50, piecesPerTurn: 1 }
+  });
+  const board = Array.from({ length: 50 }, () => Array(50).fill("O"));
+  board[0][0] = "X";
+  const state = {
+    ...base,
+    board,
+    phase: "playing",
+    currentPlayer: "X",
+    piecesLeft: 1,
+    inventory: {
+      X: [
+        { id: "bomb-1", type: "bomb" },
+        { id: "anti-1", type: "antiBomb" },
+        { id: "point-1", type: "pointDestroy" }
+      ],
+      O: []
+    },
+    eventItems: [],
+    selectedAbility: null,
+    protections: []
+  };
+
+  const result = analyzeComputerAction(state, "hard");
+  const mediumResult = analyzeComputerAction(state, "medium");
+  assert.ok(result.legalActionCount <= 3 * 12);
+  assert.ok(result.nodesSearched <= AI_SEARCH_LIMITS.hard.maxNodes);
+  assert.ok(mediumResult.nodesSearched <= AI_SEARCH_LIMITS.medium.maxEvaluations);
 });
