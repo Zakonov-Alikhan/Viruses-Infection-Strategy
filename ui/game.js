@@ -50,8 +50,11 @@ function neighbors(row, col, board) {
     .filter(({ row: nextRow, col: nextCol }) => inBounds(nextRow, nextCol, board));
 }
 
-function hasEnoughConnectedCells(player, count, board) {
+function hasEnoughConnectedCells(player, count, board, protections = []) {
   if (count <= 0) return true;
+  const unavailable = new Set(protections
+    .filter((protection) => protection.owner !== player)
+    .map((protection) => protection.row + "," + protection.col));
   const visited = new Set();
   const queue = [];
 
@@ -73,6 +76,7 @@ function hasEnoughConnectedCells(player, count, board) {
       if (visited.has(key)) continue;
       const value = board[next.row][next.col];
       if (value !== EMPTY_CELL && value !== player) continue;
+      if (value === EMPTY_CELL && unavailable.has(key)) continue;
       visited.add(key);
       if (value === EMPTY_CELL) {
         reachableEmpty += 1;
@@ -83,6 +87,13 @@ function hasEnoughConnectedCells(player, count, board) {
   }
 
   return false;
+}
+
+export function canCompleteTurn(state, player = state?.currentPlayer, count = state?.piecesLeft) {
+  return Boolean(state?.board?.length)
+    && (player === "X" || player === "O")
+    && Number.isInteger(count)
+    && hasEnoughConnectedCells(player, count, state.board, state.protections || []);
 }
 
 function isProtected(state, row, col) {
@@ -287,6 +298,26 @@ export function isLegalMove(state, row, col) {
   return neighbors(row, col, state.board).some(({ row: nextRow, col: nextCol }) => state.board[nextRow][nextCol] === state.currentPlayer);
 }
 
+export function getLegalMoves(state) {
+  if (!state?.board?.length || state.phase !== "playing") return [];
+  const moves = [];
+  for (let row = 0; row < state.board.length; row += 1) {
+    for (let col = 0; col < state.board[row].length; col += 1) {
+      if (isLegalMove(state, row, col)) moves.push({ row, col });
+    }
+  }
+  return moves;
+}
+
+export function finishIfNoLegalMoves(state) {
+  if (!state || state.phase !== "playing" || getLegalMoves(state).length > 0) return state;
+  const winner = state.currentPlayer === "X" ? "O" : "X";
+  return finish(state, winner, message("message.cannotFinish", {
+    player: state.currentPlayer,
+    count: state.settings.piecesPerTurn
+  }));
+}
+
 export function selectAbility(state, itemId) {
   if (state.phase !== "playing") return state;
   const item = getAbility(state, state.currentPlayer, itemId);
@@ -378,7 +409,7 @@ function useAreaAbility(state, itemId, row, col, type) {
     message: message(isBomb ? "message.bomb" : "message.antiBomb")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.protections)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -419,7 +450,7 @@ export function usePointDestroy(state, itemId, row, col) {
     message: message("message.pointDestroy")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.protections)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -479,7 +510,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
       lastDestroyed: abilityTargets,
       message: message("message.debris")
     };
-    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.protections)) {
       const winner = state.currentPlayer === "X" ? "O" : "X";
       return finish(next, winner, message("message.cannotFinishDebris", { player: state.currentPlayer }));
     }
@@ -584,7 +615,7 @@ export function playMove(state, row, col, random = Math.random) {
     next.message = appendMessage(next.message, message("message.freePlacementUsed"));
   }
 
-  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board)) {
+  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board, next.protections)) {
     const winner = player === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinish", { player, count: state.settings.piecesPerTurn }));
   }
@@ -601,7 +632,7 @@ export function playMove(state, row, col, random = Math.random) {
         message: appendMessage(next.message, message("message.extraTurn", { player }))
       };
       next = startTurn(next, player, state.settings.piecesPerTurn);
-      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board)) {
+      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board, next.protections)) {
         const winner = player === "X" ? "O" : "X";
         return finish(next, winner, message("message.extraCannotFinish", { player }));
       }
@@ -609,10 +640,10 @@ export function playMove(state, row, col, random = Math.random) {
     }
 
     const nextPlayer = player === "X" ? "O" : "X";
-    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board)) {
+    next = startTurn(next, nextPlayer, state.settings.piecesPerTurn);
+    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board, next.protections)) {
       return finish(next, player, message("message.opponentCannotFinish", { count: state.settings.piecesPerTurn }));
     }
-    next = startTurn(next, nextPlayer, state.settings.piecesPerTurn);
     return maybeSpawnEventItem(next, random);
   }
 

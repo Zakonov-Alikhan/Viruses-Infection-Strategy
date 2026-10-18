@@ -393,6 +393,8 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .settings-button { display: inline-flex; align-items: center; gap: 8px; }
 .settings-button > span { color: var(--teal); font-size: 16px; }
 .settings-modal { width: min(500px, calc(100% - 32px)); max-width: none; max-height: calc(100% - 32px); padding: 0; overflow: auto; color: var(--text); border: 0; background: transparent; }
+.computer-difficulty-options { display: grid; gap: 8px; margin-top: 16px; }
+.computer-difficulty-options .mode-button { min-height: 64px; margin-top: 0; }
 .settings-modal::backdrop { background: rgba(5, 12, 14, .78); backdrop-filter: blur(7px); }
 .settings-card { padding: clamp(22px, 5vw, 32px); border: 1px solid rgba(94, 218, 192, .3); border-radius: 20px; background: linear-gradient(150deg, #203130, #172326 75%); box-shadow: 0 28px 90px rgba(0, 0, 0, .5); }
 .settings-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }

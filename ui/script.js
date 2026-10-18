@@ -8,6 +8,7 @@ import {
   chooseStart,
   chooseAbilityTarget,
   createGameState,
+  finishIfNoLegalMoves,
   flagFall,
   getSelectedAbility,
   hasPermission,
@@ -23,8 +24,9 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=20261018-menu2";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261018-menu12";
+} from "./game.js?v=20261018-menu13";
+import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261018-menu13";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261018-menu13";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 
 const boardElement = document.querySelector(".game-board");
@@ -46,6 +48,9 @@ const languageSelect = document.querySelector("#language-select");
 const mainMenuScreen = document.querySelector("#main-menu-screen");
 const gameScreen = document.querySelector("#game-screen");
 const localGameButton = document.querySelector("#local-game-button");
+const computerGameButton = document.querySelector("#computer-game-button");
+const computerDifficultyModal = document.querySelector("#computer-difficulty-modal");
+const computerDifficultyCancelButton = document.querySelector("#computer-difficulty-cancel");
 const trainingButton = document.querySelector("#training-mode-button");
 const returnMenuButton = document.querySelector("#return-menu-button");
 const menuSettingsButton = document.querySelector("#menu-settings-button");
@@ -104,6 +109,7 @@ const clockXElement = document.querySelector("#clock-x");
 const clockOElement = document.querySelector("#clock-o");
 const clockPlayerX = document.querySelector("#clock-player-x");
 const clockPlayerO = document.querySelector("#clock-player-o");
+const clockPlayerOName = document.querySelector("#clock-player-o .clock-player-name span");
 const clockControlSummary = document.querySelector("#clock-control-summary");
 const resignButton = document.querySelector("#resign-button");
 const resignConfirmModal = document.querySelector("#resign-confirm-modal");
@@ -168,8 +174,95 @@ let menuDragFrame = null;
 let menuDragLastTime = null;
 let trainingSession = null;
 let trainingSavedSettings = null;
+let computerOpponent = { enabled: false, difficulty: "easy" };
+let gameSessionId = 0;
+let computerActionToken = 0;
+let computerActionTimer = null;
 const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
+
+function invalidateComputerAction() {
+  computerActionToken += 1;
+  if (computerActionTimer !== null) window.clearTimeout(computerActionTimer);
+  computerActionTimer = null;
+}
+
+function beginGameSession() {
+  invalidateComputerAction();
+  gameSessionId += 1;
+}
+
+function isComputerControlledTurn() {
+  return Boolean(computerOpponent.enabled && state
+    && (state.phase === "setup-o" || (state.phase === "playing" && state.currentPlayer === "O")));
+}
+
+function canHumanAct() {
+  if (!state || state.phase === "finished") return false;
+  if (state.phase === "setup-x") return true;
+  return !isComputerControlledTurn();
+}
+
+function scheduleComputerAction() {
+  if (!isComputerControlledTurn() || computerActionTimer !== null) return;
+  const expectedState = state;
+  const expectedSession = gameSessionId;
+  const expectedToken = ++computerActionToken;
+  const timerId = window.setTimeout(() => {
+    if (computerActionTimer === timerId) computerActionTimer = null;
+    if (expectedToken !== computerActionToken
+      || expectedSession !== gameSessionId
+      || state !== expectedState
+      || !isComputerControlledTurn()) return;
+
+    if (state.phase === "setup-o") executeComputerStart();
+    else executeComputerPlacement();
+  }, 180);
+  computerActionTimer = timerId;
+}
+
+function executeComputerStart() {
+  const { row: humanRow, col: humanCol } = state.startChoices.X || {};
+  const candidates = [];
+  for (let row = 0; row < state.settings.height; row += 1) {
+    for (let col = 0; col < state.settings.width; col += 1) {
+      if (row !== humanRow || col !== humanCol) candidates.push({ row, col });
+    }
+  }
+  if (candidates.length === 0) return;
+  const start = candidates[Math.floor(Math.random() * candidates.length)];
+  const next = chooseStart(state, start.row, start.col);
+  if (next !== state) updateState(next);
+}
+
+function executeComputerPlacement() {
+  const decisionState = state;
+  const action = chooseComputerAction(decisionState, computerOpponent.difficulty);
+  if (state !== decisionState || state.phase !== "playing" || state.currentPlayer !== "O") return;
+
+  if (action.type === "no-legal-move") {
+    if (action.reason === "ability-targeting" && state.selectedAbility !== null) {
+      const cleared = selectAbility(state, state.selectedAbility);
+      if (cleared !== state) {
+        updateState(cleared);
+        return;
+      }
+    }
+    const finished = finishIfNoLegalMoves(state);
+    if (finished !== state) updateState(finished);
+    else messageElement.textContent = t("computer.error");
+    return;
+  }
+
+  const next = applyComputerAction(state, action);
+  if (next === state) {
+    const finished = finishIfNoLegalMoves(state);
+    if (finished !== state) updateState(finished);
+    else messageElement.textContent = t("computer.error");
+    return;
+  }
+  updateState(next);
+}
 
 function scheduleMenuDragRender() {
   const continuousAnimation = settings.animationsEnabled && !reduceMotionQuery.matches && menuAnimationFrame !== null;
@@ -205,10 +298,11 @@ function renderClock() {
   const oActive = state && state.phase === "playing" && state.currentPlayer === "O";
   clockPlayerX.classList.toggle("clock-active", xActive);
   clockPlayerO.classList.toggle("clock-active", oActive);
+  clockPlayerOName.textContent = t(computerOpponent.enabled ? "computer.player" : "player.o");
   currentTurnCard.classList.toggle("turn-active", state && state.phase !== "finished");
   clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.X <= 10_000);
   clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.O <= 10_000);
-  resignButton.disabled = !state || state.phase !== "playing";
+  resignButton.disabled = !state || state.phase !== "playing" || !canHumanAct();
 }
 
 function renderInventories() {
@@ -233,7 +327,8 @@ function renderInventories() {
       icon.alt = "";
       icon.setAttribute("aria-hidden", "true");
       slot.appendChild(icon);
-      slot.disabled = state.phase !== "playing" || state.currentPlayer !== player || item.type === "extraTurn";
+      slot.disabled = state.phase !== "playing" || state.currentPlayer !== player
+        || item.type === "extraTurn" || !canHumanAct();
       const itemName = t(definition.nameKey);
       slot.setAttribute("aria-label", t(item.type === "extraTurn" ? "inventory.auto" : "inventory.choose", { name: itemName }));
       slot.title = itemName + (item.type === "extraTurn"
@@ -254,7 +349,7 @@ function renderInventories() {
       button.type = "button";
       button.className = "admin-item-button" + (state.selectedAbility === itemId ? " is-selected" : "");
       button.dataset.itemId = itemId;
-      button.disabled = !adminToolsReady;
+      button.disabled = !adminToolsReady || !canHumanAct();
       const itemName = t(definition.nameKey);
       button.title = t(adminToolsReady ? "admin.item" : "admin.itemWaiting", { name: itemName });
       const icon = document.createElement("img");
@@ -285,6 +380,7 @@ function advanceClock(now = performance.now()) {
   stopClock();
   const previousState = state;
   state = flagFall(state);
+  invalidateComputerAction();
   render();
   if (previousState.phase !== "finished" && state.phase === "finished") showResult();
   return false;
@@ -897,6 +993,7 @@ function showMenuNotice(key, params = {}) {
 
 function openLocalGame() {
   leaveTraining(true);
+  computerOpponent = { enabled: false, difficulty: "easy" };
   mainMenuScreen.hidden = true;
   gameScreen.hidden = false;
   syncMenuAmbient();
@@ -904,9 +1001,26 @@ function openLocalGame() {
   startButton.focus();
 }
 
+function openComputerDifficulty() {
+  computerDifficultyModal.showModal();
+  computerDifficultyModal.querySelector("[data-computer-difficulty='easy']")?.focus();
+}
+
+function startComputerGame(difficulty) {
+  computerOpponent = { enabled: true, difficulty };
+  computerDifficultyModal.close();
+  leaveTraining(true);
+  mainMenuScreen.hidden = true;
+  gameScreen.hidden = false;
+  syncMenuAmbient();
+  setupGame();
+}
+
 function returnToMainMenu() {
+  beginGameSession();
   leaveTraining(true);
   stopClock();
+  computerOpponent = { enabled: false, difficulty: "easy" };
   gameScreen.hidden = true;
   mainMenuScreen.hidden = false;
   syncMenuAmbient();
@@ -921,6 +1035,8 @@ function leaveTraining(restoreSettings) {
 }
 
 function startTraining(lessonIndex = 0) {
+  beginGameSession();
+  computerOpponent = { enabled: false, difficulty: "easy" };
   stopClock();
   if (trainingSession && trainingSavedSettings) settings = { ...trainingSavedSettings };
   else trainingSavedSettings = { ...settings };
@@ -1069,6 +1185,7 @@ function saveMenuSettings() {
 }
 
 function setupGame() {
+  beginGameSession();
   stopClock();
   if (resultModal.open) resultModal.close();
   newlyPlacedCells.clear();
@@ -1081,6 +1198,7 @@ function setupGame() {
   };
   render();
   startClock();
+  scheduleComputerAction();
 }
 
 function updateState(nextState) {
@@ -1142,8 +1260,10 @@ function updateState(nextState) {
   state = nextState;
   if (state.phase === "playing") startClock();
   else stopClock();
+  if (state.phase === "finished") invalidateComputerAction();
   render();
   if (gameJustEnded) showResult();
+  else scheduleComputerAction();
 }
 
 function showResult() {
@@ -1236,7 +1356,9 @@ function render() {
         cell.disabled = true;
       }
 
-      if (state.phase === "setup-x" || state.phase === "setup-o") {
+      if (isComputerControlledTurn()) {
+        cell.disabled = true;
+      } else if (state.phase === "setup-x" || state.phase === "setup-o") {
         cell.disabled = value !== EMPTY_CELL;
         if (!cell.disabled) cell.addEventListener("click", () => updateState(chooseStart(state, row, col)));
       } else if (state.phase === "playing" && selectedAbility) {
@@ -1350,8 +1472,8 @@ function render() {
     statusElement.textContent = t("game.statusO");
     turnElement.textContent = t("game.hiddenChoice");
     turnProgress.hidden = true;
-    sideTitle.textContent = t("game.choosePlayer", { player: "O" });
-    sideDescription.textContent = t("game.pickStartO");
+    sideTitle.textContent = t(computerOpponent.enabled ? "computer.setupTitle" : "game.choosePlayer", { player: "O" });
+    sideDescription.textContent = t(computerOpponent.enabled ? "computer.setupHelp" : "game.pickStartO");
   } else if (state.phase === "playing") {
     statusElement.textContent = t("game.statusTurn", { player: state.currentPlayer });
     turnElement.textContent = t("game.left", { left: state.piecesLeft, total: state.settings.piecesPerTurn });
@@ -1364,8 +1486,8 @@ function render() {
     turnPlayerLabel.textContent = state.currentPlayer;
     turnProgress.dataset.player = state.currentPlayer;
     turnProgress.classList.toggle("turn-progress-low", state.piecesLeft <= Math.ceil(state.settings.piecesPerTurn / 3));
-    sideTitle.textContent = t("game.sideTurn", { player: state.currentPlayer });
-    sideDescription.textContent = t("game.sideHelp");
+    sideTitle.textContent = t(isComputerControlledTurn() ? "computer.turnTitle" : "game.sideTurn", { player: state.currentPlayer });
+    sideDescription.textContent = t(isComputerControlledTurn() ? "computer.turnHelp" : "game.sideHelp");
   } else {
     statusElement.textContent = t("game.finished");
     turnElement.textContent = t("game.playAgain");
@@ -1629,6 +1751,11 @@ freeStartToggle.addEventListener("change", () => {
 });
 settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
+computerGameButton.addEventListener("click", openComputerDifficulty);
+computerDifficultyModal.querySelectorAll("[data-computer-difficulty]").forEach((button) => {
+  button.addEventListener("click", () => startComputerGame(button.dataset.computerDifficulty));
+});
+computerDifficultyCancelButton.addEventListener("click", () => computerDifficultyModal.close());
 trainingButton.addEventListener("click", () => startTraining(0));
  tutorialAction.addEventListener("click", advanceTraining);
 returnMenuButton.addEventListener("click", returnToMainMenu);
@@ -1649,13 +1776,13 @@ settingsForm.addEventListener("submit", applySettings);
 resultModal.addEventListener("cancel", (event) => event.preventDefault());
 resultNewGameButton.addEventListener("click", setupGame);
 resignButton.addEventListener("click", () => {
-  if (state.phase !== "playing") return;
+  if (state.phase !== "playing" || !canHumanAct()) return;
   resignConfirmModal.showModal();
   resignCancelButton.focus();
 });
 resignCancelButton.addEventListener("click", () => resignConfirmModal.close());
 resignConfirmButton.addEventListener("click", () => {
-  if (state.phase !== "playing") {
+  if (state.phase !== "playing" || !canHumanAct()) {
     resignConfirmModal.close();
     return;
   }
@@ -1665,7 +1792,7 @@ resignConfirmButton.addEventListener("click", () => {
 for (const player of ["X", "O"]) {
   inventoryElements[player].addEventListener("click", (event) => {
     const slot = event.target.closest(".inventory-slot");
-    if (!slot || slot.disabled || state.currentPlayer !== player) return;
+    if (!slot || slot.disabled || !canHumanAct() || state.currentPlayer !== player) return;
     const item = state.inventory[player].find((candidate) => String(candidate.id) === slot.dataset.itemId);
     if (item) updateState(selectAbility(state, item.id));
   });
@@ -1700,7 +1827,7 @@ document.addEventListener("languagechange", () => {
 reduceMotionQuery.addEventListener?.("change", syncMenuAmbient);
 adminItemList.addEventListener("click", (event) => {
   const button = event.target.closest(".admin-item-button");
-  if (!button || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
+  if (!button || !canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
   updateState(selectAbility(state, button.dataset.itemId));
 });
 startButton.addEventListener("click", setupGame);

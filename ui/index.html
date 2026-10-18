@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=20261018-menu12">
+  <link rel="stylesheet" href="/ui/style.css?v=20261018-menu13">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -47,8 +47,8 @@
         <button class="mode-button" id="training-mode-button" type="button">
           <span class="mode-icon" aria-hidden="true">◇</span><span class="mode-copy"><strong data-i18n="menu.training">Обучение</strong><small data-i18n="menu.trainingHelp">Освой механику на практике</small></span><span class="mode-arrow" aria-hidden="true">↗</span>
         </button>
-        <button class="mode-button" type="button" data-mode="computer">
-          <span class="mode-icon" aria-hidden="true">◎</span><span class="mode-copy"><strong data-i18n="menu.computer">Против компьютера</strong><small data-i18n="menu.computerHelp">Проверь стратегию в одиночку</small></span><span class="mode-soon" data-i18n="menu.soon">Скоро</span>
+        <button class="mode-button" id="computer-game-button" type="button" aria-haspopup="dialog" aria-controls="computer-difficulty-modal">
+          <span class="mode-icon" aria-hidden="true">◎</span><span class="mode-copy"><strong data-i18n="menu.computer">Против компьютера</strong><small data-i18n="menu.computerHelp">Проверь стратегию в одиночку</small></span><span class="mode-arrow" aria-hidden="true">→</span>
         </button>
         <div class="menu-launcher-footer">
           <span class="menu-status-dot" aria-hidden="true"></span><span data-i18n="menu.localReady">Локальная партия уже доступна</span>
@@ -59,6 +59,21 @@
     </main>
     <footer class="menu-footer"><span data-i18n="menu.footer">Создано для тех, кто мыслит на ход вперёд.</span><span class="menu-footer-mark" aria-hidden="true">V / 01</span></footer>
   </div>
+
+  <dialog id="computer-difficulty-modal" class="settings-modal computer-difficulty-modal" aria-labelledby="computer-difficulty-title" aria-describedby="computer-difficulty-help">
+    <section class="settings-card">
+      <header class="settings-header">
+        <div><p class="eyebrow" data-i18n="computer.eyebrow">Одиночная игра</p><h2 id="computer-difficulty-title" data-i18n="computer.choose">Выбери сложность</h2></div>
+        <button id="computer-difficulty-cancel" class="icon-button" type="button" aria-label="Закрыть выбор сложности" data-i18n-aria-label="computer.close">×</button>
+      </header>
+      <p id="computer-difficulty-help" class="settings-summary" data-i18n="computer.chooseHelp">Выбери уровень противника. Первый ход остаётся за тобой.</p>
+      <div class="computer-difficulty-options">
+        <button class="mode-button" type="button" data-computer-difficulty="easy"><span class="mode-icon" aria-hidden="true">Ⅰ</span><span class="mode-copy"><strong data-i18n="computer.easy">Лёгкий</strong><small data-i18n="computer.easyHelp">Случайный допустимый ход</small></span><span class="mode-arrow" aria-hidden="true">→</span></button>
+        <button class="mode-button" type="button" data-computer-difficulty="medium"><span class="mode-icon" aria-hidden="true">Ⅱ</span><span class="mode-copy"><strong data-i18n="computer.medium">Средний</strong><small data-i18n="computer.mediumHelp">Выбирает ход по его последствиям</small></span><span class="mode-arrow" aria-hidden="true">→</span></button>
+        <button class="mode-button" type="button" data-computer-difficulty="hard"><span class="mode-icon" aria-hidden="true">Ⅲ</span><span class="mode-copy"><strong data-i18n="computer.hard">Сложный</strong><small data-i18n="computer.hardHelp">Анализирует продолжение своего хода</small></span><span class="mode-arrow" aria-hidden="true">→</span></button>
+      </div>
+    </section>
+  </dialog>
 
   <main class="app-shell" id="game-screen" hidden>
     <header class="topbar">
@@ -324,6 +339,6 @@
       <button id="result-new-game" class="button button-primary" type="button" data-i18n="dialog.newGame">Начать новую партию</button>
     </section>
   </dialog>
-  <script type="module" src="/ui/script.js?v=20261018-menu12"></script>
+  <script type="module" src="/ui/script.js?v=20261018-menu13"></script>
 </body>
 </html>

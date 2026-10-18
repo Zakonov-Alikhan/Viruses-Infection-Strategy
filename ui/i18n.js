@@ -1,5 +1,5 @@
-import ruLocale from "./locale-ru.js?v=20261018-menu12";
-import enLocale from "./locale-en.js?v=20261018-menu12";
+import ruLocale from "./locale-ru.js?v=20261018-menu13";
+import enLocale from "./locale-en.js?v=20261018-menu13";
 
 const dictionaries = Object.freeze({ ru: ruLocale, en: enLocale });
 const supportedLanguages = Object.keys(dictionaries);
