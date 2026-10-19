@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=20261018-menu13">
+  <link rel="stylesheet" href="/ui/style.css?v=online2">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -41,8 +41,8 @@
         <button class="mode-button mode-button-local mode-button-featured" id="local-game-button" type="button">
           <span class="mode-icon" aria-hidden="true">◈</span><span class="mode-copy"><strong data-i18n="menu.local">На одном устройстве</strong><small data-i18n="menu.localHelp">Два игрока · один экран</small></span><span class="mode-arrow" aria-hidden="true">→</span>
         </button>
-        <button class="mode-button" type="button" data-mode="online">
-          <span class="mode-icon" aria-hidden="true">⌁</span><span class="mode-copy"><strong data-i18n="menu.online">Сетевая игра</strong><small data-i18n="menu.onlineHelp">Сразись с игроками по всему миру</small></span><span class="mode-soon" data-i18n="menu.soon">Скоро</span>
+        <button class="mode-button" id="online-game-button" type="button" aria-haspopup="dialog" aria-controls="online-room-modal">
+          <span class="mode-icon" aria-hidden="true">⌁</span><span class="mode-copy"><strong data-i18n="menu.online">Сетевая игра</strong><small data-i18n="menu.onlineHelp">Создай комнату или введи код приглашения</small></span><span class="mode-arrow" aria-hidden="true">→</span>
         </button>
         <button class="mode-button" id="training-mode-button" type="button">
           <span class="mode-icon" aria-hidden="true">◇</span><span class="mode-copy"><strong data-i18n="menu.training">Обучение</strong><small data-i18n="menu.trainingHelp">Освой механику на практике</small></span><span class="mode-arrow" aria-hidden="true">↗</span>
@@ -59,6 +59,32 @@
     </main>
     <footer class="menu-footer"><span data-i18n="menu.footer">Создано для тех, кто мыслит на ход вперёд.</span><span class="menu-footer-mark" aria-hidden="true">V / 01</span></footer>
   </div>
+
+  <dialog id="online-room-modal" class="settings-modal online-room-modal" aria-labelledby="online-room-title" aria-describedby="online-room-help">
+    <section class="settings-card">
+      <header class="settings-header">
+        <div><p class="eyebrow" data-i18n="online.eyebrow">Приватная партия</p><h2 id="online-room-title" data-i18n="online.title">Игра по приглашению</h2></div>
+        <button id="online-room-close" class="icon-button" type="button" aria-label="Закрыть" data-i18n-aria-label="online.close">×</button>
+      </header>
+      <p id="online-room-help" class="settings-summary" data-i18n="online.help">Создай комнату и отправь код второму игроку или введи его код.</p>
+      <div id="online-room-entry" class="online-room-entry">
+        <button id="online-create-room" class="button button-primary online-create-button" type="button" data-i18n="online.create">Создать комнату</button>
+        <form id="online-join-form" class="online-join-form">
+          <label for="online-room-code" data-i18n="online.codeLabel">Код приглашения</label>
+          <div class="online-code-entry"><input id="online-room-code" name="code" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD1234" aria-describedby="online-error"><button class="button button-secondary" type="submit" data-i18n="online.join">Подключиться</button></div>
+        </form>
+        <button id="online-resume-room" class="button button-secondary online-resume-button" type="button" data-i18n="online.resume" hidden>Вернуться в прошлую комнату</button>
+      </div>
+      <section id="online-room-lobby" class="online-room-lobby" hidden>
+        <p id="online-room-status" class="online-room-status" role="status" aria-live="polite"></p>
+        <div class="online-invite-code"><span class="eyebrow" data-i18n="online.inviteCode">КОД КОМНАТЫ</span><strong id="online-room-code-value"></strong></div>
+        <p id="online-player-side" class="online-player-side"></p>
+        <div class="online-invite-actions"><button id="online-copy-code" class="button button-secondary" type="button" data-i18n="online.copyCode">Скопировать код</button><button id="online-copy-link" class="button button-secondary" type="button" data-i18n="online.copyLink">Скопировать ссылку</button></div>
+      </section>
+      <p id="online-error" class="online-error" role="alert" hidden></p>
+      <div class="settings-actions"><button id="online-return-menu" class="button button-secondary" type="button" data-i18n="online.back">Вернуться в меню</button></div>
+    </section>
+  </dialog>
 
   <dialog id="computer-difficulty-modal" class="settings-modal computer-difficulty-modal" aria-labelledby="computer-difficulty-title" aria-describedby="computer-difficulty-help">
     <section class="settings-card">
@@ -107,6 +133,7 @@
             </div>
             <div id="turn-counter" class="turn-counter" data-i18n="board.preparingTurn">Подготовка к игре</div>
           </div>
+          <p id="online-game-status" class="online-game-status" role="status" aria-live="polite" hidden></p>
           <div id="turn-progress" class="turn-progress" aria-live="polite" hidden>
             <div class="turn-progress-heading"><span><span data-i18n="turn.label">ХОД</span> <b id="turn-player-label">X</b></span><span class="turn-progress-amount"><strong id="pieces-left-count">—</strong><span> / <span id="pieces-total-count">—</span> <span data-i18n="turn.pieces">фигур</span></span></span></div>
             <div class="turn-progress-track" role="progressbar" aria-label="Оставшиеся фигуры текущего хода" data-i18n-aria-label="turn.aria" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0"><span id="turn-progress-fill"></span></div>
@@ -339,6 +366,7 @@
       <button id="result-new-game" class="button button-primary" type="button" data-i18n="dialog.newGame">Начать новую партию</button>
     </section>
   </dialog>
-  <script type="module" src="/ui/script.js?v=20261018-menu13"></script>
+  <script src="/runtime-config.js"></script>
+  <script type="module" src="/ui/script.js?v=online2"></script>
 </body>
 </html>

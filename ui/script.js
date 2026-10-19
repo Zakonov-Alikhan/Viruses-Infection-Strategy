@@ -28,6 +28,7 @@ import {
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261018-menu13";
 import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261018-menu13";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
+import { MultiplayerClient } from "./multiplayer.js?v=online2";
 
 const boardElement = document.querySelector(".game-board");
 const boardShell = document.querySelector(".board-shell");
@@ -49,6 +50,23 @@ const mainMenuScreen = document.querySelector("#main-menu-screen");
 const gameScreen = document.querySelector("#game-screen");
 const localGameButton = document.querySelector("#local-game-button");
 const computerGameButton = document.querySelector("#computer-game-button");
+const onlineGameButton = document.querySelector("#online-game-button");
+const onlineRoomModal = document.querySelector("#online-room-modal");
+const onlineRoomCloseButton = document.querySelector("#online-room-close");
+const onlineCreateRoomButton = document.querySelector("#online-create-room");
+const onlineJoinForm = document.querySelector("#online-join-form");
+const onlineRoomCodeInput = document.querySelector("#online-room-code");
+const onlineResumeButton = document.querySelector("#online-resume-room");
+const onlineRoomEntry = document.querySelector("#online-room-entry");
+const onlineRoomLobby = document.querySelector("#online-room-lobby");
+const onlineRoomStatus = document.querySelector("#online-room-status");
+const onlineRoomCodeValue = document.querySelector("#online-room-code-value");
+const onlinePlayerSide = document.querySelector("#online-player-side");
+const onlineCopyCodeButton = document.querySelector("#online-copy-code");
+const onlineCopyLinkButton = document.querySelector("#online-copy-link");
+const onlineReturnMenuButton = document.querySelector("#online-return-menu");
+const onlineErrorElement = document.querySelector("#online-error");
+const onlineGameStatus = document.querySelector("#online-game-status");
 const computerDifficultyModal = document.querySelector("#computer-difficulty-modal");
 const computerDifficultyCancelButton = document.querySelector("#computer-difficulty-cancel");
 const trainingButton = document.querySelector("#training-mode-button");
@@ -175,6 +193,18 @@ let menuDragLastTime = null;
 let trainingSession = null;
 let trainingSavedSettings = null;
 let computerOpponent = { enabled: false, difficulty: "easy" };
+let onlineMode = false;
+let onlineSide = null;
+let onlineRoomCode = null;
+let onlineConnected = false;
+let onlineCommandPending = false;
+let onlinePreviousSettings = null;
+let onlineStatusKey = null;
+let onlineStatusError = null;
+let onlineClockSnapshot = null;
+let onlineClockReceivedAt = null;
+let onlineMenuError = null;
+const multiplayerClient = new MultiplayerClient();
 let gameSessionId = 0;
 let computerActionToken = 0;
 let computerActionTimer = null;
@@ -199,8 +229,32 @@ function isComputerControlledTurn() {
 
 function canHumanAct() {
   if (!state || state.phase === "finished") return false;
+  if (onlineMode) {
+    if (!onlineConnected || onlineCommandPending || !onlineSide) return false;
+    if (state.phase === "setup-x" || state.phase === "setup-o") return state.setupPlayer === onlineSide;
+    return state.phase === "playing" && state.currentPlayer === onlineSide;
+  }
   if (state.phase === "setup-x") return true;
   return !isComputerControlledTurn();
+}
+
+function sendOnlineCommand(command) {
+  if (!onlineMode || !canHumanAct()) return false;
+  if (!multiplayerClient.sendCommand(command)) {
+    onlineConnected = false;
+    onlineStatusKey = "online.disconnected";
+    render();
+    return false;
+  }
+  onlineCommandPending = true;
+  render();
+  return true;
+}
+
+function performGameAction(command, transition) {
+  if (onlineMode) return sendOnlineCommand(command);
+  updateState(transition());
+  return true;
 }
 
 function scheduleComputerAction() {
@@ -289,8 +343,19 @@ function formatClock(milliseconds) {
 }
 
 function renderClock() {
-  clockXElement.textContent = settings.unlimitedTime ? "∞" : formatClock(clockRemaining.X);
-  clockOElement.textContent = settings.unlimitedTime ? "∞" : formatClock(clockRemaining.O);
+  const onlineElapsed = onlineMode && onlineClockReceivedAt !== null
+    ? Math.max(0, performance.now() - onlineClockReceivedAt)
+    : 0;
+  const shownClock = (player) => {
+    if (!onlineMode || settings.unlimitedTime) return clockRemaining[player];
+    const serverRemaining = onlineClockSnapshot?.remainingMs?.[player];
+    if (!Number.isFinite(serverRemaining)) return clockRemaining[player];
+    return Math.max(0, serverRemaining - (onlineClockSnapshot.activePlayer === player ? onlineElapsed : 0));
+  };
+  clockXElement.hidden = false;
+  clockOElement.hidden = false;
+  clockXElement.textContent = settings.unlimitedTime ? "∞" : formatClock(shownClock("X"));
+  clockOElement.textContent = settings.unlimitedTime ? "∞" : formatClock(shownClock("O"));
   clockControlSummary.textContent = settings.unlimitedTime
     ? t("clock.unlimited")
     : t("clock.summary", { minutes: settings.clockMinutes, seconds: settings.incrementSeconds });
@@ -300,8 +365,8 @@ function renderClock() {
   clockPlayerO.classList.toggle("clock-active", oActive);
   clockPlayerOName.textContent = t(computerOpponent.enabled ? "computer.player" : "player.o");
   currentTurnCard.classList.toggle("turn-active", state && state.phase !== "finished");
-  clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.X <= 10_000);
-  clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && clockRemaining.O <= 10_000);
+  clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && shownClock("X") <= 10_000);
+  clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && shownClock("O") <= 10_000);
   resignButton.disabled = !state || state.phase !== "playing" || !canHumanAct();
 }
 
@@ -369,6 +434,7 @@ function stopClock() {
 }
 
 function advanceClock(now = performance.now()) {
+  if (onlineMode) return true;
   if (!state || state.phase !== "playing" || settings.unlimitedTime || clockLastTick === null) return true;
   const elapsed = now - clockLastTick;
   clockLastTick = now;
@@ -387,6 +453,13 @@ function advanceClock(now = performance.now()) {
 }
 
 function startClock() {
+  if (onlineMode) {
+    if (clockInterval !== null || !state || state.phase !== "playing"
+      || settings.unlimitedTime || !onlineClockSnapshot?.activePlayer) return;
+    clockInterval = window.setInterval(renderClock, 100);
+    renderClock();
+    return;
+  }
   if (clockInterval !== null || !state || state.phase !== "playing" || settings.unlimitedTime) return;
   clockLastTick = performance.now();
   clockInterval = window.setInterval(() => advanceClock(), 100);
@@ -991,7 +1064,175 @@ function showMenuNotice(key, params = {}) {
   }, 3600);
 }
 
+function onlineErrorMessage(code) {
+  const key = "online.error." + (code || "generic");
+  return t(key) === key ? t("online.error.generic") : t(key);
+}
+
+function showOnlineError(code) {
+  onlineMenuError = code;
+  onlineErrorElement.textContent = onlineErrorMessage(code);
+  onlineErrorElement.hidden = false;
+}
+
+function clearOnlinePresentation() {
+  onlineMode = false;
+  onlineSide = null;
+  onlineRoomCode = null;
+  onlineConnected = false;
+  onlineCommandPending = false;
+  onlineStatusKey = null;
+  onlineStatusError = null;
+  onlineClockSnapshot = null;
+  onlineClockReceivedAt = null;
+  onlineGameStatus.hidden = true;
+  onlineGameStatus.textContent = "";
+  gameScreen.classList.remove("is-online");
+  if (onlinePreviousSettings) settings = { ...onlinePreviousSettings };
+  onlinePreviousSettings = null;
+  if (state) renderClock();
+}
+
+function leaveOnlineSession({ showMenu = false } = {}) {
+  clearOnlinePresentation();
+  multiplayerClient.leave();
+  if (resultModal.open) resultModal.close();
+  if (onlineRoomModal.open) onlineRoomModal.close();
+  onlineRoomEntry.hidden = false;
+  onlineRoomLobby.hidden = true;
+  onlineErrorElement.hidden = true;
+  onlineMenuError = null;
+  if (showMenu) {
+    beginGameSession();
+    stopClock();
+    gameScreen.hidden = true;
+    mainMenuScreen.hidden = false;
+    syncMenuAmbient();
+  }
+}
+
+function openOnlineRoom() {
+  onlineMenuError = null;
+  onlineErrorElement.hidden = true;
+  onlineRoomEntry.hidden = false;
+  onlineRoomLobby.hidden = true;
+  const savedSession = multiplayerClient.savedSession;
+  onlineResumeButton.hidden = !savedSession;
+  if (savedSession) onlineResumeButton.textContent = t("online.resume");
+  onlineRoomModal.showModal();
+  const inviteCode = new URLSearchParams(window.location.search).get("room");
+  if (inviteCode) onlineRoomCodeInput.value = inviteCode.slice(0, 8).toUpperCase();
+  (savedSession ? onlineResumeButton : onlineCreateRoomButton).focus();
+}
+
+function showOnlineRoom(message) {
+  onlineRoomCode = message.roomCode;
+  onlineSide = message.side;
+  onlineRoomCodeValue.textContent = message.roomCode;
+  onlineRoomStatus.textContent = t(message.status === "active" ? "online.joined" : "online.waiting");
+  onlinePlayerSide.textContent = t("online.yourSide", { side: message.side });
+  onlineRoomEntry.hidden = true;
+  onlineRoomLobby.hidden = false;
+  onlineErrorElement.hidden = true;
+}
+
+function enterOnlineGame(message) {
+  const isNewOnlineSession = !onlineMode;
+  if (isNewOnlineSession) {
+    leaveTraining(true);
+    beginGameSession();
+    stopClock();
+    if (resultModal.open) resultModal.close();
+    onlinePreviousSettings = { ...settings };
+    computerOpponent = { enabled: false, difficulty: "easy" };
+    settings = { ...settings, ...message.state.settings, adminMode: false };
+    onlineMode = true;
+    gameScreen.classList.add("is-online");
+    mainMenuScreen.hidden = true;
+    gameScreen.hidden = false;
+    syncMenuAmbient();
+  }
+  onlineRoomCode = message.roomCode || onlineRoomCode || multiplayerClient.savedSession?.roomCode;
+  onlineSide = message.side || onlineSide || multiplayerClient.savedSession?.side;
+  onlineConnected = true;
+  onlineCommandPending = false;
+  onlineStatusKey = null;
+  onlineStatusError = null;
+  onlineClockSnapshot = message.clock || null;
+  onlineClockReceivedAt = performance.now();
+  onlineGameStatus.hidden = true;
+  if (onlineRoomModal.open) onlineRoomModal.close();
+
+  if (isNewOnlineSession || !state) {
+    state = message.state;
+    newlyPlacedCells.clear();
+    newlySpawnedItems.clear();
+    activeAreaEffect = null;
+    clockRemaining = { X: 0, O: 0 };
+    render();
+    startClock();
+    if (state.phase === "finished") showResult();
+  } else {
+    updateState(message.state, { serverUpdate: true });
+  }
+}
+
+function handleMultiplayerEvent(event) {
+  if (event.type === "room-created" || event.type === "room-joined") {
+    showOnlineRoom(event);
+    return;
+  }
+  if (event.type === "room-ready" || event.type === "room-resumed" || event.type === "reconnected") {
+    enterOnlineGame(event.room || event);
+    return;
+  }
+  if (event.type === "state" && onlineMode && event.roomCode === onlineRoomCode) {
+    onlineConnected = true;
+    onlineCommandPending = false;
+    onlineStatusError = null;
+    onlineClockSnapshot = event.clock || null;
+    onlineClockReceivedAt = performance.now();
+    updateState(event.state, { serverUpdate: true });
+    return;
+  }
+  if (event.type === "disconnected") {
+    onlineConnected = false;
+    onlineCommandPending = false;
+    onlineStatusKey = "online.reconnecting";
+    if (onlineMode) {
+      onlineGameStatus.textContent = t(onlineStatusKey);
+      onlineGameStatus.hidden = false;
+      render();
+    } else if (onlineRoomModal.open && multiplayerClient.savedSession) {
+      onlineRoomStatus.textContent = t(onlineStatusKey);
+    }
+    return;
+  }
+  if (event.type === "reconnect-failed" || event.type === "room-closed") {
+    onlineConnected = false;
+    onlineCommandPending = false;
+    onlineStatusError = event.code || event.reason;
+    onlineGameStatus.textContent = onlineErrorMessage(onlineStatusError);
+    onlineGameStatus.hidden = false;
+    if (onlineMode) render();
+    else if (onlineRoomModal.open) showOnlineError(onlineStatusError);
+    return;
+  }
+  if (event.type === "server-error" || event.type === "command-error" || event.type === "transport-error") {
+    if (event.type === "command-error") onlineCommandPending = false;
+    onlineStatusError = event.code;
+    if (onlineMode) {
+      onlineGameStatus.textContent = onlineErrorMessage(event.code);
+      onlineGameStatus.hidden = false;
+      render();
+    } else if (onlineRoomModal.open) showOnlineError(event.code);
+  }
+}
+
+multiplayerClient.subscribe(handleMultiplayerEvent);
+
 function openLocalGame() {
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
   leaveTraining(true);
   computerOpponent = { enabled: false, difficulty: "easy" };
   mainMenuScreen.hidden = true;
@@ -1007,6 +1248,7 @@ function openComputerDifficulty() {
 }
 
 function startComputerGame(difficulty) {
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
   computerOpponent = { enabled: true, difficulty };
   computerDifficultyModal.close();
   leaveTraining(true);
@@ -1017,6 +1259,10 @@ function startComputerGame(difficulty) {
 }
 
 function returnToMainMenu() {
+  if (onlineMode || multiplayerClient.savedSession) {
+    leaveOnlineSession({ showMenu: true });
+    return;
+  }
   beginGameSession();
   leaveTraining(true);
   stopClock();
@@ -1035,6 +1281,7 @@ function leaveTraining(restoreSettings) {
 }
 
 function startTraining(lessonIndex = 0) {
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
   beginGameSession();
   computerOpponent = { enabled: false, difficulty: "easy" };
   stopClock();
@@ -1078,6 +1325,7 @@ function completeTrainingLesson() {
 }
 
 function handleTrainingMove(row, col) {
+  if (onlineMode) return sendOnlineCommand({ type: "place", row, col });
   if (!trainingSession) return updateState(playMove(state, row, col));
   const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
   if (lesson.objective === "shield" && trainingSession.piecePlaced) {
@@ -1102,6 +1350,7 @@ function handleTrainingMove(row, col) {
 }
 
 function handleTrainingAbilityTarget(itemId, row, col) {
+  if (onlineMode) return sendOnlineCommand({ type: "ability-target", itemId, row, col });
   if (!trainingSession) return updateState(chooseAbilityTarget(state, itemId, row, col));
   const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
   if (!lesson.targets.some((target) => target.row === row && target.col === col)) {
@@ -1114,6 +1363,7 @@ function handleTrainingAbilityTarget(itemId, row, col) {
 }
 
 function handleTrainingAreaTarget(itemId, row, col) {
+  if (onlineMode) return sendOnlineCommand({ type: "ability-target", itemId, row, col });
   if (!trainingSession) return updateState(useBomb(state, itemId, row, col));
   const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
   if (lesson.objective !== "bomb" || !lesson.targets.some((target) => target.row === row && target.col === col)) {
@@ -1201,14 +1451,15 @@ function setupGame() {
   scheduleComputerAction();
 }
 
-function updateState(nextState) {
+function updateState(nextState, { serverUpdate = false } = {}) {
+  if (onlineMode !== serverUpdate) return;
   const previousState = state;
   const now = performance.now();
-  if (previousState.phase === "playing" && !advanceClock(now)) return;
+  if (!onlineMode && previousState.phase === "playing" && !advanceClock(now)) return;
   const completedTurn = previousState.phase === "playing"
     && previousState.piecesLeft === 1
     && (nextState.currentPlayer !== previousState.currentPlayer || (nextState.phase === "finished" && nextState.piecesLeft === 0));
-  if (completedTurn && !settings.unlimitedTime) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
+  if (!onlineMode && completedTurn && !settings.unlimitedTime) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
   const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
   const animationStartedAt = performance.now();
   newlyPlacedCells.clear();
@@ -1263,7 +1514,7 @@ function updateState(nextState) {
   if (state.phase === "finished") invalidateComputerAction();
   render();
   if (gameJustEnded) showResult();
-  else scheduleComputerAction();
+  else if (!onlineMode) scheduleComputerAction();
 }
 
 function showResult() {
@@ -1356,11 +1607,14 @@ function render() {
         cell.disabled = true;
       }
 
-      if (isComputerControlledTurn()) {
+      if (isComputerControlledTurn() || (onlineMode && !canHumanAct())) {
         cell.disabled = true;
       } else if (state.phase === "setup-x" || state.phase === "setup-o") {
         cell.disabled = value !== EMPTY_CELL;
-        if (!cell.disabled) cell.addEventListener("click", () => updateState(chooseStart(state, row, col)));
+        if (!cell.disabled) cell.addEventListener("click", () => performGameAction(
+          { type: "choose-start", row, col },
+          () => chooseStart(state, row, col)
+        ));
       } else if (state.phase === "playing" && selectedAbility) {
         if (selectedAbility.type === "bomb" || selectedAbility.type === "antiBomb") {
           const lessonAllowsArea = !trainingSession || TRAINING_LESSONS[trainingSession.lessonIndex].objective !== "bomb"
@@ -1369,7 +1623,9 @@ function render() {
           cell.disabled = !valid;
           if (valid) cell.addEventListener("click", () => selectedAbility.type === "bomb"
             ? handleTrainingAreaTarget(selectedAbility.id, row, col)
-            : updateState(useAntiBomb(state, selectedAbility.id, row, col)));
+            : onlineMode
+              ? sendOnlineCommand({ type: "ability-target", itemId: selectedAbility.id, row, col })
+              : updateState(useAntiBomb(state, selectedAbility.id, row, col)));
         } else if (selectedAbility.type === "debris") {
           const valid = isValidDebrisTarget(state, row, col);
           cell.disabled = !valid;
@@ -1383,7 +1639,9 @@ function render() {
         } else if (selectedAbility.type === "pointDestroy") {
           const valid = isValidPointDestroyTarget(state, row, col);
           cell.disabled = !valid;
-          if (valid) cell.addEventListener("click", () => updateState(usePointDestroy(state, selectedAbility.id, row, col)));
+          if (valid) cell.addEventListener("click", () => onlineMode
+            ? sendOnlineCommand({ type: "ability-target", itemId: selectedAbility.id, row, col })
+            : updateState(usePointDestroy(state, selectedAbility.id, row, col)));
         } else if (trainingSession?.piecePlaced && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "shield") {
           cell.disabled = true;
         } else if (isLegalMove(state, row, col)) {
@@ -1466,14 +1724,22 @@ function render() {
     statusElement.textContent = t("game.statusX");
     turnElement.textContent = t("board.preparingTurn");
     turnProgress.hidden = true;
-    sideTitle.textContent = t("game.choosePlayer", { player: "X" });
-    sideDescription.textContent = t("game.pickStartX");
+    sideTitle.textContent = onlineMode
+      ? t(state.setupPlayer === onlineSide ? "online.chooseStart" : "online.waitingStart")
+      : t("game.choosePlayer", { player: "X" });
+    sideDescription.textContent = onlineMode
+      ? t(state.setupPlayer === onlineSide ? "online.chooseStartHelp" : "online.waitingStartHelp", { player: state.setupPlayer })
+      : t("game.pickStartX");
   } else if (state.phase === "setup-o") {
     statusElement.textContent = t("game.statusO");
     turnElement.textContent = t("game.hiddenChoice");
     turnProgress.hidden = true;
-    sideTitle.textContent = t(computerOpponent.enabled ? "computer.setupTitle" : "game.choosePlayer", { player: "O" });
-    sideDescription.textContent = t(computerOpponent.enabled ? "computer.setupHelp" : "game.pickStartO");
+    sideTitle.textContent = onlineMode
+      ? t(state.setupPlayer === onlineSide ? "online.chooseStart" : "online.waitingStart")
+      : t(computerOpponent.enabled ? "computer.setupTitle" : "game.choosePlayer", { player: "O" });
+    sideDescription.textContent = onlineMode
+      ? t(state.setupPlayer === onlineSide ? "online.chooseStartHelp" : "online.waitingStartHelp", { player: state.setupPlayer })
+      : t(computerOpponent.enabled ? "computer.setupHelp" : "game.pickStartO");
   } else if (state.phase === "playing") {
     statusElement.textContent = t("game.statusTurn", { player: state.currentPlayer });
     turnElement.textContent = t("game.left", { left: state.piecesLeft, total: state.settings.piecesPerTurn });
@@ -1486,8 +1752,12 @@ function render() {
     turnPlayerLabel.textContent = state.currentPlayer;
     turnProgress.dataset.player = state.currentPlayer;
     turnProgress.classList.toggle("turn-progress-low", state.piecesLeft <= Math.ceil(state.settings.piecesPerTurn / 3));
-    sideTitle.textContent = t(isComputerControlledTurn() ? "computer.turnTitle" : "game.sideTurn", { player: state.currentPlayer });
-    sideDescription.textContent = t(isComputerControlledTurn() ? "computer.turnHelp" : "game.sideHelp");
+    sideTitle.textContent = onlineMode
+      ? t(state.currentPlayer === onlineSide ? "online.yourTurn" : "online.opponentTurn", { player: state.currentPlayer })
+      : t(isComputerControlledTurn() ? "computer.turnTitle" : "game.sideTurn", { player: state.currentPlayer });
+    sideDescription.textContent = onlineMode
+      ? t(state.currentPlayer === onlineSide ? "online.yourTurnHelp" : "online.opponentTurnHelp")
+      : t(isComputerControlledTurn() ? "computer.turnHelp" : "game.sideHelp");
   } else {
     statusElement.textContent = t("game.finished");
     turnElement.textContent = t("game.playAgain");
@@ -1497,6 +1767,14 @@ function render() {
   }
 
   messageElement.textContent = formatMessage(state.message);
+  if (onlineMode) {
+    onlineGameStatus.textContent = onlineStatusError
+      ? onlineErrorMessage(onlineStatusError)
+      : onlineStatusKey ? t(onlineStatusKey) : t("online.connectedAs", { side: onlineSide });
+    onlineGameStatus.hidden = false;
+  } else {
+    onlineGameStatus.hidden = true;
+  }
   syncBoardGeometry();
   renderClock();
   renderInventories();
@@ -1751,6 +2029,77 @@ freeStartToggle.addEventListener("change", () => {
 });
 settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
+onlineGameButton.addEventListener("click", openOnlineRoom);
+onlineRoomCloseButton.addEventListener("click", () => onlineRoomModal.close());
+onlineRoomModal.addEventListener("close", () => {
+  if (!onlineMode && multiplayerClient.savedSession) leaveOnlineSession();
+});
+onlineCreateRoomButton.addEventListener("click", async () => {
+  onlineCreateRoomButton.disabled = true;
+  onlineErrorElement.hidden = true;
+  onlineRoomStatus.textContent = t("online.connecting");
+  try {
+    await multiplayerClient.createRoom();
+  } catch (error) {
+    showOnlineError(error.code);
+  } finally {
+    onlineCreateRoomButton.disabled = false;
+  }
+});
+onlineJoinForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const code = onlineRoomCodeInput.value.trim().toUpperCase();
+  if (!code) {
+    showOnlineError("invalid-room-code");
+    onlineRoomCodeInput.focus();
+    return;
+  }
+  onlineJoinForm.querySelector("button[type='submit']").disabled = true;
+  onlineErrorElement.hidden = true;
+  try {
+    await multiplayerClient.joinRoom(code);
+  } catch (error) {
+    showOnlineError(error.code);
+  } finally {
+    onlineJoinForm.querySelector("button[type='submit']").disabled = false;
+  }
+});
+onlineResumeButton.addEventListener("click", async () => {
+  onlineResumeButton.disabled = true;
+  onlineErrorElement.hidden = true;
+  try {
+    await multiplayerClient.resumeSavedRoom();
+  } catch (error) {
+    showOnlineError(error.code);
+  } finally {
+    onlineResumeButton.disabled = false;
+  }
+});
+onlineCopyCodeButton.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(onlineRoomCode || onlineRoomCodeValue.textContent);
+    onlineRoomStatus.textContent = t("online.codeCopied");
+  } catch {
+    showOnlineError("clipboard-unavailable");
+  }
+});
+onlineCopyLinkButton.addEventListener("click", async () => {
+  try {
+    const invite = new URL(window.location.href);
+    invite.searchParams.set("room", onlineRoomCode || onlineRoomCodeValue.textContent);
+    await navigator.clipboard.writeText(invite.toString());
+    onlineRoomStatus.textContent = t("online.linkCopied");
+  } catch {
+    showOnlineError("clipboard-unavailable");
+  }
+});
+onlineReturnMenuButton.addEventListener("click", () => {
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
+  if (onlineRoomModal.open) onlineRoomModal.close();
+  onlineRoomEntry.hidden = false;
+  onlineRoomLobby.hidden = true;
+  onlineErrorElement.hidden = true;
+});
 computerGameButton.addEventListener("click", openComputerDifficulty);
 computerDifficultyModal.querySelectorAll("[data-computer-difficulty]").forEach((button) => {
   button.addEventListener("click", () => startComputerGame(button.dataset.computerDifficulty));
@@ -1764,9 +2113,7 @@ menuSettingsCloseButton.addEventListener("click", () => menuSettingsModal.close(
 menuSettingsDoneButton.addEventListener("click", saveMenuSettings);
 accountActionButton.addEventListener("click", () => showMenuNotice("menu.profileSoon"));
 document.querySelectorAll("[data-mode]").forEach((button) => {
-  button.addEventListener("click", () => {
-    showMenuNotice("menu.missing", { feature: t("menu." + button.dataset.mode) });
-  });
+  button.addEventListener("click", () => showMenuNotice("menu.missing", { feature: t("menu." + button.dataset.mode) }));
 });
 rulesButton.addEventListener("click", () => rulesModal.showModal());
 rulesCloseButton.addEventListener("click", () => rulesModal.close());
@@ -1774,7 +2121,10 @@ settingsCloseButton.addEventListener("click", () => settingsModal.close());
 settingsCancelButton.addEventListener("click", () => settingsModal.close());
 settingsForm.addEventListener("submit", applySettings);
 resultModal.addEventListener("cancel", (event) => event.preventDefault());
-resultNewGameButton.addEventListener("click", setupGame);
+resultNewGameButton.addEventListener("click", () => {
+  if (onlineMode) leaveOnlineSession({ showMenu: true });
+  else setupGame();
+});
 resignButton.addEventListener("click", () => {
   if (state.phase !== "playing" || !canHumanAct()) return;
   resignConfirmModal.showModal();
@@ -1787,14 +2137,18 @@ resignConfirmButton.addEventListener("click", () => {
     return;
   }
   resignConfirmModal.close();
-  updateState(resign(state));
+  if (onlineMode) sendOnlineCommand({ type: "resign" });
+  else updateState(resign(state));
 });
 for (const player of ["X", "O"]) {
   inventoryElements[player].addEventListener("click", (event) => {
     const slot = event.target.closest(".inventory-slot");
     if (!slot || slot.disabled || !canHumanAct() || state.currentPlayer !== player) return;
     const item = state.inventory[player].find((candidate) => String(candidate.id) === slot.dataset.itemId);
-    if (item) updateState(selectAbility(state, item.id));
+    if (item) {
+      if (onlineMode) sendOnlineCommand({ type: "select-ability", itemId: item.id });
+      else updateState(selectAbility(state, item.id));
+    }
   });
 }
 languageSelect.value = getLanguage();

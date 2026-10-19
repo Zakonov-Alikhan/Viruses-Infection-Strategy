@@ -393,6 +393,29 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .settings-button { display: inline-flex; align-items: center; gap: 8px; }
 .settings-button > span { color: var(--teal); font-size: 16px; }
 .settings-modal { width: min(500px, calc(100% - 32px)); max-width: none; max-height: calc(100% - 32px); padding: 0; overflow: auto; color: var(--text); border: 0; background: transparent; }
+.online-room-modal { width: min(540px, calc(100% - 28px)); }
+.online-room-entry { display: grid; gap: 20px; }
+.online-create-button { width: 100%; min-height: 48px; }
+.online-join-form { display: grid; gap: 8px; }
+.online-join-form > label { color: #c2d0ca; font-size: 12px; font-weight: 700; }
+.online-code-entry { display: flex; gap: 8px; }
+.online-code-entry input { width: 100%; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid #34484a; border-radius: 10px; color: var(--text); background: rgba(12,20,22,.55); font: inherit; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.online-code-entry input:focus { outline: 2px solid rgba(94,218,192,.45); outline-offset: 1px; }
+.online-resume-button { width: 100%; }
+.online-room-lobby { display: grid; gap: 15px; }
+.online-room-status { margin: 0; color: #c7d7d0; font-size: 13px; line-height: 1.55; }
+.online-invite-code { display: grid; justify-items: center; gap: 6px; padding: 18px; border: 1px solid rgba(198,243,107,.25); border-radius: 13px; background: rgba(198,243,107,.055); }
+.online-invite-code .eyebrow { margin: 0; color: #90a69c; font-size: 9px; letter-spacing: .16em; }
+.online-invite-code strong { color: var(--lime); font-size: clamp(26px, 8vw, 36px); letter-spacing: .2em; }
+.online-player-side { margin: 0; color: #c7d7d0; text-align: center; font-size: 13px; }
+.online-invite-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.online-error { margin: 15px 0 0; padding: 10px 12px; border-left: 2px solid #ff806f; border-radius: 0 8px 8px 0; color: #ffc3b8; background: rgba(255,100,82,.08); font-size: 12px; line-height: 1.5; }
+.online-room-modal .settings-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+.online-game-status { margin: 0; padding: 8px 11px; border: 1px solid rgba(94,218,192,.18); border-radius: 8px; color: #b6d9ce; background: rgba(94,218,192,.06); font-size: 11px; line-height: 1.4; }
+.online-game-status[hidden] { display: none !important; }
+.app-shell.is-online .settings-button,
+.app-shell.is-online #start-button { display: none; }
+.app-shell.is-online .clock-control-summary { color: #93aaa0; }
 .computer-difficulty-options { display: grid; gap: 8px; margin-top: 16px; }
 .computer-difficulty-options .mode-button { min-height: 64px; margin-top: 0; }
 .settings-modal::backdrop { background: rgba(5, 12, 14, .78); backdrop-filter: blur(7px); }

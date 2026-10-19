@@ -1,9 +1,14 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
 )
 
 func main() {
@@ -17,8 +22,39 @@ func main() {
 		w.Header().Set("Content-Type", "text/css")
 		http.ServeFile(w, r, "ui/style.css") // Относительный путь
 	})
-	port := ":3000"
-	fmt.Printf("Сервер запущен на порту %s\n", port)
-	log.Println("Server is listening...http://127.0.0.1:3000")
-	http.ListenAndServe(port, mux)
+	mux.HandleFunc("/runtime-config.js", serveRuntimeConfig)
+
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "3000"
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		log.Fatalf("Invalid PORT %q: expected a number from 1 to 65535", port)
+	}
+	address := net.JoinHostPort("0.0.0.0", port)
+	log.Printf("Web server listening on %s", address)
+	if err := http.ListenAndServe(address, mux); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func serveRuntimeConfig(w http.ResponseWriter, r *http.Request) {
+	webSocketURL := strings.TrimSpace(os.Getenv("VIRUSES_MULTIPLAYER_URL"))
+	if webSocketURL != "" {
+		parsed, err := url.Parse(webSocketURL)
+		if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" ||
+			parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			http.Error(w, "VIRUSES_MULTIPLAYER_URL must be a ws:// or wss:// URL", http.StatusInternalServerError)
+			return
+		}
+	}
+	encodedURL, err := json.Marshal(webSocketURL)
+	if err != nil {
+		http.Error(w, "Could not create runtime configuration", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte("window.VIRUSES_MULTIPLAYER_URL = " + string(encodedURL) + ";\n"))
 }

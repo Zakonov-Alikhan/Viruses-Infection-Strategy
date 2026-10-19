@@ -212,10 +212,10 @@ function acquireEventItem(state, player, eventItem) {
   };
 }
 
-export function resign(state) {
-  if (state.phase !== "playing") return state;
-  const winner = state.currentPlayer === "X" ? "O" : "X";
-  return finish(state, winner, message("message.resigned", { player: state.currentPlayer }));
+export function resign(state, player = state.currentPlayer) {
+  if (state.phase !== "playing" || (player !== "X" && player !== "O")) return state;
+  const winner = player === "X" ? "O" : "X";
+  return finish(state, winner, message("message.resigned", { player }));
 }
 
 export function flagFall(state) {
