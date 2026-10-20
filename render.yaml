@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: viruses-infection-strategy
+    runtime: go
+    plan: free
+    region: oregon
+    branch: codex/online-multiplayer
+    buildCommand: go build -o viruses-web .
+    startCommand: ./viruses-web
+    healthCheckPath: /
+    envVars:
+      - key: VIRUSES_MULTIPLAYER_URL
+        sync: false
+
+  - type: web
+    name: viruses-multiplayer
+    runtime: node
+    plan: free
+    region: oregon
+    branch: codex/online-multiplayer
+    buildCommand: npm ci
+    startCommand: npm run start:multiplayer
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MULTIPLAYER_HOST
+        value: 0.0.0.0
+      - key: MULTIPLAYER_TRUST_PROXY
+        value: "true"
+      - key: MULTIPLAYER_ALLOWED_ORIGINS
+        sync: false
