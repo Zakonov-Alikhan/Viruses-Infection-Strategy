@@ -100,7 +100,8 @@ export function processGameCommand(state, side, command, {
     if (!isCoordinate(command.row, command.col)) return failure(state, "invalid-coordinate");
   }
   if ((command.type === "select-ability" || command.type === "ability-target")
-    && (typeof command.itemId !== "string" || command.itemId.length === 0)) {
+    && !((typeof command.itemId === "string" && command.itemId.length > 0)
+      || (Number.isSafeInteger(command.itemId) && command.itemId > 0))) {
     return failure(state, "invalid-item");
   }
   if (command.type === "ability-target" && state.selectedAbility !== command.itemId) {

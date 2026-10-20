@@ -192,23 +192,53 @@ export function getSelectedAbility(state) {
   return state.selectedAbility === null ? null : getAbility(state, state.currentPlayer, state.selectedAbility);
 }
 
+function pendingExtraTurnQueues(state) {
+  const queues = state.pendingExtraTurns;
+  if (queues && !Array.isArray(queues) && typeof queues === "object") {
+    const result = { X: [...(queues.X || [])], O: [...(queues.O || [])] };
+    const legacyId = state.pendingExtraTurn;
+    if (legacyId !== null && legacyId !== undefined && result.X.length === 0 && result.O.length === 0) {
+      const owner = ["X", "O"].find((player) => state.inventory?.[player]?.some((item) => item.id === legacyId));
+      if (owner) result[owner].push(legacyId);
+    }
+    return result;
+  }
+  const legacyId = state.pendingExtraTurn;
+  if (legacyId === null || legacyId === undefined) return { X: [], O: [] };
+  const owner = ["X", "O"].find((player) => state.inventory?.[player]?.some((item) => item.id === legacyId));
+  return { X: owner === "X" ? [legacyId] : [], O: owner === "O" ? [legacyId] : [] };
+}
+
+function withPendingExtraTurnQueues(state, queues) {
+  return {
+    ...state,
+    pendingExtraTurns: queues,
+    // Keep the old scalar field readable for older local fixtures/integrations.
+    pendingExtraTurn: queues[state.currentPlayer]?.[0] ?? queues.X[0] ?? queues.O[0] ?? null
+  };
+}
+
 function acquireEventItem(state, player, eventItem) {
   const inventory = copyInventory(state.inventory);
+  const pendingExtraTurns = pendingExtraTurnQueues(state);
   if (inventory[player].length >= MAX_INVENTORY_ITEMS) {
-    const removableIndex = inventory[player].findIndex((item) => item.id !== state.pendingExtraTurn);
+    const protectedIds = new Set(pendingExtraTurns[player]);
+    const removableIndex = inventory[player].findIndex((item) => !protectedIds.has(item.id));
     const [replaced] = inventory[player].splice(removableIndex < 0 ? 0 : removableIndex, 1);
+    if (eventItem.type === "extraTurn") pendingExtraTurns[player].push(eventItem.id);
     return {
       inventory: { ...inventory, [player]: [...inventory[player], eventItem] },
       selectedAbility: state.selectedAbility === replaced.id ? null : state.selectedAbility,
-      pendingExtraTurn: eventItem.type === "extraTurn"
-        ? eventItem.id
-        : state.pendingExtraTurn === replaced.id ? null : state.pendingExtraTurn
+      pendingExtraTurns,
+      pendingExtraTurn: pendingExtraTurns[state.currentPlayer]?.[0] ?? pendingExtraTurns.X[0] ?? pendingExtraTurns.O[0] ?? null
     };
   }
+  if (eventItem.type === "extraTurn") pendingExtraTurns[player].push(eventItem.id);
   return {
     inventory: { ...inventory, [player]: [...inventory[player], eventItem] },
     selectedAbility: state.selectedAbility,
-    pendingExtraTurn: eventItem.type === "extraTurn" ? eventItem.id : state.pendingExtraTurn
+    pendingExtraTurns,
+    pendingExtraTurn: pendingExtraTurns[state.currentPlayer]?.[0] ?? pendingExtraTurns.X[0] ?? pendingExtraTurns.O[0] ?? null
   };
 }
 
@@ -271,6 +301,7 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
     selectedAbility: null,
     abilityTargets: [],
     protections: [],
+    pendingExtraTurns: { X: [], O: [] },
     pendingExtraTurn: null,
     message: [],
     winner: null,
@@ -621,16 +652,18 @@ export function playMove(state, row, col, random = Math.random) {
   }
 
   if (piecesLeft === 0) {
-    const pendingExtraTurn = next.pendingExtraTurn;
-    if (pendingExtraTurn !== null && next.inventory[player].some((item) => item.id === pendingExtraTurn)) {
+    const pendingExtraTurns = pendingExtraTurnQueues(next);
+    const pendingExtraTurn = pendingExtraTurns[player][0];
+    if (pendingExtraTurn !== undefined) {
       const nextInventory = copyInventory(next.inventory);
       removeInventoryItem(nextInventory, player, pendingExtraTurn);
+      pendingExtraTurns[player].shift();
       next = {
         ...next,
         inventory: nextInventory,
-        pendingExtraTurn: null,
         message: appendMessage(next.message, message("message.extraTurn", { player }))
       };
+      next = withPendingExtraTurnQueues(next, pendingExtraTurns);
       next = startTurn(next, player, state.settings.piecesPerTurn);
       if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board, next.protections)) {
         const winner = player === "X" ? "O" : "X";

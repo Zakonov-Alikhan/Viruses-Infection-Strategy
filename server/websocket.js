@@ -164,10 +164,10 @@ export function createMultiplayerServer({
 
       const context = contexts.get(socket);
       if (message.type === "create-room") {
-        if (!exactKeys(message, ["type", "requestId"])) return sendError(socket, "invalid-message", message.requestId);
+        if (!exactKeys(message, ["type", "settings", "requestId"])) return sendError(socket, "invalid-message", message.requestId);
         if (context) return sendError(socket, "already-in-room", message.requestId);
         if (!createLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
-        const created = roomManager.createRoom();
+        const created = roomManager.createRoom(message.settings);
         if (!created.ok) return sendError(socket, created.error.code, message.requestId);
         const attached = roomManager.attachConnection(created.roomCode, created.side, (outgoing) => {
           safeJsonSend(socket, outgoing, attached.connection);

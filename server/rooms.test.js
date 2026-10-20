@@ -106,6 +106,38 @@ test("creates private rooms and assigns X then O on the server", () => {
   assert.equal(manager.roomCount, 1);
 });
 
+test("applies validated per-room settings to game state and clock, and rejects invalid settings", () => {
+  const manager = makeManager();
+  const customSettings = {
+    width: 12,
+    height: 10,
+    piecesPerTurn: 3,
+    clockMinutes: 7,
+    incrementSeconds: 4,
+    unlimitedTime: false,
+    randomEvents: false,
+    animationsEnabled: false,
+    freeStartingPositions: false
+  };
+  const created = manager.createRoom(customSettings);
+  assert.equal(created.ok, true);
+  assert.equal(created.state.phase, "playing");
+  assert.deepEqual(created.state.settings, customSettings);
+  assert.deepEqual(created.clock.remainingMs, { X: 7 * 60_000, O: 7 * 60_000 });
+  assert.equal(created.clock.enabled, true);
+
+  const joined = manager.joinRoom(created.roomCode);
+  assert.deepEqual(joined.state.settings, customSettings);
+  assert.deepEqual(joined.clock.remainingMs, { X: 7 * 60_000, O: 7 * 60_000 });
+
+  const roomCount = manager.roomCount;
+  const invalidPieces = manager.createRoom({ ...customSettings, piecesPerTurn: 13 });
+  const unknownSetting = manager.createRoom({ ...customSettings, adminMode: true });
+  assert.deepEqual(invalidPieces.error, { code: "invalid-settings" });
+  assert.deepEqual(unknownSetting.error, { code: "invalid-settings" });
+  assert.equal(manager.roomCount, roomCount);
+});
+
 test("rejects a third seat and unknown room codes", () => {
   const manager = makeManager();
   const room = manager.createRoom();
@@ -263,6 +295,38 @@ test("a timely move preserves elapsed time, adds the configured increment, and s
   assert.equal(snapshot.clock.activePlayer, "O");
   assert.equal([...scheduler.timers.values()][0].dueAt, scheduler.now() + snapshot.clock.remainingMs.O);
   assert.equal(snapshot.state.phase, "playing");
+});
+
+test("a collected extra turn receives its increment, then the clock passes to the opponent", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received, connectionX, connectionO } = makeTimedManager(scheduler);
+  await startGame(manager, room.roomCode, received);
+  const internalRoom = manager.rooms.get(room.roomCode);
+  internalRoom.state = {
+    ...internalRoom.state,
+    eventItems: [{ id: 73, type: "extraTurn", row: 0, col: 1 }]
+  };
+
+  await scheduler.advance(3_000);
+  const extraTurnMove = await manager.submitCommand(room.roomCode, "X", {
+    type: "place", row: 0, col: 1
+  });
+  assert.equal(extraTurnMove.ok, true);
+  let snapshot = manager.getSnapshot(room.roomCode, "X");
+  assert.equal(snapshot.state.currentPlayer, "X");
+  assert.equal(snapshot.state.piecesLeft, 1);
+  assert.equal(snapshot.clock.activePlayer, "X");
+  assert.equal(snapshot.clock.remainingMs.X, 59_000);
+
+  await scheduler.advance(4_000);
+  const regularMove = await manager.submitCommand(room.roomCode, "X", {
+    type: "place", row: 0, col: 2
+  });
+  assert.equal(regularMove.ok, true);
+  snapshot = manager.getSnapshot(room.roomCode, "O");
+  assert.equal(snapshot.state.currentPlayer, "O");
+  assert.equal(snapshot.clock.activePlayer, "O");
+  assert.equal(snapshot.clock.remainingMs.X, 57_000);
 });
 
 test("unlimited-time games never schedule or apply a timeout", async () => {

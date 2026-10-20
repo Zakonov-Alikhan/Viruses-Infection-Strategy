@@ -124,9 +124,9 @@ export class MultiplayerClient {
     return this.connectPromise;
   }
 
-  async createRoom() {
+  async createRoom(settings) {
     await this.connect();
-    return this.#request("create-room", {}, "room-created");
+    return this.#request("create-room", settings ? { settings } : {}, "room-created");
   }
 
   async joinRoom(code) {

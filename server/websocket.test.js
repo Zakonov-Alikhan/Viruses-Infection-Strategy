@@ -159,6 +159,55 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.deepEqual(xMoveState.state, oMoveState.state);
 });
 
+test("forwards validated room settings through WebSocket creation to both players", async (t) => {
+  const { server, address } = await makeTestServer();
+  const peers = [];
+  t.after(async () => {
+    await Promise.all(peers.map((peer) => peer.close().catch(() => {})));
+    await server.close();
+  });
+
+  const host = await openPeer(address);
+  peers.push(host);
+  host.send({
+    type: "create-room",
+    requestId: "settings-create",
+    settings: {
+      width: 12,
+      height: 10,
+      piecesPerTurn: 3,
+      clockMinutes: 4,
+      incrementSeconds: 6,
+      unlimitedTime: false,
+      randomEvents: false,
+      animationsEnabled: false,
+      freeStartingPositions: false
+    }
+  });
+  const created = await host.next("room-created");
+  assert.equal(created.requestId, "settings-create");
+  assert.deepEqual(created.state.settings, {
+    width: 12,
+    height: 10,
+    piecesPerTurn: 3,
+    clockMinutes: 4,
+    incrementSeconds: 6,
+    unlimitedTime: false,
+    randomEvents: false,
+    animationsEnabled: false,
+    freeStartingPositions: false
+  });
+  assert.equal(created.state.phase, "playing");
+  assert.deepEqual(created.clock.remainingMs, { X: 4 * 60_000, O: 4 * 60_000 });
+
+  const guest = await openPeer(address);
+  peers.push(guest);
+  guest.send({ type: "join-room", code: created.roomCode });
+  const joined = await guest.next("room-joined");
+  assert.deepEqual(joined.state.settings, created.state.settings);
+  assert.deepEqual(joined.clock.remainingMs, created.clock.remainingMs);
+});
+
 test("handles malformed and unknown messages, binary frames, and rejects oversized frames", async (t) => {
   const { server, address } = await makeTestServer({ maxPayload: 1024 });
   const peers = [];

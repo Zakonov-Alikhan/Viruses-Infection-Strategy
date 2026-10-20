@@ -117,6 +117,32 @@ test("applies a selected bomb through core ability transitions", () => {
   assert.deepEqual(state.inventory.X, [{ id: "bomb-1", type: "bomb" }]);
 });
 
+test("accepts numeric event-item IDs from the game engine through the server command API", () => {
+  const base = playingState();
+  const board = base.board.map((row) => row.slice());
+  board[4][4] = "O";
+  const state = {
+    ...base,
+    board,
+    inventory: { X: [{ id: 17, type: "bomb" }], O: [] }
+  };
+  const selected = processGameCommand(state, "X", {
+    type: "select-ability", itemId: 17
+  });
+
+  assert.equal(selected.ok, true);
+  assert.equal(selected.state.selectedAbility, 17);
+  assert.deepEqual(getPlayerView(selected.state, "X").inventory.X, [{ id: 17, type: "bomb" }]);
+
+  const used = processGameCommand(selected.state, "X", {
+    type: "ability-target", itemId: 17, row: 4, col: 4
+  });
+  assert.equal(used.ok, true);
+  assert.equal(used.state.board[4][4], EMPTY_CELL);
+  assert.deepEqual(used.state.inventory.X, []);
+  assert.deepEqual(state.inventory.X, [{ id: 17, type: "bomb" }]);
+});
+
 test("forwards staged shield targets to the core and applies the shield after the final target", () => {
   const base = playingState();
   const state = {

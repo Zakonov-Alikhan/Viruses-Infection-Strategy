@@ -395,6 +395,15 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .settings-modal { width: min(500px, calc(100% - 32px)); max-width: none; max-height: calc(100% - 32px); padding: 0; overflow: auto; color: var(--text); border: 0; background: transparent; }
 .online-room-modal { width: min(540px, calc(100% - 28px)); }
 .online-room-entry { display: grid; gap: 20px; }
+.online-game-settings { padding: 12px 14px; border: 1px solid rgba(191,225,209,.13); border-radius: 12px; background: rgba(12,20,22,.32); }
+.online-game-settings > summary { color: #dce8e2; font-size: 13px; font-weight: 750; cursor: pointer; }
+.online-settings-grid { display: grid; gap: 12px; margin-top: 15px; }
+.online-settings-grid .settings-dimensions { margin: 0; }
+.online-settings-grid .settings-field label { display: block; margin-bottom: 5px; color: #aebfb8; font-size: 11px; }
+.online-settings-grid .settings-field input { width: 100%; min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid #34484a; border-radius: 8px; color: var(--text); background: rgba(12,20,22,.55); font: inherit; }
+.online-settings-grid .settings-time-control { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.online-settings-grid .toggle-row { padding: 10px 0; }
+.online-settings-grid .toggle-copy strong { font-size: 11px; }
 .online-create-button { width: 100%; min-height: 48px; }
 .online-join-form { display: grid; gap: 8px; }
 .online-join-form > label { color: #c2d0ca; font-size: 12px; font-weight: 700; }
@@ -582,4 +591,9 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
   .mini-piece { width: 30px; height: 30px; font-size: 14px; }
   .rules-contact-example > p { font-size: 10px; }
   .turn-progress { margin-top: 1px; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  #menu-ambient, #menu-duel { pointer-events: none; touch-action: auto; cursor: default; }
+  .duel-drag-hint { display: none; }
 }

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=online2">
+  <link rel="stylesheet" href="/ui/style.css?v=online3">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -68,6 +68,24 @@
       </header>
       <p id="online-room-help" class="settings-summary" data-i18n="online.help">Создай комнату и отправь код второму игроку или введи его код.</p>
       <div id="online-room-entry" class="online-room-entry">
+        <details id="online-game-settings" class="online-game-settings">
+          <summary data-i18n="online.settings">Настройки партии</summary>
+          <div class="online-settings-grid">
+            <div class="settings-dimensions">
+              <div class="settings-field"><label for="online-board-width" data-i18n="settings.width">Ширина</label><input id="online-board-width" type="number" min="10" max="50" step="1" required></div>
+              <span class="dimension-separator" aria-hidden="true">×</span>
+              <div class="settings-field"><label for="online-board-height" data-i18n="settings.height">Высота</label><input id="online-board-height" type="number" min="10" max="50" step="1" required></div>
+            </div>
+            <div class="settings-field"><label for="online-pieces-per-turn" data-i18n="settings.pieces">Фигур за ход</label><input id="online-pieces-per-turn" type="number" min="1" max="250" step="1" required></div>
+            <div class="settings-time-control">
+              <div class="settings-field"><label for="online-clock-minutes" data-i18n="settings.each">Время каждому игроку</label><input id="online-clock-minutes" type="number" min="1" max="60" step="1" required></div>
+              <div class="settings-field"><label for="online-clock-increment" data-i18n="settings.increment">Добавка за полный ход</label><input id="online-clock-increment" type="number" min="0" max="60" step="1" required></div>
+            </div>
+            <label class="toggle-row" for="online-unlimited-time"><span class="toggle-copy"><strong data-i18n="settings.unlimited">Без ограничения по времени</strong></span><input class="switch-input" id="online-unlimited-time" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
+            <label class="toggle-row" for="online-random-events"><span class="toggle-copy"><strong data-i18n="settings.random">Случайные события на карте</strong></span><input class="switch-input" id="online-random-events" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
+            <label class="toggle-row" for="online-free-start"><span class="toggle-copy"><strong data-i18n="settings.freeStart">Свободное расположение в начале партии</strong></span><input class="switch-input" id="online-free-start" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
+          </div>
+        </details>
         <button id="online-create-room" class="button button-primary online-create-button" type="button" data-i18n="online.create">Создать комнату</button>
         <form id="online-join-form" class="online-join-form">
           <label for="online-room-code" data-i18n="online.codeLabel">Код приглашения</label>
@@ -367,6 +385,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=online2"></script>
+  <script type="module" src="/ui/script.js?v=online3"></script>
 </body>
 </html>

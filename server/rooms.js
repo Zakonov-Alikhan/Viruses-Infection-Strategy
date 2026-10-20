@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { DEFAULT_SETTINGS, createGameState } from "../ui/game.js";
+import { DEFAULT_SETTINGS, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState } from "../ui/game.js";
 import { getPlayerView, processGameCommand } from "./game-service.js";
 
 const SIDES = ["X", "O"];
@@ -24,6 +24,28 @@ function failure(code) {
 
 function normalizeCode(code) {
   return typeof code === "string" ? code.trim().toUpperCase() : "";
+}
+
+const ROOM_SETTING_FIELDS = new Set([
+  "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds",
+  "unlimitedTime", "randomEvents", "animationsEnabled", "freeStartingPositions"
+]);
+
+function normalizeRoomSettings(input, defaults) {
+  if (input === undefined) input = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some((key) => !ROOM_SETTING_FIELDS.has(key))) return null;
+  const settings = { ...defaults, ...input, adminMode: false };
+  const dimensionsValid = [settings.width, settings.height].every((value) =>
+    Number.isInteger(value) && value >= MIN_BOARD_DIMENSION && value <= MAX_BOARD_DIMENSION);
+  if (!dimensionsValid
+    || !Number.isInteger(settings.piecesPerTurn) || settings.piecesPerTurn < 1
+    || settings.piecesPerTurn > Math.floor(settings.width * settings.height / 10)
+    || !Number.isInteger(settings.clockMinutes) || settings.clockMinutes < 1 || settings.clockMinutes > 60
+    || !Number.isInteger(settings.incrementSeconds) || settings.incrementSeconds < 0 || settings.incrementSeconds > 60
+    || !["unlimitedTime", "randomEvents", "animationsEnabled", "freeStartingPositions"]
+      .every((key) => typeof settings[key] === "boolean")) return null;
+  return settings;
 }
 
 export class RoomManager {
@@ -54,8 +76,10 @@ export class RoomManager {
     this.rooms = new Map();
   }
 
-  createRoom() {
+  createRoom(requestedSettings) {
     if (this.rooms.size >= this.maxRooms) return failure("server-full");
+    const roomSettings = normalizeRoomSettings(requestedSettings, this.settings);
+    if (!roomSettings) return failure("invalid-settings");
     let code;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const candidate = normalizeCode(this.roomCodeFactory());
@@ -70,16 +94,16 @@ export class RoomManager {
     const token = this.playerTokenFactory();
     const room = {
       code,
-      state: createGameState({ ...this.settings }, this.random),
+      state: createGameState(roomSettings, this.random),
       version: 0,
       status: "waiting",
       createdAt,
       lastActivityAt: createdAt,
       clock: {
-        enabled: !this.settings.unlimitedTime,
+        enabled: !roomSettings.unlimitedTime,
         remainingMs: {
-          X: this.settings.unlimitedTime ? null : this.settings.clockMinutes * 60_000,
-          O: this.settings.unlimitedTime ? null : this.settings.clockMinutes * 60_000
+          X: roomSettings.unlimitedTime ? null : roomSettings.clockMinutes * 60_000,
+          O: roomSettings.unlimitedTime ? null : roomSettings.clockMinutes * 60_000
         },
         activePlayer: null,
         deadlineAt: null,
@@ -401,9 +425,14 @@ export class RoomManager {
     }
     const completedTurn = previousState.piecesLeft === 1
       && (nextState.currentPlayer !== previousState.currentPlayer
+        || (nextState.phase === "playing"
+          && nextState.currentPlayer === previousState.currentPlayer
+          && nextState.piecesLeft === nextState.settings.piecesPerTurn
+          && Array.isArray(nextState.message)
+          && nextState.message.some((entry) => entry?.key === "message.extraTurn"))
         || (nextState.phase === "finished" && nextState.piecesLeft === 0));
     if (completedTurn) {
-      clock.remainingMs[previousState.currentPlayer] += this.settings.incrementSeconds * 1000;
+      clock.remainingMs[previousState.currentPlayer] += room.state.settings.incrementSeconds * 1000;
     }
 
     if (nextState.phase !== "playing") {

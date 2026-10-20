@@ -24,11 +24,11 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=20261018-menu13";
-import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261018-menu13";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261018-menu13";
+} from "./game.js?v=20261021-onlinefix1";
+import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261021-onlinefix1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261021-onlinefix1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
-import { MultiplayerClient } from "./multiplayer.js?v=online2";
+import { MultiplayerClient } from "./multiplayer.js?v=online3";
 
 const boardElement = document.querySelector(".game-board");
 const boardShell = document.querySelector(".board-shell");
@@ -54,6 +54,14 @@ const onlineGameButton = document.querySelector("#online-game-button");
 const onlineRoomModal = document.querySelector("#online-room-modal");
 const onlineRoomCloseButton = document.querySelector("#online-room-close");
 const onlineCreateRoomButton = document.querySelector("#online-create-room");
+const onlineBoardWidthInput = document.querySelector("#online-board-width");
+const onlineBoardHeightInput = document.querySelector("#online-board-height");
+const onlinePiecesInput = document.querySelector("#online-pieces-per-turn");
+const onlineClockMinutesInput = document.querySelector("#online-clock-minutes");
+const onlineClockIncrementInput = document.querySelector("#online-clock-increment");
+const onlineUnlimitedTimeToggle = document.querySelector("#online-unlimited-time");
+const onlineRandomEventsToggle = document.querySelector("#online-random-events");
+const onlineFreeStartToggle = document.querySelector("#online-free-start");
 const onlineJoinForm = document.querySelector("#online-join-form");
 const onlineRoomCodeInput = document.querySelector("#online-room-code");
 const onlineResumeButton = document.querySelector("#online-resume-room");
@@ -593,7 +601,7 @@ function findAmbientNode(point, threshold = 24) {
 }
 
 menuCanvas.addEventListener("pointerdown", (event) => {
-  if (mainMenuScreen.hidden) return;
+  if (mainMenuScreen.hidden || event.pointerType !== "mouse") return;
   const rect = menuCanvas.getBoundingClientRect();
   const node = findAmbientNode({ x: event.clientX - rect.left, y: event.clientY - rect.top });
   if (!node) return;
@@ -926,7 +934,7 @@ function getDuelPointer(event) {
 }
 
 menuDuelCanvas.addEventListener("pointerdown", (event) => {
-  if (menuDuelCanvas.closest(".main-menu-screen").hidden) return;
+  if (menuDuelCanvas.closest(".main-menu-screen").hidden || event.pointerType !== "mouse") return;
   const point = getDuelPointer(event);
   const scale = Math.min(point.width / 500, point.height / 330, 1.15);
   const radius = Math.max(35, 51 * scale);
@@ -1111,7 +1119,7 @@ function leaveOnlineSession({ showMenu = false } = {}) {
   }
 }
 
-function openOnlineRoom() {
+function openOnlineRoom(inviteCode = "") {
   onlineMenuError = null;
   onlineErrorElement.hidden = true;
   onlineRoomEntry.hidden = false;
@@ -1120,9 +1128,56 @@ function openOnlineRoom() {
   onlineResumeButton.hidden = !savedSession;
   if (savedSession) onlineResumeButton.textContent = t("online.resume");
   onlineRoomModal.showModal();
-  const inviteCode = new URLSearchParams(window.location.search).get("room");
-  if (inviteCode) onlineRoomCodeInput.value = inviteCode.slice(0, 8).toUpperCase();
+  const requestedCode = inviteCode || new URLSearchParams(window.location.search).get("room") || "";
+  if (requestedCode) onlineRoomCodeInput.value = requestedCode.slice(0, 8).toUpperCase();
+  syncOnlineRoomSettings();
   (savedSession ? onlineResumeButton : onlineCreateRoomButton).focus();
+}
+
+function syncOnlineRoomSettings() {
+  onlineBoardWidthInput.value = String(settings.width);
+  onlineBoardHeightInput.value = String(settings.height);
+  onlinePiecesInput.value = String(settings.piecesPerTurn);
+  onlineClockMinutesInput.value = String(settings.clockMinutes);
+  onlineClockIncrementInput.value = String(settings.incrementSeconds);
+  onlineUnlimitedTimeToggle.checked = settings.unlimitedTime;
+  onlineRandomEventsToggle.checked = settings.randomEvents;
+  onlineFreeStartToggle.checked = settings.freeStartingPositions;
+  onlineClockMinutesInput.disabled = settings.unlimitedTime;
+  onlineClockIncrementInput.disabled = settings.unlimitedTime;
+  const validDimensions = [Number(onlineBoardWidthInput.value), Number(onlineBoardHeightInput.value)]
+    .every((dimension) => Number.isInteger(dimension) && dimension >= MIN_BOARD_DIMENSION && dimension <= MAX_BOARD_DIMENSION);
+  onlinePiecesInput.max = String(validDimensions
+    ? Math.floor(Number(onlineBoardWidthInput.value) * Number(onlineBoardHeightInput.value) / 10)
+    : Math.floor(MAX_BOARD_DIMENSION * MAX_BOARD_DIMENSION / 10));
+}
+
+function collectOnlineRoomSettings() {
+  const width = Number(onlineBoardWidthInput.value);
+  const height = Number(onlineBoardHeightInput.value);
+  const piecesPerTurn = Number(onlinePiecesInput.value);
+  const clockMinutes = Number(onlineClockMinutesInput.value);
+  const incrementSeconds = Number(onlineClockIncrementInput.value);
+  onlinePiecesInput.max = String(Math.floor(width * height / 10));
+  if (![width, height].every((value) => Number.isInteger(value) && value >= MIN_BOARD_DIMENSION && value <= MAX_BOARD_DIMENSION)
+    || !Number.isInteger(piecesPerTurn) || piecesPerTurn < 1 || piecesPerTurn > Math.floor(width * height / 10)
+    || !Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60
+    || !Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60) {
+    onlineErrorElement.textContent = t("online.error.invalid-settings");
+    onlineErrorElement.hidden = false;
+    return null;
+  }
+  return {
+    width,
+    height,
+    piecesPerTurn,
+    clockMinutes,
+    incrementSeconds,
+    unlimitedTime: onlineUnlimitedTimeToggle.checked,
+    randomEvents: onlineRandomEventsToggle.checked,
+    animationsEnabled: settings.animationsEnabled,
+    freeStartingPositions: onlineFreeStartToggle.checked
+  };
 }
 
 function showOnlineRoom(message) {
@@ -2035,16 +2090,29 @@ onlineRoomModal.addEventListener("close", () => {
   if (!onlineMode && multiplayerClient.savedSession) leaveOnlineSession();
 });
 onlineCreateRoomButton.addEventListener("click", async () => {
+  const roomSettings = collectOnlineRoomSettings();
+  if (!roomSettings) return;
   onlineCreateRoomButton.disabled = true;
   onlineErrorElement.hidden = true;
   onlineRoomStatus.textContent = t("online.connecting");
   try {
-    await multiplayerClient.createRoom();
+    await multiplayerClient.createRoom(roomSettings);
   } catch (error) {
     showOnlineError(error.code);
   } finally {
     onlineCreateRoomButton.disabled = false;
   }
+});
+for (const input of [onlineBoardWidthInput, onlineBoardHeightInput]) {
+  input.addEventListener("input", () => {
+    const width = Number(onlineBoardWidthInput.value);
+    const height = Number(onlineBoardHeightInput.value);
+    onlinePiecesInput.max = String(Math.floor(width * height / 10));
+  });
+}
+onlineUnlimitedTimeToggle.addEventListener("change", () => {
+  onlineClockMinutesInput.disabled = onlineUnlimitedTimeToggle.checked;
+  onlineClockIncrementInput.disabled = onlineUnlimitedTimeToggle.checked;
 });
 onlineJoinForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2203,4 +2271,12 @@ if (typeof ResizeObserver === "function") {
   new ResizeObserver(resizeDuelCanvas).observe(menuDuelCanvas);
 } else {
   window.addEventListener("resize", syncBoardGeometry);
+}
+const inviteUrl = new URL(window.location.href);
+const inviteCode = inviteUrl.searchParams.get("room");
+if (inviteCode) {
+  inviteUrl.searchParams.delete("room");
+  window.history.replaceState(null, "", inviteUrl.pathname + inviteUrl.search + inviteUrl.hash);
+  openOnlineRoom(inviteCode);
+  onlineJoinForm.requestSubmit();
 }
