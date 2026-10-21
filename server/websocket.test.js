@@ -148,6 +148,8 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.equal(xGameState.clock.remainingMs.X > 0, true);
   assert.equal(xGameState.state.board[0][0], "X");
   assert.equal(oGameState.state.startChoices.X, null);
+  assert.equal(xGameState.historyEntry.id, oGameState.historyEntry.id);
+  assert.equal(xGameState.historyEntry.type, "start");
 
   const xMove = x.next("state");
   const oMove = o.next("state");
@@ -159,6 +161,67 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.equal(oMoveState.clock.activePlayer, "X");
   assert.equal(xMoveState.state.board[0][1], "X");
   assert.deepEqual(xMoveState.state, oMoveState.state);
+  assert.deepEqual(xMoveState.historyEntry.coordinates, [{ row: 0, col: 1 }]);
+  assert.equal(xMoveState.historyEntry.id, oMoveState.historyEntry.id);
+});
+
+test("WebSocket takeback accepts only a proposal ID and returns one authoritative restored snapshot", async (t) => {
+  const { server, address } = await makeTestServer();
+  const peers = [];
+  t.after(async () => {
+    await Promise.all(peers.map((peer) => peer.close().catch(() => {})));
+    await server.close();
+  });
+
+  const x = await openPeer(address);
+  const o = await openPeer(address);
+  peers.push(x, o);
+  x.send({
+    type: "create-room",
+    settings: { piecesPerTurn: 1, freeStartingPositions: true, randomEvents: false },
+    requestId: "create-undo"
+  });
+  const created = await x.next("room-created");
+  o.send({ type: "join-room", code: created.roomCode, requestId: "join-undo" });
+  await o.next("room-joined");
+  await x.next("room-ready");
+
+  let xState = x.next("state");
+  let oState = o.next("state");
+  x.send({ type: "command", command: { type: "choose-start", row: 0, col: 0 } });
+  await Promise.all([xState, oState]);
+  oState = o.next("state");
+  xState = x.next("state");
+  o.send({ type: "command", command: { type: "choose-start", row: 9, col: 9 } });
+  const started = await Promise.all([xState, oState]);
+  const xLive = started[0].state;
+  const target = xLive.board[0][1] === "" ? { row: 0, col: 1 } : { row: 1, col: 0 };
+  xState = x.next("state");
+  oState = o.next("state");
+  x.send({ type: "command", command: { type: "place", ...target } });
+  await Promise.all([xState, oState]);
+
+  x.send({ type: "undo-propose", state: { board: [["O"]] }, requestId: "undo-injected-state" });
+  assert.equal((await x.next("server-error")).code, "invalid-message");
+  x.send({ type: "undo-propose", requestId: "undo-propose" });
+  const proposalForX = x.next("undo-proposal");
+  const proposalForO = o.next("undo-proposal");
+  const proposalCreated = x.next("undo-proposal-created");
+  const [offeredX, offeredO, createdAck] = await Promise.all([proposalForX, proposalForO, proposalCreated]);
+  assert.equal(offeredX.proposalId, offeredO.proposalId);
+  assert.equal(createdAck.requestId, "undo-propose");
+
+  o.send({ type: "undo-vote", proposalId: offeredO.proposalId, accept: true, requestId: "undo-accept" });
+  const restoredX = x.next("state");
+  const restoredO = o.next("state");
+  const accepted = o.next("undo-vote-recorded");
+  const [xSnapshot, oSnapshot, voteAck] = await Promise.all([restoredX, restoredO, accepted]);
+  assert.equal(voteAck.accepted, true);
+  assert.equal(xSnapshot.version, oSnapshot.version);
+  assert.deepEqual(xSnapshot.state, oSnapshot.state);
+  assert.equal(xSnapshot.state.currentPlayer, "X");
+  assert.equal(xSnapshot.state.board[target.row][target.col], "");
+  assert.equal(xSnapshot.historyEntry.type, "undo");
 });
 
 test("WebSocket board editing requires the configured admin secret and broadcasts the authoritative snapshot", async (t) => {
@@ -254,7 +317,10 @@ test("forwards validated room settings through WebSocket creation to both player
   guest.send({ type: "join-room", code: created.roomCode });
   const joined = await guest.next("room-joined");
   assert.deepEqual(joined.state.settings, created.state.settings);
-  assert.deepEqual(joined.clock.remainingMs, created.clock.remainingMs);
+  assert.ok(joined.clock.remainingMs.X <= created.clock.remainingMs.X
+    && joined.clock.remainingMs.X > created.clock.remainingMs.X - 1_000);
+  assert.equal(joined.clock.remainingMs.O, created.clock.remainingMs.O);
+  assert.equal(joined.clock.activePlayer, "X");
 });
 
 test("WebSocket room creation accepts blank clock values when time is unlimited", async (t) => {

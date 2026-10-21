@@ -394,6 +394,7 @@ function beginPlay(state, board, message, random) {
     board,
     phase: "playing",
     currentPlayer: "X",
+    turnNumber: 1,
     piecesLeft: state.settings.piecesPerTurn,
     lastDestroyed: [],
     message
@@ -437,6 +438,7 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
     wormholePair: null,
     nextWormholeId: 1,
     roundNumber: 1,
+    turnNumber: 0,
     inventory: { X: [], O: [] },
     selectedAbility: null,
     abilityTargets: [],
@@ -594,6 +596,7 @@ function startTurn(state, player, piecesPerTurn) {
   return {
     ...state,
     currentPlayer: player,
+    turnNumber: (state.turnNumber || 0) + 1,
     piecesLeft: piecesPerTurn,
     selectedAbility: null,
     abilityTargets: [],

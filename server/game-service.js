@@ -182,6 +182,8 @@ export function getPlayerView(state, side) {
     phase: state.phase,
     currentPlayer: state.currentPlayer,
     piecesLeft: state.piecesLeft,
+    roundNumber: state.roundNumber ?? 1,
+    turnNumber: state.turnNumber ?? 0,
     setupPlayer: setupPhase ? state.setupPlayer : null,
     startChoices: {
       X: setupPhase && side === "X" && state.startChoices?.X

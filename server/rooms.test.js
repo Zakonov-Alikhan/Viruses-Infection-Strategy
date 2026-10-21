@@ -110,6 +110,42 @@ test("creates private rooms without exposing a final side until the second playe
   assert.equal(manager.roomCount, 1);
 });
 
+test("room history contains only confirmed commands and is shared with each player's view", async () => {
+  const manager = makeManager();
+  const room = manager.createRoom();
+  manager.joinRoom(room.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(room.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(room.roomCode, "O", (message) => received.O.push(message));
+  manager.broadcastReady(room.roomCode);
+
+  await startGame(manager, room.roomCode, received);
+  const initialHistory = manager.getSnapshot(room.roomCode, "X").history;
+  assert.equal(initialHistory.length, 1);
+  assert.equal(initialHistory[0].type, "start");
+  assert.equal("startChoices" in initialHistory[0].position, false);
+
+  const rejected = await manager.submitCommand(room.roomCode, "X", { type: "place", row: -1, col: -1 });
+  assert.equal(rejected.ok, false);
+  assert.equal(manager.getSnapshot(room.roomCode, "X").history.length, 1);
+
+  const state = manager.getSnapshot(room.roomCode, "X").state;
+  const move = getLegalMoves(state)[0];
+  const accepted = await manager.submitCommand(room.roomCode, "X", {
+    type: "place", row: move.row, col: move.col
+  });
+  assert.equal(accepted.ok, true);
+  const historyX = manager.getSnapshot(room.roomCode, "X").history;
+  const historyO = manager.getSnapshot(room.roomCode, "O").history;
+  assert.equal(historyX.length, 2);
+  assert.deepEqual(historyO.map(({ id }) => id), historyX.map(({ id }) => id));
+  assert.equal(historyX[1].type, "placement");
+  assert.equal(historyX[1].side, "X");
+  assert.deepEqual(historyX[1].coordinates, [move]);
+  assert.equal(received.X.at(-1).historyEntry.id, historyX[1].id);
+  assert.equal(received.O.at(-1).historyEntry.id, historyX[1].id);
+});
+
 test("randomly assigns X and O after the second player joins and retains token ownership", () => {
   for (const [sideRandom, expectedCreator, expectedJoiner] of [
     [() => 0.25, "X", "O"],
@@ -156,7 +192,8 @@ test("applies validated per-room settings to game state and clock, and rejects i
 
   const joined = manager.joinRoom(created.roomCode);
   assert.deepEqual(joined.state.settings, customSettings);
-  assert.deepEqual(joined.clock.remainingMs, { X: 7 * 60_000, O: 7 * 60_000 });
+  assert.ok(joined.clock.remainingMs.X <= 7 * 60_000 && joined.clock.remainingMs.X > 7 * 60_000 - 1_000);
+  assert.equal(joined.clock.remainingMs.O, 7 * 60_000);
 
   const roomCount = manager.roomCount;
   const invalidPieces = manager.createRoom({ ...customSettings, piecesPerTurn: 13 });
@@ -192,6 +229,25 @@ test("unlimited-time rooms accept absent time values and keep finite settings wi
   assert.equal(Number.isFinite(created.state.settings.incrementSeconds), true);
   assert.equal(created.state.settings.clockMinutes, DEFAULT_SETTINGS.clockMinutes);
   assert.equal(created.state.settings.incrementSeconds, DEFAULT_SETTINGS.incrementSeconds);
+});
+
+test("a fixed-corner online game starts the server clock when the second player joins", () => {
+  const scheduler = makeFakeScheduler();
+  const manager = new RoomManager({
+    settings: { ...TEST_SETTINGS, freeStartingPositions: false, unlimitedTime: false },
+    now: scheduler.now,
+    scheduleTimeout: scheduler.setTimeoutFn,
+    cancelTimeout: scheduler.clearTimeoutFn,
+    sideRandom: () => 0.25,
+    roomCodeFactory: () => "FIXED1",
+    playerTokenFactory: () => "fixed-start-test-token-000000000000000"
+  });
+  const room = manager.createRoom();
+  assert.equal(room.state.phase, "playing");
+  manager.joinRoom(room.roomCode);
+  const clock = manager.getSnapshot(room.roomCode, "X").clock;
+  assert.equal(clock.activePlayer, "X");
+  assert.equal(scheduler.timers.size, 1);
 });
 
 test("rejects a third seat and unknown room codes", () => {
@@ -421,6 +477,7 @@ test("server flag-falls the active player at the deadline exactly once", async (
   await staleTimer();
   assert.equal(manager.getSnapshot(room.roomCode, "X").version, version);
   assert.equal(received.X.filter(({ state }) => state.phase === "finished").length, 1);
+  assert.equal((await manager.proposeUndo(room.roomCode, "O")).error.code, "wrong-phase");
 });
 
 test("a timely move preserves elapsed time, adds the configured increment, and starts the opponent clock", async () => {
@@ -471,6 +528,117 @@ test("a collected extra turn receives its increment, then the clock passes to th
   assert.equal(snapshot.state.currentPlayer, "O");
   assert.equal(snapshot.clock.activePlayer, "O");
   assert.equal(snapshot.clock.remainingMs.X, 57_000);
+});
+
+test("online takeback restores the full pre-turn state, records the rollback and preserves fair clocks", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received } = makeTimedManager(scheduler);
+  await startGame(manager, room.roomCode, received);
+  const internal = manager.rooms.get(room.roomCode);
+  const seatsBefore = { X: internal.seats.X, O: internal.seats.O };
+  const beforeTurn = structuredClone(internal.state);
+  const move = getLegalMoves(beforeTurn)[0];
+  await scheduler.advance(3_000);
+  const placed = await manager.submitCommand(room.roomCode, "X", { type: "place", ...move });
+  assert.equal(placed.ok, true);
+  const endedTurn = manager.getSnapshot(room.roomCode, "X");
+  assert.equal(endedTurn.undoAvailable, true);
+  assert.equal(endedTurn.clock.activePlayer, "O");
+  const oldVersion = endedTurn.version;
+
+  const offer = await manager.proposeUndo(room.roomCode, "X");
+  assert.equal(offer.ok, true);
+  assert.equal(manager.getSnapshot(room.roomCode, "X").clock.activePlayer, null);
+  assert.equal(received.X.at(-1).type, "undo-proposal");
+  assert.equal(received.O.at(-1).type, "undo-proposal");
+  assert.equal(received.O.at(-1).fromSide, "X");
+
+  const blockedState = structuredClone(internal.state);
+  const blocked = await manager.submitCommand(room.roomCode, "O", { type: "resign" });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error.code, "undo-pending");
+  assert.deepEqual(internal.state, blockedState);
+  assert.equal((await manager.voteUndo(room.roomCode, "X", offer.proposalId, true)).error.code, "cannot-vote-own-undo");
+
+  await scheduler.advance(5_000);
+  assert.equal(manager.getSnapshot(room.roomCode, "O").clock.remainingMs.O, 60_000);
+  const accepted = await manager.voteUndo(room.roomCode, "O", offer.proposalId, true);
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.version, oldVersion + 1);
+  const xSnapshot = manager.getSnapshot(room.roomCode, "X");
+  const oSnapshot = manager.getSnapshot(room.roomCode, "O");
+  assert.deepEqual(internal.state, beforeTurn);
+  assert.deepEqual(xSnapshot.state, oSnapshot.state);
+  assert.equal(xSnapshot.state.currentPlayer, "X");
+  assert.equal(xSnapshot.clock.activePlayer, "X");
+  assert.equal(xSnapshot.clock.remainingMs.X, 57_000); // spent time remains spent; the undone turn's +2s increment is removed
+  assert.equal(internal.seats.X, seatsBefore.X);
+  assert.equal(internal.seats.O, seatsBefore.O);
+  assert.equal(internal.history.at(-1).type, "undo");
+  assert.equal(internal.history.at(-1).side, "X");
+  assert.equal(internal.history.at(-1).position.board[move.row][move.col], ".");
+  assert.equal(xSnapshot.undoAvailable, false);
+  assert.equal(received.X.filter((message) => message.type === "state" && message.version === accepted.version).length, 1);
+  assert.equal(received.O.filter((message) => message.type === "state" && message.version === accepted.version).length, 1);
+  const restoredState = structuredClone(internal.state);
+  assert.equal((await manager.voteUndo(room.roomCode, "O", offer.proposalId, true)).error.code, "undo-proposal-expired");
+  assert.equal(internal.version, accepted.version);
+  assert.deepEqual(internal.state, restoredState);
+});
+
+test("declined, duplicate and stale takeback votes cannot change the game and resume the opponent clock", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received } = makeTimedManager(scheduler);
+  await startGame(manager, room.roomCode, received);
+  const internal = manager.rooms.get(room.roomCode);
+  const move = getLegalMoves(internal.state)[0];
+  await manager.submitCommand(room.roomCode, "X", { type: "place", ...move });
+  const beforeOffer = structuredClone(internal.state);
+  const version = internal.version;
+  const offer = await manager.proposeUndo(room.roomCode, "X");
+  const declined = await manager.voteUndo(room.roomCode, "O", offer.proposalId, false);
+
+  assert.equal(declined.ok, true);
+  assert.equal(declined.accepted, false);
+  assert.deepEqual(internal.state, beforeOffer);
+  assert.equal(internal.version, version);
+  assert.equal(manager.getSnapshot(room.roomCode, "O").clock.activePlayer, "O");
+  assert.equal((await manager.voteUndo(room.roomCode, "O", offer.proposalId, true)).error.code, "undo-proposal-expired");
+  assert.deepEqual(internal.state, beforeOffer);
+});
+
+test("undo proposal expiration and disconnect clear the lock and restart the server clock", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received, connectionO } = makeTimedManager(scheduler);
+  manager.undoResponseTimeoutMs = 2_000;
+  await startGame(manager, room.roomCode, received);
+  const move = getLegalMoves(manager.getSnapshot(room.roomCode, "X").state)[0];
+  await manager.submitCommand(room.roomCode, "X", { type: "place", ...move });
+  const offer = await manager.proposeUndo(room.roomCode, "X");
+  await scheduler.advance(2_000);
+  assert.equal(manager.getSnapshot(room.roomCode, "O").undoProposal, null);
+  assert.equal(manager.getSnapshot(room.roomCode, "O").clock.activePlayer, "O");
+  assert.equal(received.X.some((message) => message.type === "undo-cancelled" && message.reason === "expired"), true);
+  assert.equal((await manager.voteUndo(room.roomCode, "O", offer.proposalId, true)).error.code, "undo-proposal-expired");
+
+  const secondOffer = await manager.proposeUndo(room.roomCode, "X");
+  assert.equal(secondOffer.ok, true);
+  manager.detachConnection(room.roomCode, "O", connectionO.connection);
+  assert.equal(manager.getSnapshot(room.roomCode, "X").undoProposal, null);
+  assert.equal(manager.getSnapshot(room.roomCode, "X").clock.activePlayer, "O");
+});
+
+test("a committed opponent action and a finished match make the old takeback unavailable", async () => {
+  const { manager, room, received } = makeTimedManager(makeFakeScheduler(), { unlimitedTime: true });
+  await startGame(manager, room.roomCode, received);
+  const state = manager.getSnapshot(room.roomCode, "X").state;
+  await manager.submitCommand(room.roomCode, "X", { type: "place", ...getLegalMoves(state)[0] });
+  const opponentState = manager.getSnapshot(room.roomCode, "O").state;
+  await manager.submitCommand(room.roomCode, "O", { type: "place", ...getLegalMoves(opponentState)[0] });
+  assert.equal(manager.getSnapshot(room.roomCode, "X").undoAvailable, false);
+  assert.equal((await manager.proposeUndo(room.roomCode, "X")).error.code, "undo-unavailable");
+  await manager.submitCommand(room.roomCode, "X", { type: "resign" });
+  assert.equal((await manager.proposeUndo(room.roomCode, "O")).error.code, "wrong-phase");
 });
 
 test("unlimited-time games never schedule or apply a timeout", async () => {

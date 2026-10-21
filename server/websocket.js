@@ -201,7 +201,10 @@ export function createMultiplayerServer({
           status: created.status,
           version: created.version,
           state: created.state,
+          history: created.history,
           clock: created.clock,
+          undoAvailable: created.undoAvailable,
+          undoProposal: created.undoProposal,
           requestId: message.requestId
         }, attached.connection);
         return;
@@ -232,7 +235,10 @@ export function createMultiplayerServer({
           status: joined.status,
           version: joined.version,
           state: joined.state,
+          history: joined.history,
           clock: joined.clock,
+          undoAvailable: joined.undoAvailable,
+          undoProposal: joined.undoProposal,
           requestId: message.requestId
         }, attached.connection);
         roomManager.broadcastReady(joined.roomCode);
@@ -261,7 +267,10 @@ export function createMultiplayerServer({
           status: resumed.status,
           version: resumed.version,
           state: resumed.state,
+          history: resumed.history,
           clock: resumed.clock,
+          undoAvailable: resumed.undoAvailable,
+          undoProposal: resumed.undoProposal,
           requestId: message.requestId
         }, resumed.connection);
         return;
@@ -341,6 +350,43 @@ export function createMultiplayerServer({
               requestId: message.requestId
             });
           }).catch(() => sendError(socket, "restart-failed", message.requestId));
+        return;
+      }
+
+      if (message.type === "undo-propose") {
+        if (!exactKeys(message, ["type", "requestId"])) return sendError(socket, "invalid-message", message.requestId);
+        if (!context) return sendError(socket, "not-in-room", message.requestId);
+        roomManager.proposeUndo(context.roomCode, context.connection.side)
+          .then((result) => {
+            if (!result.ok) return sendError(socket, result.error.code, message.requestId);
+            safeJsonSend(socket, {
+              type: "undo-proposal-created",
+              roomCode: context.roomCode,
+              proposalId: result.proposalId,
+              expiresAt: result.expiresAt,
+              requestId: message.requestId
+            });
+          }).catch(() => sendError(socket, "undo-failed", message.requestId));
+        return;
+      }
+
+      if (message.type === "undo-vote") {
+        if (!exactKeys(message, ["type", "proposalId", "accept", "requestId"])
+          || typeof message.proposalId !== "string" || typeof message.accept !== "boolean") {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (!context) return sendError(socket, "not-in-room", message.requestId);
+        roomManager.voteUndo(context.roomCode, context.connection.side, message.proposalId, message.accept)
+          .then((result) => {
+            if (!result.ok) return sendError(socket, result.error.code, message.requestId);
+            safeJsonSend(socket, {
+              type: "undo-vote-recorded",
+              roomCode: context.roomCode,
+              accepted: result.accepted,
+              version: result.version,
+              requestId: message.requestId
+            });
+          }).catch(() => sendError(socket, "undo-failed", message.requestId));
         return;
       }
 

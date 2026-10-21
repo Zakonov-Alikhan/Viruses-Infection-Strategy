@@ -55,6 +55,8 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 .player-indicator { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 750; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 13px rgba(198, 243, 107, .6); }
 .turn-counter { color: var(--muted); font-size: 12px; text-align: right; }
+.round-counter { flex: 0 0 auto; padding: 5px 9px; border: 1px solid rgba(94, 218, 192, .24); border-radius: 7px; color: #b9d8d0; background: rgba(94, 218, 192, .07); font-size: 10px; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.round-counter[hidden] { display: none; }
 .game-message { min-height: 20px; margin: 9px 0 12px; color: var(--lime); font-size: 13px; line-height: 1.45; }
 .board-frame { width: 100%; overflow: auto; padding: 12px; border: 1px solid rgba(163, 204, 185, .14); border-radius: 14px; background: #111c1f; }
 .board-shell { width: min(746px, 100%); margin: 0 auto; }
@@ -132,6 +134,20 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .current-turn-card { border-color: rgba(94, 218, 192, .2); background: linear-gradient(145deg, #203130, #172326 72%); transition: border-color .18s ease, box-shadow .18s ease; }
 .current-turn-card.turn-active { border-color: rgba(198, 243, 107, .5); box-shadow: 0 0 28px rgba(198, 243, 107, .08), 0 18px 52px rgba(0, 0, 0, .16); }
 .current-turn-card h2 { margin-bottom: 12px; font-size: 23px; }
+.history-card { min-width: 0; padding: 14px 16px; }
+.history-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #dce9e2; cursor: pointer; font-size: 12px; font-weight: 750; list-style: none; }
+.history-card > summary::-webkit-details-marker { display: none; }
+.history-card > summary::after { color: var(--teal); content: "⌄"; font-size: 17px; transition: transform .16s ease; }
+.history-card[open] > summary::after { transform: rotate(180deg); }
+.history-notice { margin: 11px 0 0 !important; padding: 8px 9px; border-left: 2px solid var(--teal); color: #b9d8d0 !important; background: rgba(94, 218, 192, .06); font-size: 10px !important; }
+.history-notice[hidden], .history-live-button[hidden] { display: none; }
+.history-list { display: grid; max-height: min(42vh, 360px); gap: 5px; margin: 10px 0 0; padding: 0 3px 0 0; overflow: auto; list-style: none; overscroll-behavior: contain; }
+.history-entry { width: 100%; display: block; padding: 8px 9px; border: 1px solid rgba(191, 225, 209, .1); border-radius: 8px; color: #c5d2cc; background: rgba(12, 20, 22, .42); cursor: pointer; text-align: left; }
+.history-entry:hover, .history-entry.is-selected { border-color: rgba(94, 218, 192, .48); background: rgba(94, 218, 192, .09); }
+.history-entry:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.history-entry-heading { display: block; font-size: 10px; line-height: 1.45; }
+.history-entry-result { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.history-live-button { width: 100%; min-height: 36px; margin-top: 9px; font-size: 11px; }
 .side-card p:not(.eyebrow) { margin-bottom: 0; color: #bdcbc6; font-size: 13px; line-height: 1.65; }
 .rules-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #b7c5c0; cursor: pointer; font-size: 12px; font-weight: 750; list-style: none; }
 .rules-summary::-webkit-details-marker { display: none; }
@@ -512,6 +528,8 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .button-resign { width: 100%; min-height: 38px; border-color: rgba(255, 148, 127, .34); color: #ffb1a2; background: rgba(255, 148, 127, .08); }
 .button-resign:hover:not(:disabled) { border-color: var(--coral); background: rgba(255, 148, 127, .16); }
 .button-resign:disabled { opacity: .4; cursor: not-allowed; }
+.undo-turn-button { width: 100%; min-height: 38px; }
+.undo-risk-note { margin: 7px 2px 0; color: #e7ad62; font-size: 11px; line-height: 1.4; text-align: center; }
 .resign-confirm-modal { width: min(420px, calc(100% - 32px)); max-width: none; padding: 0; color: var(--text); border: 1px solid rgba(255, 148, 127, .3); border-radius: 18px; background: #172326; box-shadow: 0 28px 90px rgba(0, 0, 0, .5); }
 .resign-confirm-modal::backdrop { background: rgba(5, 12, 14, .78); backdrop-filter: blur(7px); }
 .resign-confirm-card { padding: 28px; }

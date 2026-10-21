@@ -189,6 +189,17 @@ export class MultiplayerClient {
     return this.#request("restart-vote", { proposalId, accept }, "restart-vote-recorded");
   }
 
+  proposeUndo() {
+    return this.#request("undo-propose", {}, "undo-proposal-created");
+  }
+
+  voteUndo(proposalId, accept) {
+    if (typeof proposalId !== "string" || typeof accept !== "boolean") {
+      return Promise.reject(new MultiplayerError("invalid-undo-vote"));
+    }
+    return this.#request("undo-vote", { proposalId, accept }, "undo-vote-recorded");
+  }
+
   sendAim(row, col) {
     if (!this.connected) return false;
     if (row === null && col === null) return this.#send({ type: "aim", row: null, col: null });

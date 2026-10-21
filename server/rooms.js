@@ -5,6 +5,8 @@ import {
   isValidShieldTarget
 } from "../ui/game.js";
 import { getPlayerView, processGameCommand } from "./game-service.js";
+import { appendHistoryEntry, createHistoryEntry, createUndoHistoryEntry, MAX_HISTORY_ENTRIES } from "../ui/history.js";
+import { TurnUndoHistory } from "../ui/turn-undo.js";
 
 const SIDES = ["X", "O"];
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -70,6 +72,7 @@ export class RoomManager {
     waitingRoomTtlMs = 5 * 60_000,
     reconnectGraceMs = 2 * 60_000,
     finishedRoomTtlMs = 60_000,
+    undoResponseTimeoutMs = 30_000,
     now = Date.now,
     roomCodeFactory = makeRoomCode,
     playerTokenFactory = makePlayerToken,
@@ -84,6 +87,7 @@ export class RoomManager {
     this.waitingRoomTtlMs = waitingRoomTtlMs;
     this.reconnectGraceMs = reconnectGraceMs;
     this.finishedRoomTtlMs = finishedRoomTtlMs;
+    this.undoResponseTimeoutMs = undoResponseTimeoutMs;
     this.now = now;
     this.roomCodeFactory = roomCodeFactory;
     this.playerTokenFactory = playerTokenFactory;
@@ -111,9 +115,14 @@ export class RoomManager {
 
     const createdAt = this.now();
     const token = this.playerTokenFactory();
+    const initialState = createGameState(roomSettings, this.random);
     const room = {
       code,
-      state: createGameState(roomSettings, this.random),
+      state: initialState,
+      history: [],
+      nextHistoryId: 1,
+      undoHistory: new TurnUndoHistory(),
+      undoProposal: null,
       version: 0,
       status: "waiting",
       createdAt,
@@ -137,6 +146,12 @@ export class RoomManager {
       restartProposal: null,
       queue: Promise.resolve()
     };
+    room.undoHistory.reset(initialState, room.clock.remainingMs);
+    const initialEntry = createHistoryEntry(null, initialState, room.nextHistoryId);
+    if (initialEntry) {
+      room.history.push(initialEntry);
+      room.nextHistoryId += 1;
+    }
     this.rooms.set(code, room);
     return {
       ok: true,
@@ -147,7 +162,9 @@ export class RoomManager {
       status: room.status,
       version: room.version,
       state: getPlayerView(room.state, "X"),
-      clock: this.#clockSnapshot(room)
+      history: room.history,
+      clock: this.#clockSnapshot(room),
+      ...this.#undoView(room, "X")
     };
   }
 
@@ -171,6 +188,7 @@ export class RoomManager {
     }
     room.status = "active";
     room.lastActivityAt = joinedAt;
+    if (room.state.phase === "playing") this.#startClock(room, room.state.currentPlayer, joinedAt);
     return {
       ok: true,
       roomCode: code,
@@ -180,7 +198,9 @@ export class RoomManager {
       status: room.status,
       version: room.version,
       state: getPlayerView(room.state, joiningSide),
-      clock: this.#clockSnapshot(room)
+      history: room.history,
+      clock: this.#clockSnapshot(room),
+      ...this.#undoView(room, joiningSide)
     };
   }
 
@@ -227,7 +247,9 @@ export class RoomManager {
       status: room.status,
       version: room.version,
       state: getPlayerView(room.state, side),
+      history: room.history,
       clock: this.#clockSnapshot(room),
+      ...this.#undoView(room, side),
       connection: attached.connection
     };
   }
@@ -241,6 +263,7 @@ export class RoomManager {
     room.lastActivityAt = seat.disconnectedAt;
     this.#clearAim(room, side);
     this.#cancelRestartProposal(room, "player-disconnected");
+    this.#cancelUndoProposal(room, "player-disconnected");
     return true;
   }
 
@@ -253,6 +276,7 @@ export class RoomManager {
       const opponentSide = side === "X" ? "O" : "X";
       if (!room.seats[opponentSide]?.connection) return failure("player-disconnected");
       if (room.restartProposal) return failure("restart-already-pending");
+      if (room.undoProposal) return failure("undo-pending");
       if (kind === "settings") {
         if (this.#expireClockIfDue(room, this.now())) return failure("time-expired");
         if (room.status !== "active" || room.state.phase === "finished") return failure("wrong-phase");
@@ -314,6 +338,117 @@ export class RoomManager {
     return operation;
   }
 
+  proposeUndo(rawCode, side) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return Promise.resolve(failure("room-not-found"));
+    const operation = room.queue.then(() => {
+      if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (!room.seats[side]?.connection) return failure("player-disconnected");
+      const opponentSide = side === "X" ? "O" : "X";
+      if (!room.seats[opponentSide]?.connection) return failure("player-disconnected");
+      if (room.status !== "active" || room.state.phase !== "playing") return failure("wrong-phase");
+      if (room.restartProposal) return failure("restart-pending");
+      if (room.undoProposal) return failure("undo-pending");
+      if (this.#expireClockIfDue(room, this.now())) return failure("time-expired");
+      if (room.state.currentPlayer === side
+        || !room.undoHistory.canUndo(side, { latestOnly: true })) return failure("undo-unavailable");
+
+      this.#pauseClock(room, this.now());
+      const proposal = {
+        id: randomUUID(),
+        fromSide: side,
+        toSide: opponentSide,
+        expiresAt: this.now() + this.undoResponseTimeoutMs,
+        timer: null
+      };
+      room.undoProposal = proposal;
+      proposal.timer = this.scheduleTimeout(() => {
+        const expiry = room.queue.then(() => {
+          if (this.rooms.get(room.code) !== room || room.undoProposal?.id !== proposal.id) return;
+          this.#cancelUndoProposal(room, "expired");
+        });
+        room.queue = expiry.then(() => undefined, () => undefined);
+        return expiry;
+      }, this.undoResponseTimeoutMs);
+      proposal.timer?.unref?.();
+      this.#broadcastEphemeral(room, {
+        type: "undo-proposal",
+        roomCode: room.code,
+        proposalId: proposal.id,
+        fromSide: proposal.fromSide,
+        toSide: proposal.toSide,
+        expiresAt: proposal.expiresAt,
+        clock: this.#clockSnapshot(room)
+      });
+      return { ok: true, proposalId: proposal.id, expiresAt: proposal.expiresAt };
+    });
+    room.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  voteUndo(rawCode, side, proposalId, accept) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return Promise.resolve(failure("room-not-found"));
+    const operation = room.queue.then(() => {
+      if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (!room.seats[side]?.connection) return failure("player-disconnected");
+      const proposal = room.undoProposal;
+      if (!proposal || proposal.id !== proposalId) return failure("undo-proposal-expired");
+      if (proposal.toSide !== side) return failure("cannot-vote-own-undo");
+      if (typeof accept !== "boolean") return failure("invalid-undo-vote");
+      if (this.now() >= proposal.expiresAt) {
+        this.#cancelUndoProposal(room, "expired");
+        return failure("undo-proposal-expired");
+      }
+      if (!accept) {
+        this.#cancelUndoProposal(room, "declined");
+        return { ok: true, accepted: false };
+      }
+      if (room.status !== "active" || room.state.phase !== "playing"
+        || !room.undoHistory.canUndo(proposal.fromSide, { latestOnly: true })) {
+        this.#cancelUndoProposal(room, "no-longer-available");
+        return failure("undo-unavailable");
+      }
+
+      const checkpoint = room.undoHistory.completed.at(-1);
+      this.#clearUndoProposal(room);
+      if (room.clock.enabled && checkpoint.clockIncrementMs > 0) {
+        room.clock.remainingMs[proposal.fromSide] = Math.max(
+          0,
+          room.clock.remainingMs[proposal.fromSide] - checkpoint.clockIncrementMs
+        );
+      }
+      room.state = room.undoHistory.undo(proposal.fromSide, { latestOnly: true }).state;
+      this.#startClock(room, room.state.currentPlayer, this.now());
+      room.undoHistory.reset(room.state, room.clock.remainingMs);
+      room.aims = { X: null, O: null };
+      const historyEntry = createUndoHistoryEntry(room.state, room.nextHistoryId, {
+        side: proposal.fromSide,
+        turnNumber: checkpoint.turnNumber
+      });
+      if (historyEntry) {
+        room.history = appendHistoryEntry(room.history, historyEntry, MAX_HISTORY_ENTRIES);
+        room.nextHistoryId += 1;
+      }
+      room.version += 1;
+      room.lastActivityAt = this.now();
+      this.#broadcastSnapshots(room, "state", {
+        historyEntry,
+        undoAccepted: true,
+        undoneSide: proposal.fromSide
+      });
+      this.#broadcastEphemeral(room, {
+        type: "undo-complete",
+        roomCode: room.code,
+        proposalId,
+        version: room.version
+      });
+      return { ok: true, accepted: true, version: room.version };
+    });
+    room.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
   updateAim(rawCode, side, target) {
     const room = this.rooms.get(normalizeCode(rawCode));
     if (!room) return failure("room-not-found");
@@ -353,7 +488,9 @@ export class RoomManager {
       status: room.status,
       version: room.version,
       state: getPlayerView(room.state, side),
-      clock: this.#clockSnapshot(room)
+      history: room.history,
+      clock: this.#clockSnapshot(room),
+      ...this.#undoView(room, side)
     };
   }
 
@@ -374,10 +511,11 @@ export class RoomManager {
       if (this.rooms.get(room.code) !== room) return failure("room-not-found");
       if (room.status !== "active") return failure("room-not-ready");
       if (!room.seats[side]?.connection) return failure("player-disconnected");
+      if (room.undoProposal) return { ...failure("undo-pending"), version: room.version };
 
       const now = this.now();
       if (this.#expireClockIfDue(room, now)) {
-        return { ...failure(room.state, "time-expired"), version: room.version };
+        return { ...failure("time-expired"), version: room.version };
       }
 
       const result = processGameCommand(room.state, side, command, {
@@ -391,14 +529,20 @@ export class RoomManager {
       const selectedExchange = command.type === "select-ability"
         && previousState.inventory?.[side]?.some((item) => item.id === command.itemId && item.type === "exchange");
       room.state = result.state;
-      this.#updateClockAfterCommand(room, previousState, room.state, now);
+      const historyEntry = createHistoryEntry(previousState, room.state, room.nextHistoryId, { command, side });
+      if (historyEntry) {
+        room.history = appendHistoryEntry(room.history, historyEntry, MAX_HISTORY_ENTRIES);
+        room.nextHistoryId += 1;
+      }
+      const incrementAppliedMs = this.#updateClockAfterCommand(room, previousState, room.state, now);
+      room.undoHistory.record(previousState, room.state, this.#clockSnapshot(room).remainingMs, incrementAppliedMs);
       room.version += 1;
       room.lastActivityAt = this.now();
       if (room.state.phase === "finished" && room.restartProposal?.kind === "settings") {
         this.#cancelRestartProposal(room, "match-finished");
       }
       this.#clearAllAims(room);
-      this.#broadcastSnapshots(room, "state");
+      this.#broadcastSnapshots(room, "state", historyEntry ? { historyEntry } : {});
       if (previousAbility && ["bomb", "antiBomb", "pointDestroy"].includes(previousAbility.type)
         && room.state.board !== previousState.board && room.state.lastDestroyed.length > 0) {
         const visualEvent = {
@@ -444,6 +588,7 @@ export class RoomManager {
         if (expiredSeat) reason = "reconnect-expired";
       }
       if (!reason) continue;
+      this.#clearUndoProposal(room);
       this.#stopClock(room);
 
       for (const side of SIDES) {
@@ -460,7 +605,10 @@ export class RoomManager {
   }
 
   stopAllClocks() {
-    for (const room of this.rooms.values()) this.#stopClock(room);
+    for (const room of this.rooms.values()) {
+      this.#clearUndoProposal(room);
+      this.#stopClock(room);
+    }
   }
 
   hasRoom(rawCode) {
@@ -488,10 +636,67 @@ export class RoomManager {
     return true;
   }
 
+  #undoView(room, side) {
+    const proposal = room.undoProposal;
+    return {
+      undoAvailable: room.status === "active"
+        && room.state.phase === "playing"
+        && !proposal
+        && room.undoHistory.canUndo(side, { latestOnly: true }),
+      undoProposal: proposal ? {
+        proposalId: proposal.id,
+        fromSide: proposal.fromSide,
+        toSide: proposal.toSide,
+        expiresAt: proposal.expiresAt
+      } : null
+    };
+  }
+
+  #pauseClock(room, now) {
+    const clock = room.clock;
+    if (clock.activePlayer && clock.deadlineAt !== null) {
+      clock.remainingMs[clock.activePlayer] = Math.max(0, clock.deadlineAt - now);
+    }
+    this.#stopClock(room);
+  }
+
+  #clearUndoProposal(room) {
+    const proposal = room.undoProposal;
+    if (!proposal) return null;
+    room.undoProposal = null;
+    if (proposal.timer !== null) this.cancelTimeout(proposal.timer);
+    proposal.timer = null;
+    return proposal;
+  }
+
+  #cancelUndoProposal(room, reason) {
+    const proposal = this.#clearUndoProposal(room);
+    if (!proposal) return false;
+    if (room.status === "active" && room.state.phase === "playing") {
+      this.#startClock(room, room.state.currentPlayer, this.now());
+    }
+    this.#broadcastEphemeral(room, {
+      type: "undo-cancelled",
+      roomCode: room.code,
+      proposalId: proposal.id,
+      reason,
+      undoAvailableFor: this.#undoView(room, proposal.fromSide).undoAvailable ? proposal.fromSide : null,
+      clock: this.#clockSnapshot(room)
+    });
+    return true;
+  }
+
   #restartRoom(room, proposal) {
     this.#stopClock(room);
+    this.#clearUndoProposal(room);
     room.restartProposal = null;
     room.state = createGameState(proposal.settings, this.random);
+    room.history = [];
+    const initialEntry = createHistoryEntry(null, room.state, room.nextHistoryId);
+    if (initialEntry) {
+      room.history.push(initialEntry);
+      room.nextHistoryId += 1;
+    }
     const oldX = room.seats.X;
     const oldO = room.seats.O;
     if (this.sideRandom() < 0.5) room.seats = { X: oldX, O: oldO };
@@ -512,10 +717,11 @@ export class RoomManager {
       timer: null,
       generation: room.clock.generation + 1
     };
+    room.undoHistory.reset(room.state, room.clock.remainingMs);
     room.version += 1;
     room.lastActivityAt = this.now();
     if (room.state.phase === "playing") this.#startClock(room, room.state.currentPlayer, this.now());
-    this.#broadcastSnapshots(room, "state", { restartKind: proposal.kind });
+    this.#broadcastSnapshots(room, "state", { restartKind: proposal.kind, history: room.history });
     this.#broadcastEphemeral(room, {
       type: "restart-complete",
       roomCode: room.code,
@@ -568,8 +774,10 @@ export class RoomManager {
         side,
         version: room.version,
         ...extra,
+        ...((type === "room-ready" || extra.restartKind) ? { history: room.history } : {}),
         state: getPlayerView(room.state, side),
-        clock: this.#clockSnapshot(room)
+        clock: this.#clockSnapshot(room),
+        ...this.#undoView(room, side)
       };
       try {
         connection.send(envelope);
@@ -649,25 +857,35 @@ export class RoomManager {
       this.#stopClock(room);
       return false;
     }
+    const previousState = room.state;
     room.state = result.state;
+    const historyEntry = createHistoryEntry(previousState, room.state, room.nextHistoryId, {
+      command: { type: "timeout" },
+      side: timedOutPlayer
+    });
+    if (historyEntry) {
+      room.history = appendHistoryEntry(room.history, historyEntry, MAX_HISTORY_ENTRIES);
+      room.nextHistoryId += 1;
+    }
+    room.undoHistory.clear();
     this.#stopClock(room);
     if (room.restartProposal?.kind === "settings") this.#cancelRestartProposal(room, "match-finished");
     room.version += 1;
     room.lastActivityAt = now;
     this.#clearAllAims(room);
-    this.#broadcastSnapshots(room, "state");
+    this.#broadcastSnapshots(room, "state", historyEntry ? { historyEntry } : {});
     return true;
   }
 
   #updateClockAfterCommand(room, previousState, nextState, now) {
     const clock = room.clock;
-    if (!clock.enabled) return;
+    if (!clock.enabled) return 0;
 
     if (previousState.phase !== "playing" && nextState.phase === "playing") {
       this.#startClock(room, nextState.currentPlayer, now);
-      return;
+      return 0;
     }
-    if (previousState.phase !== "playing") return;
+    if (previousState.phase !== "playing") return 0;
 
     const activePlayer = clock.activePlayer;
     if (activePlayer && clock.deadlineAt !== null) {
@@ -681,21 +899,21 @@ export class RoomManager {
           && Array.isArray(nextState.message)
           && nextState.message.some((entry) => entry?.key === "message.extraTurn"))
         || (nextState.phase === "finished" && nextState.piecesLeft === 0));
-    if (completedTurn) {
-      clock.remainingMs[previousState.currentPlayer] += room.state.settings.incrementSeconds * 1000;
-    }
+    const incrementAppliedMs = completedTurn ? room.state.settings.incrementSeconds * 1000 : 0;
+    if (incrementAppliedMs > 0) clock.remainingMs[previousState.currentPlayer] += incrementAppliedMs;
 
     if (nextState.phase !== "playing") {
       this.#stopClock(room);
-      return;
+      return incrementAppliedMs;
     }
     if (nextState.currentPlayer !== activePlayer) {
       this.#startClock(room, nextState.currentPlayer, now);
-      return;
+      return incrementAppliedMs;
     }
     if (clock.deadlineAt !== null) {
       clock.deadlineAt = now + clock.remainingMs[activePlayer];
       if (completedTurn) this.#startClock(room, nextState.currentPlayer, now);
     }
+    return incrementAppliedMs;
   }
 }

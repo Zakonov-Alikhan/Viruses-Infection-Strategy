@@ -346,7 +346,7 @@ test("player view is allow-listed and strips server-only fields and role metadat
   assert.deepEqual(Object.keys(view).sort(), [
     "abilityTargets", "board", "currentPlayer", "eventItems",
     "finishReason", "inventory", "lastDestroyed", "message", "phase", "piecesLeft",
-    "protections", "selectedAbility", "settings", "setupPlayer", "startChoices", "winner", "wormholePair"
+    "protections", "roundNumber", "selectedAbility", "settings", "setupPlayer", "startChoices", "turnNumber", "winner", "wormholePair"
   ].sort());
   assert.equal("serverSecret" in view, false);
   assert.equal("playerRoles" in view, false);

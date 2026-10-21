@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=wormhole-settings1">
+  <link rel="stylesheet" href="/ui/style.css?v=turn-undo1">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -152,6 +152,7 @@
               <span id="game-status" data-i18n="board.preparing">Подготовка игры</span>
             </div>
             <div id="turn-counter" class="turn-counter" data-i18n="board.preparingTurn">Подготовка к игре</div>
+            <span id="round-counter" class="round-counter" hidden></span>
           </div>
           <p id="online-game-status" class="online-game-status" role="status" aria-live="polite" hidden></p>
           <div id="turn-progress" class="turn-progress" aria-live="polite" hidden>
@@ -199,12 +200,20 @@
             <time class="player-clock" id="clock-o" aria-label="Остаток времени игрока O" data-i18n-aria-label="clock.remaining" data-i18n-player="O">05:00</time>
           </div>
           <button id="resign-button" class="button button-resign" type="button" disabled data-i18n="resign">Сдаться</button>
+          <button id="undo-turn-button" class="button button-secondary undo-turn-button" type="button" aria-describedby="undo-risk-note" data-i18n="undo.button" hidden>Отменить ход</button>
+          <p id="undo-risk-note" class="undo-risk-note" data-i18n="undo.riskNote" hidden>В разработке, использовать на свой страх и риск.</p>
         </div>
         <div class="side-card current-turn-card" id="current-turn-card">
           <p class="eyebrow" data-i18n="status.now">Сейчас</p>
           <h2 id="side-title">Выберите старт</h2>
           <p id="side-description">При свободном расположении игроки выбирают старт по очереди. Передайте устройство сопернику после выбора.</p>
         </div>
+        <details class="side-card history-card" id="history-card" hidden>
+          <summary data-i18n="history.title">Журнал ходов</summary>
+          <p id="history-notice" class="history-notice" data-i18n="history.viewing" hidden>Просмотр истории. Игровое поле неактивно.</p>
+          <ol id="history-list" class="history-list"></ol>
+          <button id="history-live-button" class="button button-secondary history-live-button" type="button" data-i18n="history.live" hidden>Вернуться к текущей игре</button>
+        </details>
         <section class="side-card tutorial-panel" id="tutorial-panel" aria-live="polite" hidden>
           <p class="eyebrow" id="tutorial-step"></p>
           <div class="tutorial-progress-track" aria-hidden="true"><span id="tutorial-progress-fill"></span></div>
@@ -419,6 +428,17 @@
       </div>
     </section>
   </dialog>
+  <dialog id="undo-proposal-modal" class="resign-confirm-modal" aria-labelledby="undo-proposal-title" aria-describedby="undo-proposal-description">
+    <section class="resign-confirm-card">
+      <p class="eyebrow resign-confirm-eyebrow" data-i18n="dialog.confirm">Подтверждение</p>
+      <h2 id="undo-proposal-title" data-i18n="undo.proposalTitle">Соперник предлагает отменить ход</h2>
+      <p id="undo-proposal-description"></p>
+      <div class="resign-confirm-actions">
+        <button id="undo-proposal-decline" class="button button-secondary" type="button" data-i18n="dialog.restartDecline">Отказаться</button>
+        <button id="undo-proposal-accept" class="button button-primary" type="button" data-i18n="dialog.restartAccept">Согласиться</button>
+      </div>
+    </section>
+  </dialog>
   <dialog id="admin-auth-modal" class="resign-confirm-modal" aria-labelledby="admin-auth-title">
     <form id="admin-auth-form" class="resign-confirm-card">
       <p class="eyebrow resign-confirm-eyebrow" data-i18n="admin.mode">Режим администратора</p>
@@ -446,6 +466,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=wormhole-settings1"></script>
+  <script type="module" src="/ui/script.js?v=turn-undo1"></script>
 </body>
 </html>

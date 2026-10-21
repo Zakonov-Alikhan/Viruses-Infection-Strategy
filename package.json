@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start:multiplayer": "node server/index.js",
-    "test": "node --test ui/game.test.js ui/settings.test.js ui/restart.test.js ui/ai.test.js ui/multiplayer.test.js server/game-service.test.js server/index.test.js server/rooms.test.js server/websocket.test.js"
+    "test": "node --test ui/game.test.js ui/history.test.js ui/turn-undo.test.js ui/settings.test.js ui/restart.test.js ui/ai.test.js ui/multiplayer.test.js server/game-service.test.js server/index.test.js server/rooms.test.js server/websocket.test.js"
   },
   "dependencies": {
     "ws": "^8.21.0"

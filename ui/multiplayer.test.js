@@ -133,9 +133,22 @@ test("client creates and joins a room, then relays confirmed authoritative turns
   assert.deepEqual(nextForX.state.board, nextForO.state.board);
   assert.equal(nextForX.clock.activePlayer, "O");
   assert.equal(nextForX.clock.remainingMs.X, nextForO.clock.remainingMs.X);
+  assert.equal(nextForX.undoAvailable, true);
   assert.equal(x.sendCommand({ type: "place", ...move }), true);
   const rejected = await xEvents.waitFor((event) => event.type === "command-error" && event.code === "not-your-turn");
   assert.equal(rejected.version, nextForX.version);
+
+  const offer = await x.proposeUndo();
+  const incomingOffer = await oEvents.waitFor((event) => event.type === "undo-proposal" && event.proposalId === offer.proposalId);
+  assert.equal(incomingOffer.fromSide, "X");
+  const restoredX = xEvents.waitFor((event) => event.type === "state" && event.undoAccepted === true);
+  const restoredO = oEvents.waitFor((event) => event.type === "state" && event.undoAccepted === true);
+  const vote = await o.voteUndo(offer.proposalId, true);
+  assert.equal(vote.accepted, true);
+  const [xAfterUndo, oAfterUndo] = await Promise.all([restoredX, restoredO]);
+  assert.deepEqual(xAfterUndo.state, oAfterUndo.state);
+  assert.equal(xAfterUndo.state.board[move.row][move.col], "");
+  assert.equal(xAfterUndo.historyEntry.type, "undo");
 
   x.leave();
   o.leave();

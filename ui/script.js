@@ -27,13 +27,20 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=wormhole-settings1";
+} from "./game.js?v=game-history1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
 import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=wormhole-settings1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
+import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
+import {
+  appendHistoryEntry,
+  createHistoryEntry,
+  createUndoHistoryEntry,
+  restoreHistoryPosition
+} from "./history.js?v=game-history1";
 
 const boardElement = document.querySelector(".game-board");
 const boardShell = document.querySelector(".board-shell");
@@ -43,6 +50,11 @@ const sideAxis = document.querySelector(".axis-side");
 const statusElement = document.querySelector("#game-status");
 const messageElement = document.querySelector("#game-message");
 const turnElement = document.querySelector("#turn-counter");
+const roundCounter = document.querySelector("#round-counter");
+const historyCard = document.querySelector("#history-card");
+const historyList = document.querySelector("#history-list");
+const historyNotice = document.querySelector("#history-notice");
+const historyLiveButton = document.querySelector("#history-live-button");
 const turnProgress = document.querySelector("#turn-progress");
 const piecesLeftCount = document.querySelector("#pieces-left-count");
 const piecesTotalCount = document.querySelector("#pieces-total-count");
@@ -169,6 +181,12 @@ const clockPlayerO = document.querySelector("#clock-player-o");
 const clockPlayerOName = document.querySelector("#clock-player-o .clock-player-name span");
 const clockControlSummary = document.querySelector("#clock-control-summary");
 const resignButton = document.querySelector("#resign-button");
+const undoTurnButton = document.querySelector("#undo-turn-button");
+const undoRiskNote = document.querySelector("#undo-risk-note");
+const undoProposalModal = document.querySelector("#undo-proposal-modal");
+const undoProposalDescription = document.querySelector("#undo-proposal-description");
+const undoProposalAcceptButton = document.querySelector("#undo-proposal-accept");
+const undoProposalDeclineButton = document.querySelector("#undo-proposal-decline");
 const resignConfirmModal = document.querySelector("#resign-confirm-modal");
 const resignCancelButton = document.querySelector("#resign-cancel");
 const resignConfirmButton = document.querySelector("#resign-confirm");
@@ -238,6 +256,9 @@ const clockIncrementError = document.querySelector("#clock-increment-error");
 
 let settings = { ...DEFAULT_SETTINGS };
 let state;
+let moveHistory = [];
+let historyViewId = null;
+let localHistoryId = 0;
 let newlyPlacedCells = new Map();
 let newlySpawnedItems = new Map();
 let newlySpawnedWormholes = new Map();
@@ -287,6 +308,11 @@ let onlineClockReceivedAt = null;
 let onlineMenuError = null;
 let pendingSettings = null;
 let incomingRestartProposal = null;
+let incomingUndoProposal = null;
+let localUndoConfirmation = false;
+let onlineUndoAvailable = false;
+let onlineUndoPending = false;
+const localUndoHistory = new TurnUndoHistory({ preserveCompletedTurns: true });
 const multiplayerClient = new MultiplayerClient();
 let gameSessionId = 0;
 let computerActionToken = 0;
@@ -313,7 +339,7 @@ function isComputerControlledTurn() {
 function canHumanAct() {
   if (!state || state.phase === "finished") return false;
   if (onlineMode) {
-    if (!onlineConnected || onlineCommandPending || !onlineSide) return false;
+    if (!onlineConnected || onlineCommandPending || onlineUndoPending || !onlineSide) return false;
     if (state.phase === "setup-x" || state.phase === "setup-o") return state.setupPlayer === onlineSide;
     return state.phase === "playing" && state.currentPlayer === onlineSide;
   }
@@ -322,7 +348,9 @@ function canHumanAct() {
 }
 
 function sendOnlineCommand(command) {
-  const allowedAdminAction = onlineMode && onlineAdminAuthenticated && onlineConnected && !onlineCommandPending;
+  if (historyViewId !== null) return false;
+  const allowedAdminAction = onlineMode && onlineAdminAuthenticated && onlineConnected
+    && !onlineCommandPending && !onlineUndoPending;
   if (!onlineMode || (!canHumanAct() && !allowedAdminAction)) return false;
   if (!multiplayerClient.sendCommand(command)) {
     onlineConnected = false;
@@ -337,7 +365,7 @@ function sendOnlineCommand(command) {
 
 function performGameAction(command, transition) {
   if (onlineMode) return sendOnlineCommand(command);
-  updateState(transition());
+  updateState(transition(), { command, side: state.currentPlayer });
   return true;
 }
 
@@ -451,10 +479,18 @@ function renderClock() {
   currentTurnCard.classList.toggle("turn-active", state && state.phase !== "finished");
   clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && shownClock("X") <= 10_000);
   clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && shownClock("O") <= 10_000);
-  resignButton.disabled = !state || state.phase !== "playing" || !canHumanAct();
+  resignButton.disabled = historyViewId !== null || !state || state.phase !== "playing" || !canHumanAct();
+  const localUndoSide = computerOpponent.enabled ? "X" : null;
+  const localUndoAvailable = !onlineMode && !trainingSession && historyViewId === null && state?.phase === "playing"
+    && localUndoHistory.canUndo(localUndoSide, { latestOnly: !computerOpponent.enabled });
+  undoTurnButton.hidden = !(onlineMode ? onlineUndoAvailable : localUndoAvailable);
+  undoRiskNote.hidden = undoTurnButton.hidden;
+  undoTurnButton.disabled = historyViewId !== null || !state || state.phase !== "playing"
+    || (onlineMode && (!onlineConnected || onlineCommandPending || onlineUndoPending));
 }
 
-function renderInventories() {
+function renderInventories(displayState = state) {
+  const state = displayState;
   for (const player of ["X", "O"]) {
     const container = inventoryElements[player];
     const items = state.inventory[player];
@@ -476,7 +512,7 @@ function renderInventories() {
       icon.alt = "";
       icon.setAttribute("aria-hidden", "true");
       slot.appendChild(icon);
-      slot.disabled = state.phase !== "playing" || state.currentPlayer !== player
+      slot.disabled = historyViewId !== null || state.phase !== "playing" || state.currentPlayer !== player
         || item.type === "extraTurn" || !canHumanAct();
       const itemName = t(definition.nameKey);
       slot.setAttribute("aria-label", t(item.type === "extraTurn" ? "inventory.auto" : "inventory.choose", { name: itemName }));
@@ -503,7 +539,7 @@ function renderInventories() {
       button.type = "button";
       button.className = "admin-item-button" + (state.selectedAbility === itemId ? " is-selected" : "");
       button.dataset.itemId = itemId;
-      button.disabled = !adminToolsReady || !canHumanAct();
+      button.disabled = historyViewId !== null || !adminToolsReady || !canHumanAct();
       const itemName = t(definition.nameKey);
       button.title = t(adminToolsReady ? "admin.item" : "admin.itemWaiting", { name: itemName });
       const icon = document.createElement("img");
@@ -1222,10 +1258,15 @@ function clearOnlinePresentation() {
   onlineStatusError = null;
   onlineClockSnapshot = null;
   onlineClockReceivedAt = null;
+  onlineUndoAvailable = false;
+  onlineUndoPending = false;
+  incomingUndoProposal = null;
+  localUndoConfirmation = false;
   onlineGameStatus.hidden = true;
   onlineGameStatus.textContent = "";
   incomingRestartProposal = null;
   if (restartProposalModal.open) restartProposalModal.close();
+  if (undoProposalModal.open) undoProposalModal.close();
   gameScreen.classList.remove("is-online");
   if (onlinePreviousSettings) settings = { ...onlinePreviousSettings };
   onlinePreviousSettings = null;
@@ -1340,6 +1381,9 @@ function showOnlineRoom(message) {
 
 function enterOnlineGame(message) {
   const isNewOnlineSession = !onlineMode;
+  if (Array.isArray(message.history)) moveHistory = message.history;
+  else if (isNewOnlineSession) moveHistory = [];
+  if (isNewOnlineSession) historyViewId = null;
   if (isNewOnlineSession) {
     leaveTraining(true);
     beginGameSession();
@@ -1365,6 +1409,12 @@ function enterOnlineGame(message) {
   onlineStatusError = null;
   onlineClockSnapshot = message.clock || null;
   onlineClockReceivedAt = performance.now();
+  onlineUndoAvailable = Boolean(message.undoAvailable);
+  onlineUndoPending = Boolean(message.undoProposal);
+  if (onlineUndoPending) onlineStatusKey = "undo.waiting";
+  incomingUndoProposal = message.undoProposal?.toSide === onlineSide
+    ? { roomCode: message.roomCode, ...message.undoProposal }
+    : null;
   onlineGameStatus.hidden = true;
   if (onlineRoomModal.open) onlineRoomModal.close();
 
@@ -1382,6 +1432,7 @@ function enterOnlineGame(message) {
   } else {
     updateState(message.state, { serverUpdate: true });
   }
+  if (incomingUndoProposal) showUndoProposal(incomingUndoProposal);
 }
 
 function handleMultiplayerEvent(event) {
@@ -1390,6 +1441,8 @@ function handleMultiplayerEvent(event) {
     return;
   }
   if (event.type === "room-created" || event.type === "room-joined") {
+    moveHistory = Array.isArray(event.history) ? event.history : [];
+    historyViewId = null;
     showOnlineRoom(event);
     return;
   }
@@ -1412,7 +1465,47 @@ function handleMultiplayerEvent(event) {
     render();
     return;
   }
+  if (event.type === "undo-proposal" && onlineMode && event.roomCode === onlineRoomCode) {
+    onlineUndoPending = true;
+    onlineUndoAvailable = false;
+    onlineClockSnapshot = event.clock || onlineClockSnapshot;
+    onlineClockReceivedAt = performance.now();
+    if (event.toSide === onlineSide) {
+      incomingUndoProposal = event;
+      showUndoProposal(event);
+    } else {
+      onlineStatusKey = "undo.waiting";
+      onlineGameStatus.hidden = false;
+    }
+    render();
+    return;
+  }
+  if (event.type === "undo-cancelled" && onlineMode && event.roomCode === onlineRoomCode) {
+    if (incomingUndoProposal?.proposalId === event.proposalId) incomingUndoProposal = null;
+    onlineUndoPending = false;
+    onlineUndoAvailable = event.undoAvailableFor === onlineSide;
+    onlineClockSnapshot = event.clock || onlineClockSnapshot;
+    onlineClockReceivedAt = performance.now();
+    if (undoProposalModal.open && !localUndoConfirmation) undoProposalModal.close();
+    onlineStatusKey = null;
+    onlineStatusError = null;
+    render();
+    onlineGameStatus.textContent = t("undo.cancelled", { reason: t("undo.reason." + event.reason) });
+    onlineGameStatus.hidden = false;
+    return;
+  }
+  if (event.type === "undo-complete" && onlineMode && event.roomCode === onlineRoomCode) {
+    onlineUndoPending = false;
+    incomingUndoProposal = null;
+    onlineStatusKey = null;
+    if (undoProposalModal.open) undoProposalModal.close();
+    render();
+    onlineGameStatus.textContent = t("undo.complete");
+    onlineGameStatus.hidden = false;
+    return;
+  }
   if (event.type === "visual-event" && onlineMode && event.roomCode === onlineRoomCode) {
+    if (historyViewId !== null) return;
     if (event.abilityType === "exchange") {
       if (state?.settings.animationsEnabled) playInventoryExchangeAnimation();
       return;
@@ -1432,6 +1525,21 @@ function handleMultiplayerEvent(event) {
         shell.classList.add("bomb-screen-shake");
       }
       render();
+    }
+    return;
+  }
+  if (event.type === "undo-proposal-created" && onlineMode && event.roomCode === onlineRoomCode) {
+    onlineStatusKey = "undo.waiting";
+    onlineUndoPending = true;
+    render();
+    return;
+  }
+  if (event.type === "undo-vote-recorded" && onlineMode && event.roomCode === onlineRoomCode) {
+    if (!event.accepted) {
+      onlineStatusKey = null;
+      render();
+      onlineGameStatus.textContent = t("undo.cancelled", { reason: t("undo.reason.declined") });
+      onlineGameStatus.hidden = false;
     }
     return;
   }
@@ -1506,6 +1614,12 @@ function handleMultiplayerEvent(event) {
     onlineStatusError = null;
     onlineClockSnapshot = event.clock || null;
     onlineClockReceivedAt = performance.now();
+    onlineUndoAvailable = Boolean(event.undoAvailable);
+    onlineUndoPending = Boolean(event.undoProposal);
+    if (!onlineUndoPending) incomingUndoProposal = null;
+    else if (event.undoProposal.toSide === onlineSide) {
+      incomingUndoProposal = { roomCode: event.roomCode, ...event.undoProposal };
+    }
     lastSentAim = null;
     if (event.restartKind) {
       beginGameSession();
@@ -1517,7 +1631,9 @@ function handleMultiplayerEvent(event) {
       newlySpawnedWormholes.clear();
       remoteAim = null;
       lastSentAim = null;
+      historyViewId = null;
     }
+    syncHistoryFromServer(event);
     updateState(event.state, { serverUpdate: true });
     return;
   }
@@ -1530,6 +1646,10 @@ function handleMultiplayerEvent(event) {
     boardEditorTool = null;
     pendingBoardEdit = false;
     onlineCommandPending = false;
+    onlineUndoAvailable = false;
+    onlineUndoPending = false;
+    incomingUndoProposal = null;
+    if (undoProposalModal.open && !localUndoConfirmation) undoProposalModal.close();
     onlineStatusKey = "online.reconnecting";
     if (onlineMode) {
       onlineGameStatus.textContent = t(onlineStatusKey);
@@ -1549,6 +1669,10 @@ function handleMultiplayerEvent(event) {
     remoteAim = null;
     lastSentAim = null;
     onlineCommandPending = false;
+    onlineUndoAvailable = false;
+    onlineUndoPending = false;
+    incomingUndoProposal = null;
+    if (undoProposalModal.open && !localUndoConfirmation) undoProposalModal.close();
     onlineStatusError = event.code || event.reason;
     onlineGameStatus.textContent = onlineErrorMessage(onlineStatusError);
     onlineGameStatus.hidden = false;
@@ -1628,6 +1752,8 @@ function leaveTraining(restoreSettings) {
 function startTraining(lessonIndex = 0) {
   if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
   beginGameSession();
+  moveHistory = [];
+  historyViewId = null;
   computerOpponent = { enabled: false, difficulty: "easy" };
   stopClock();
   if (trainingSession && trainingSavedSettings) settings = { ...trainingSavedSettings };
@@ -1696,7 +1822,9 @@ function handleTrainingMove(row, col) {
 
 function handleTrainingAbilityTarget(itemId, row, col) {
   if (onlineMode) return sendOnlineCommand({ type: "ability-target", itemId, row, col });
-  if (!trainingSession) return updateState(chooseAbilityTarget(state, itemId, row, col));
+  if (!trainingSession) return updateState(chooseAbilityTarget(state, itemId, row, col), {
+    command: { type: "ability-target", itemId, row, col }, side: state.currentPlayer
+  });
   const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
   if (!lesson.targets.some((target) => target.row === row && target.col === col)) {
     trainingSession.feedbackKey = "training.tryTarget";
@@ -1709,7 +1837,9 @@ function handleTrainingAbilityTarget(itemId, row, col) {
 
 function handleTrainingAreaTarget(itemId, row, col) {
   if (onlineMode) return sendOnlineCommand({ type: "ability-target", itemId, row, col });
-  if (!trainingSession) return updateState(useBomb(state, itemId, row, col));
+  if (!trainingSession) return updateState(useBomb(state, itemId, row, col), {
+    command: { type: "ability-target", itemId, row, col }, side: state.currentPlayer
+  });
   const lesson = TRAINING_LESSONS[trainingSession.lessonIndex];
   if (lesson.objective !== "bomb" || !lesson.targets.some((target) => target.row === row && target.col === col)) {
     trainingSession.feedbackKey = "training.tryTarget";
@@ -1793,26 +1923,140 @@ function setupGame() {
   newlyPlacedCells.clear();
   newlySpawnedItems.clear();
   newlySpawnedWormholes.clear();
+  moveHistory = [];
+  historyViewId = null;
+  localHistoryId = 0;
+  incomingUndoProposal = null;
+  localUndoConfirmation = false;
+  onlineUndoAvailable = false;
+  onlineUndoPending = false;
+  if (undoProposalModal.open) undoProposalModal.close();
   activeAreaEffect = null;
   state = createGameState(settings);
+  const initialHistoryEntry = createHistoryEntry(null, state, ++localHistoryId);
+  if (initialHistoryEntry) moveHistory = appendHistoryEntry(moveHistory, initialHistoryEntry);
   clockRemaining = {
     X: settings.clockMinutes * 60_000,
     O: settings.clockMinutes * 60_000
   };
+  localUndoHistory.preserveCompletedTurns = Boolean(computerOpponent.enabled);
+  localUndoHistory.reset(state, clockRemaining);
   render();
   startClock();
   scheduleComputerAction();
 }
 
-function updateState(nextState, { serverUpdate = false } = {}) {
+function acceptHistoryEntry(entry) {
+  if (!entry) return;
+  moveHistory = appendHistoryEntry(moveHistory, entry);
+  if (historyViewId !== null && !moveHistory.some(({ id }) => id === historyViewId)) historyViewId = null;
+  renderHistoryControls();
+}
+
+function syncHistoryFromServer(message) {
+  if (Array.isArray(message.history)) {
+    moveHistory = message.history;
+    if (historyViewId !== null && !moveHistory.some(({ id }) => id === historyViewId)) historyViewId = null;
+  }
+  acceptHistoryEntry(message.historyEntry);
+}
+
+function describeHistoryEntry(entry) {
+  const coordinates = (entry.coordinates || []).map(({ row, col }) => `${columnLabel(col)}${row + 1}`).join(", ");
+  if (entry.type === "start") return t("history.start");
+  if (entry.type === "placement") return t("history.placement", { side: entry.side, coordinates });
+  if (entry.type === "ability") return t("history.ability", {
+    side: entry.side,
+    item: t(`item.${entry.itemType || "unknown"}`),
+    coordinates: coordinates ? ` · ${coordinates}` : ""
+  });
+  if (entry.type === "board-edit") return t("history.edit", { side: entry.side, coordinates });
+  if (entry.type === "resign") return t("history.resign", { side: entry.side });
+  if (entry.type === "timeout") return t("history.timeout", { side: entry.side });
+  if (entry.type === "undo") return t("history.undo", { side: entry.side, turn: entry.turnNumber });
+  return t("history.action", { side: entry.side || "—" });
+}
+
+function renderHistoryControls() {
+  if (!historyList || !historyCard) return;
+  historyCard.hidden = !state || !moveHistory.length || Boolean(trainingSession);
+  historyList.replaceChildren();
+  for (const entry of moveHistory) {
+    const row = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "history-entry" + (entry.id === historyViewId ? " is-selected" : "");
+    button.setAttribute("aria-current", entry.id === historyViewId ? "true" : "false");
+    button.addEventListener("click", () => {
+      historyViewId = entry.id;
+      invalidateComputerAction();
+      historyCard.open = true;
+      render();
+    });
+    const heading = document.createElement("span");
+    heading.className = "history-entry-heading";
+    heading.textContent = `${t("history.counter", { round: entry.roundNumber, turn: entry.turnNumber })} · ${describeHistoryEntry(entry)}`;
+    button.append(heading);
+    if (entry.result?.length) {
+      const result = document.createElement("small");
+      result.className = "history-entry-result";
+      result.textContent = formatMessage(entry.result);
+      button.append(result);
+    }
+    row.append(button);
+    historyList.append(row);
+  }
+  const viewing = historyViewId !== null;
+  historyNotice.hidden = !viewing;
+  historyLiveButton.hidden = !viewing;
+  historyLiveButton.disabled = Boolean(viewing && onlineMode && !onlineConnected);
+}
+
+historyLiveButton.addEventListener("click", () => {
+  if (onlineMode && !onlineConnected) return;
+  historyViewId = null;
+  render();
+  if (state?.phase === "finished" && !resultModal.open) showResult();
+  if (!onlineMode) scheduleComputerAction();
+});
+
+function updateState(nextState, {
+  serverUpdate = false,
+  command = null,
+  side = null,
+  undoRestore = false,
+  undoTurn = null
+} = {}) {
   if (onlineMode !== serverUpdate) return;
+  if (historyViewId !== null && !serverUpdate) return;
   const previousState = state;
   const now = performance.now();
   if (!onlineMode && previousState.phase === "playing" && !advanceClock(now)) return;
-  const completedTurn = previousState.phase === "playing"
+  if (!onlineMode && !trainingSession) {
+    const entry = undoRestore
+      ? createUndoHistoryEntry(nextState, localHistoryId + 1, undoTurn)
+      : createHistoryEntry(previousState, nextState, localHistoryId + 1, { command, side });
+    if (entry) {
+      localHistoryId += 1;
+      acceptHistoryEntry(entry);
+    }
+  }
+  const completedTurn = !undoRestore && previousState.phase === "playing"
     && previousState.piecesLeft === 1
-    && (nextState.currentPlayer !== previousState.currentPlayer || (nextState.phase === "finished" && nextState.piecesLeft === 0));
-  if (!onlineMode && completedTurn && !settings.unlimitedTime) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
+    && (nextState.currentPlayer !== previousState.currentPlayer
+      || (nextState.phase === "playing"
+        && nextState.currentPlayer === previousState.currentPlayer
+        && nextState.piecesLeft === nextState.settings.piecesPerTurn
+        && Array.isArray(nextState.message)
+        && nextState.message.some((entry) => entry?.key === "message.extraTurn"))
+      || (nextState.phase === "finished" && nextState.piecesLeft === 0));
+  const incrementAppliedMs = !onlineMode && completedTurn && !settings.unlimitedTime
+    ? settings.incrementSeconds * 1000
+    : 0;
+  if (incrementAppliedMs > 0) clockRemaining[previousState.currentPlayer] += incrementAppliedMs;
+  if (!onlineMode && !trainingSession && !undoRestore) {
+    localUndoHistory.record(previousState, nextState, clockRemaining, incrementAppliedMs);
+  }
   const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
   const inventoryExchangeConfirmed = !onlineMode
     && nextState.message?.key === "message.exchange"
@@ -1820,7 +2064,7 @@ function updateState(nextState, { serverUpdate = false } = {}) {
   const animationStartedAt = performance.now();
   newlyPlacedCells.clear();
   newlySpawnedItems.clear();
-  if (previousState.phase === "playing" && previousState.settings.animationsEnabled && nextState.board !== previousState.board) {
+  if (!undoRestore && previousState.phase === "playing" && previousState.settings.animationsEnabled && nextState.board !== previousState.board) {
     for (let row = 0; row < nextState.board.length; row += 1) {
       for (let col = 0; col < nextState.board[row].length; col += 1) {
         const value = nextState.board[row][col];
@@ -1830,7 +2074,7 @@ function updateState(nextState, { serverUpdate = false } = {}) {
       }
     }
   }
-  if (previousState.phase === "playing" && previousState.settings.animationsEnabled) {
+  if (!undoRestore && previousState.phase === "playing" && previousState.settings.animationsEnabled) {
     const previousItems = new Set(previousState.eventItems.map((item) => item.id));
     for (const item of nextState.eventItems) {
       if (!previousItems.has(item.id)) newlySpawnedItems.set(item.id, animationStartedAt);
@@ -1840,7 +2084,8 @@ function updateState(nextState, { serverUpdate = false } = {}) {
     }
   }
   let bombStarted = false;
-  if (!onlineMode && previousState.phase === "playing" && previousState.settings.animationsEnabled) {
+  if (!undoRestore && !onlineMode && historyViewId === null
+    && previousState.phase === "playing" && previousState.settings.animationsEnabled) {
     const usedAbility = getSelectedAbility(previousState);
     if ((usedAbility?.type === "bomb" || usedAbility?.type === "antiBomb")
       && nextState.board !== previousState.board && nextState.lastDestroyed.length === 4) {
@@ -1875,7 +2120,7 @@ function updateState(nextState, { serverUpdate = false } = {}) {
   if (state.phase === "finished") invalidateComputerAction();
   render();
   if (inventoryExchangeConfirmed && state.settings.animationsEnabled) playInventoryExchangeAnimation();
-  if (gameJustEnded) showResult();
+  if (gameJustEnded && historyViewId === null) showResult();
   else if (!onlineMode) scheduleComputerAction();
 }
 
@@ -1892,7 +2137,7 @@ function playInventoryExchangeAnimation() {
 }
 
 function placeBoardEditorObject(row, col) {
-  if (!boardEditorTool || !state || state.phase !== "playing" || isComputerControlledTurn()) return;
+  if (historyViewId !== null || !boardEditorTool || !state || state.phase !== "playing" || isComputerControlledTurn()) return;
   if (onlineMode) {
     if (!onlineConnected || !onlineAdminAuthenticated || onlineCommandPending) return;
     pendingBoardEdit = true;
@@ -1913,7 +2158,10 @@ function placeBoardEditorObject(row, col) {
   }
   boardEditorMessageKey = "admin.editorPlaced";
   boardEditorStatus.textContent = t(boardEditorMessageKey);
-  updateState(nextState);
+  updateState(nextState, {
+    command: { type: "board-edit", object: { ...boardEditorTool, row, col } },
+    side: state.currentPlayer
+  });
 }
 
 function showResult() {
@@ -1942,8 +2190,15 @@ function markLegalCell(cell, player) {
 }
 
 function render() {
+  const displayState = historyViewId === null
+    ? state
+    : restoreHistoryPosition(moveHistory.find(({ id }) => id === historyViewId)?.position) || state;
+  renderGamePosition(displayState);
+}
+
+function renderGamePosition(state) {
   settingsButton.disabled = Boolean(onlineMode
-    && (state?.phase === "finished" || !onlineConnected || onlineCommandPending));
+    && (state?.phase === "finished" || !onlineConnected || onlineCommandPending)) || historyViewId !== null;
   const animationNow = performance.now();
   for (const [key, startedAt] of newlyPlacedCells) {
     if (animationNow - startedAt >= 720) newlyPlacedCells.delete(key);
@@ -2045,7 +2300,7 @@ function render() {
       if (boardEditorActive && state.phase === "playing" && !isComputerControlledTurn()
         && (!onlineMode || (onlineConnected && onlineAdminAuthenticated && !onlineCommandPending))) {
         const editableCell = value === EMPTY_CELL && !wormholeEndpoint;
-        cell.disabled = !editableCell;
+        cell.disabled = !editableCell || historyViewId !== null;
         cell.classList.toggle("editor-target", editableCell && Boolean(boardEditorTool));
         if (editableCell) cell.addEventListener("click", () => placeBoardEditorObject(row, col));
       } else if (isComputerControlledTurn() || (onlineMode && !canHumanAct())) {
@@ -2066,7 +2321,9 @@ function render() {
             ? handleTrainingAreaTarget(selectedAbility.id, row, col)
             : onlineMode
               ? sendOnlineCommand({ type: "ability-target", itemId: selectedAbility.id, row, col })
-              : updateState(useAntiBomb(state, selectedAbility.id, row, col)));
+              : updateState(useAntiBomb(state, selectedAbility.id, row, col), {
+                command: { type: "ability-target", itemId: selectedAbility.id, row, col }, side: state.currentPlayer
+              }));
         } else if (selectedAbility.type === "debris") {
           const valid = isValidDebrisTarget(state, row, col);
           cell.disabled = !valid;
@@ -2082,7 +2339,9 @@ function render() {
           cell.disabled = !valid;
           if (valid) cell.addEventListener("click", () => onlineMode
             ? sendOnlineCommand({ type: "ability-target", itemId: selectedAbility.id, row, col })
-            : updateState(usePointDestroy(state, selectedAbility.id, row, col)));
+            : updateState(usePointDestroy(state, selectedAbility.id, row, col), {
+              command: { type: "ability-target", itemId: selectedAbility.id, row, col }, side: state.currentPlayer
+            }));
         } else if (trainingSession?.piecePlaced && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "shield") {
           cell.disabled = true;
         } else if (isLegalMove(state, row, col)) {
@@ -2133,12 +2392,13 @@ function render() {
           && col >= activeAreaEffect.col && col < activeAreaEffect.col + effectSize;
         if (!isAreaEffectCell) cell.classList.add("just-destroyed");
       }
+      if (historyViewId !== null) cell.disabled = true;
       boardElement.appendChild(cell);
     }
   }
   areaEffectOverlay.hidden = true;
   areaEffectOverlay.replaceChildren();
-  if (activeAreaEffect && state.settings.animationsEnabled) {
+  if (historyViewId === null && activeAreaEffect && state.settings.animationsEnabled) {
     const firstCell = boardElement.querySelector('.cell[data-row="' + activeAreaEffect.row + '"][data-col="' + activeAreaEffect.col + '"]');
     const singleCellEffect = activeAreaEffect.type === "pointDestroy";
     const bottomRightCell = singleCellEffect ? firstCell : boardElement.querySelector('.cell[data-row="' + (activeAreaEffect.row + 1) + '"][data-col="' + (activeAreaEffect.col + 1) + '"]');
@@ -2156,10 +2416,11 @@ function render() {
   boardElement.appendChild(areaEffectOverlay);
   bombAimOverlay.hidden = true;
   boardElement.appendChild(bombAimOverlay);
-  updateBombAim();
+  if (historyViewId === null) updateBombAim();
+  else bombAimOverlay.hidden = true;
   remoteAimOverlay.hidden = true;
   remoteAimOverlay.className = "remote-aim-overlay";
-  if (onlineMode && remoteAim && remoteAim.side !== onlineSide) {
+  if (historyViewId === null && onlineMode && remoteAim && remoteAim.side !== onlineSide) {
     const firstCell = boardElement.querySelector('.cell[data-row="' + remoteAim.row + '"][data-col="' + remoteAim.col + '"]');
     const isArea = remoteAim.abilityType === "bomb" || remoteAim.abilityType === "antiBomb";
     const lastCell = isArea
@@ -2180,6 +2441,7 @@ function render() {
   privacyNote.lastChild.textContent = " " + t(state.settings.freeStartingPositions ? "privacy.hidden" : "privacy.corners");
 
   if (state.phase === "setup-x") {
+    roundCounter.hidden = true;
     statusElement.textContent = t("game.statusX");
     turnElement.textContent = t("board.preparingTurn");
     turnProgress.hidden = true;
@@ -2190,6 +2452,7 @@ function render() {
       ? t(state.setupPlayer === onlineSide ? "online.chooseStartHelp" : "online.waitingStartHelp", { player: state.setupPlayer })
       : t("game.pickStartX");
   } else if (state.phase === "setup-o") {
+    roundCounter.hidden = true;
     statusElement.textContent = t("game.statusO");
     turnElement.textContent = t("game.hiddenChoice");
     turnProgress.hidden = true;
@@ -2200,6 +2463,11 @@ function render() {
       ? t(state.setupPlayer === onlineSide ? "online.chooseStartHelp" : "online.waitingStartHelp", { player: state.setupPlayer })
       : t(computerOpponent.enabled ? "computer.setupHelp" : "game.pickStartO");
   } else if (state.phase === "playing") {
+    roundCounter.hidden = false;
+    roundCounter.textContent = t("history.counter", {
+      round: state.roundNumber ?? 1,
+      turn: state.turnNumber ?? 1
+    });
     statusElement.textContent = t("game.statusTurn", { player: state.currentPlayer });
     turnElement.textContent = t("game.left", { left: state.piecesLeft, total: state.settings.piecesPerTurn });
     turnProgress.hidden = false;
@@ -2213,11 +2481,16 @@ function render() {
     turnProgress.classList.toggle("turn-progress-low", state.piecesLeft <= Math.ceil(state.settings.piecesPerTurn / 3));
     sideTitle.textContent = onlineMode
       ? t(state.currentPlayer === onlineSide ? "online.yourTurn" : "online.opponentTurn", { player: state.currentPlayer })
-      : t(isComputerControlledTurn() ? "computer.turnTitle" : "game.sideTurn", { player: state.currentPlayer });
+      : t(computerOpponent.enabled && state.currentPlayer === "O" ? "computer.turnTitle" : "game.sideTurn", { player: state.currentPlayer });
     sideDescription.textContent = onlineMode
       ? t(state.currentPlayer === onlineSide ? "online.yourTurnHelp" : "online.opponentTurnHelp")
-      : t(isComputerControlledTurn() ? "computer.turnHelp" : "game.sideHelp");
+      : t(computerOpponent.enabled && state.currentPlayer === "O" ? "computer.turnHelp" : "game.sideHelp");
   } else {
+    roundCounter.hidden = false;
+    roundCounter.textContent = t("history.counter", {
+      round: state.roundNumber ?? 1,
+      turn: state.turnNumber ?? 1
+    });
     statusElement.textContent = t("game.finished");
     turnElement.textContent = t("game.playAgain");
     turnProgress.hidden = true;
@@ -2236,8 +2509,9 @@ function render() {
   }
   syncBoardGeometry();
   renderClock();
-  renderInventories();
+  renderInventories(state);
   renderTrainingPanel();
+  renderHistoryControls();
 }
 
 function updateBombAim() {
@@ -2533,6 +2807,74 @@ async function answerRestartProposal(accept) {
   }
 }
 
+function showUndoProposal(proposal) {
+  document.querySelector("#undo-proposal-title").textContent = t("undo.proposalTitle");
+  undoProposalDescription.textContent = t("undo.proposalText");
+  undoProposalAcceptButton.textContent = t("dialog.restartAccept");
+  undoProposalDeclineButton.textContent = t("dialog.restartDecline");
+  if (!undoProposalModal.open) undoProposalModal.showModal();
+  undoProposalAcceptButton.focus();
+}
+
+function applyLocalUndo() {
+  if (!state || state.phase !== "playing" || historyViewId !== null) return false;
+  if (!advanceClock(performance.now())) return false;
+  const targetSide = computerOpponent.enabled ? "X" : null;
+  const undo = localUndoHistory.undo(targetSide, { latestOnly: !computerOpponent.enabled });
+  if (!undo) return false;
+  invalidateComputerAction();
+  if (Number.isFinite(undo.clockIncrementMs) && undo.clockIncrementMs > 0) {
+    clockRemaining[undo.side] = Math.max(0, clockRemaining[undo.side] - undo.clockIncrementMs);
+  }
+  updateState(undo.state, {
+    undoRestore: true,
+    undoTurn: { side: undo.side, turnNumber: undo.turnNumber }
+  });
+  return true;
+}
+
+async function answerUndoProposal(accept) {
+  if (localUndoConfirmation) {
+    localUndoConfirmation = false;
+    if (undoProposalModal.open) undoProposalModal.close();
+    if (accept) applyLocalUndo();
+    return;
+  }
+  const proposal = incomingUndoProposal;
+  if (!proposal) return;
+  incomingUndoProposal = null;
+  if (undoProposalModal.open) undoProposalModal.close();
+  try {
+    await multiplayerClient.voteUndo(proposal.proposalId, accept);
+  } catch (error) {
+    onlineStatusKey = null;
+    onlineStatusError = error.code;
+    render();
+  }
+}
+
+function requestUndoTurn() {
+  if (!state || state.phase !== "playing" || historyViewId !== null) return;
+  if (onlineMode) {
+    if (!onlineConnected || !onlineUndoAvailable || onlineUndoPending) return;
+    undoTurnButton.disabled = true;
+    multiplayerClient.proposeUndo().catch((error) => {
+      onlineStatusKey = null;
+      onlineStatusError = error.code;
+      render();
+    });
+    return;
+  }
+  const targetSide = computerOpponent.enabled ? "X" : null;
+  if (!localUndoHistory.canUndo(targetSide, { latestOnly: !computerOpponent.enabled })) return;
+  localUndoConfirmation = true;
+  document.querySelector("#undo-proposal-title").textContent = t("undo.localTitle");
+  undoProposalDescription.textContent = t("undo.localText");
+  undoProposalDeclineButton.textContent = t("settings.cancel");
+  undoProposalAcceptButton.textContent = t("undo.button");
+  undoProposalModal.showModal();
+}
+
 widthInput.addEventListener("input", () => {
   updatePiecesLimit();
   validateField(widthInput);
@@ -2679,6 +3021,13 @@ restartProposalModal.addEventListener("cancel", (event) => {
   event.preventDefault();
   answerRestartProposal(false);
 });
+undoTurnButton.addEventListener("click", requestUndoTurn);
+undoProposalAcceptButton.addEventListener("click", () => answerUndoProposal(true));
+undoProposalDeclineButton.addEventListener("click", () => answerUndoProposal(false));
+undoProposalModal.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  answerUndoProposal(false);
+});
 resultModal.addEventListener("cancel", (event) => event.preventDefault());
 resultRematchButton.addEventListener("click", async () => {
   if (!state || state.phase !== "finished") return;
@@ -2710,7 +3059,7 @@ resignConfirmButton.addEventListener("click", () => {
   }
   resignConfirmModal.close();
   if (onlineMode) sendOnlineCommand({ type: "resign" });
-  else updateState(resign(state));
+  else updateState(resign(state), { command: { type: "resign" }, side: state.currentPlayer });
 });
 for (const player of ["X", "O"]) {
   inventoryElements[player].addEventListener("click", (event) => {
@@ -2719,7 +3068,9 @@ for (const player of ["X", "O"]) {
     const item = state.inventory[player].find((candidate) => String(candidate.id) === slot.dataset.itemId);
     if (item) {
       if (onlineMode) sendOnlineCommand({ type: "select-ability", itemId: item.id });
-      else updateState(selectAbility(state, item.id));
+      else updateState(selectAbility(state, item.id), {
+        command: { type: "select-ability", itemId: item.id }, side: player
+      });
     }
   });
 }
@@ -2759,10 +3110,13 @@ document.addEventListener("languagechange", () => {
 reduceMotionQuery.addEventListener?.("change", syncMenuAmbient);
 adminItemList.addEventListener("click", (event) => {
   const button = event.target.closest(".admin-item-button");
-  if (!button || boardEditorActive || !canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
-  updateState(selectAbility(state, button.dataset.itemId));
+  if (historyViewId !== null || !button || boardEditorActive || !canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
+  updateState(selectAbility(state, button.dataset.itemId), {
+    command: { type: "select-ability", itemId: button.dataset.itemId }, side: state.currentPlayer
+  });
 });
 boardEditorToggle.addEventListener("click", () => {
+  if (historyViewId !== null) return;
   if (onlineMode) {
     if (!onlineConnected || onlineCommandPending) return;
     if (!onlineAdminAuthenticated) {
@@ -2791,7 +3145,7 @@ boardEditorToggle.addEventListener("click", () => {
 });
 boardEditorTools.addEventListener("click", (event) => {
   const button = event.target.closest(".editor-tool-button");
-  if (!button || !boardEditorActive
+  if (historyViewId !== null || !button || !boardEditorActive
     || (onlineMode ? (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated)
       : !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM))) return;
   boardEditorTool = button.dataset.editorKind === "item"

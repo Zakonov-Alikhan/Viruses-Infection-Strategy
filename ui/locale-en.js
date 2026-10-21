@@ -211,5 +211,13 @@ export default Object.freeze({ ...{
   "training.lesson.bomb.success": "The bomb cleared the 2×2 square. All four cells are available again."
 }, ...{
   "wormhole.orange": "orange wormhole", "wormhole.blue": "blue wormhole", "wormhole.cell": "{color}, linked portal; {rounds} rounds remaining",
-  "rules.wormhole": "When both random events and wormholes are enabled, one linked portal pair may appear. Place next to one portal to continue your chain next to its pair. Portals are neutral, do not count as cells, and vanish after the displayed number of full rounds."
+  "rules.wormhole": "When both random events and wormholes are enabled, one linked portal pair may appear. Place next to one portal to continue your chain next to its pair. Portals are neutral, do not count as cells, and vanish after the displayed number of full rounds.",
+  "history.title": "Move history", "history.counter": "Round {round} · turn {turn}",
+  "history.viewing": "Viewing history. The board is read-only.", "history.live": "Return to live game",
+  "history.start": "Game started", "history.placement": "{side}: placement · {coordinates}",
+  "history.ability": "{side}: {item}{coordinates}", "history.edit": "{side}: board edit · {coordinates}",
+  "history.resign": "{side} resigned", "history.timeout": "{side}'s time expired", "history.undo": "{side} undid turn {turn}", "history.undoResult": "{side}'s turn {turn} was undone", "history.action": "Player {side}'s action",
+  "undo.riskNote": "In development. Use at your own risk.",
+  "undo.button": "Undo turn", "undo.proposalTitle": "Your opponent requests a takeback", "undo.proposalText": "Your opponent asks to undo their most recent completed turn. Accepting restores the position from before that turn; server clocks will not be rewound.", "undo.localTitle": "Undo the last turn?", "undo.localText": "The position from before the last completed turn will be restored. Clocks will not be rewound.", "undo.waiting": "Takeback offer sent. Clocks are paused until a response or timeout.", "undo.complete": "The turn was undone by agreement.", "undo.cancelled": "Takeback offer closed: {reason}", "undo.reason.declined": "your opponent declined", "undo.reason.expired": "the response window expired", "undo.reason.player-disconnected": "a player disconnected", "undo.reason.no-longer-available": "the turn is no longer undoable", "undo.reason.undefined": "the offer is no longer valid",
+  "online.error.undo-unavailable": "This turn cannot be undone now.", "online.error.undo-pending": "Wait for the pending takeback offer to be answered.", "online.error.restart-pending": "Wait for the pending restart offer to be answered.", "online.error.cannot-vote-own-undo": "You cannot answer your own offer.", "online.error.undo-proposal-expired": "The takeback offer has expired.", "online.error.invalid-undo-vote": "Invalid takeback response.", "online.error.undo-failed": "Could not process the takeback."
 } });
