@@ -134,6 +134,7 @@ export class RoomManager {
         O: null
       },
       aims: { X: null, O: null },
+      restartProposal: null,
       queue: Promise.resolve()
     };
     this.rooms.set(code, room);
@@ -239,7 +240,78 @@ export class RoomManager {
     seat.disconnectedAt = this.now();
     room.lastActivityAt = seat.disconnectedAt;
     this.#clearAim(room, side);
+    this.#cancelRestartProposal(room, "player-disconnected");
     return true;
+  }
+
+  proposeRestart(rawCode, side, kind, requestedSettings = undefined) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return Promise.resolve(failure("room-not-found"));
+    const operation = room.queue.then(() => {
+      if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (!room.seats[side]?.connection) return failure("player-disconnected");
+      const opponentSide = side === "X" ? "O" : "X";
+      if (!room.seats[opponentSide]?.connection) return failure("player-disconnected");
+      if (room.restartProposal) return failure("restart-already-pending");
+      if (kind === "settings") {
+        if (this.#expireClockIfDue(room, this.now())) return failure("time-expired");
+        if (room.status !== "active" || room.state.phase === "finished") return failure("wrong-phase");
+        const settings = normalizeRoomSettings(requestedSettings, room.state.settings);
+        if (!settings) return failure("invalid-settings");
+        room.restartProposal = { id: randomUUID(), kind, fromSide: side, settings };
+      } else if (kind === "rematch") {
+        if (room.status !== "active" || room.state.phase !== "finished") return failure("wrong-phase");
+        room.restartProposal = { id: randomUUID(), kind, fromSide: side, settings: { ...room.state.settings } };
+      } else return failure("invalid-restart-kind");
+
+      const proposal = room.restartProposal;
+      const opponentConnection = room.seats[opponentSide]?.connection;
+      if (opponentConnection) {
+        try {
+          opponentConnection.send({
+            type: "restart-proposal",
+            roomCode: room.code,
+            proposalId: proposal.id,
+            kind: proposal.kind,
+            settings: proposal.kind === "settings" ? { ...proposal.settings } : undefined
+          });
+        } catch { this.detachConnection(room.code, opponentSide, opponentConnection); }
+      }
+      return { ok: true, proposalId: proposal.id, kind: proposal.kind };
+    });
+    room.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  voteRestart(rawCode, side, proposalId, accept) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return Promise.resolve(failure("room-not-found"));
+    const operation = room.queue.then(() => {
+      if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (!room.seats[side]?.connection) return failure("player-disconnected");
+      const proposal = room.restartProposal;
+      if (!proposal || proposal.id !== proposalId) return failure("restart-proposal-expired");
+      if (proposal.fromSide === side) return failure("cannot-vote-own-proposal");
+      if (typeof accept !== "boolean") return failure("invalid-restart-vote");
+      if (proposal.kind === "settings" && this.#expireClockIfDue(room, this.now())) return failure("time-expired");
+      if (!accept) {
+        this.#cancelRestartProposal(room, "declined");
+        return { ok: true, accepted: false };
+      }
+      if (proposal.kind === "settings" && room.state.phase === "finished") {
+        this.#cancelRestartProposal(room, "match-finished");
+        return failure("wrong-phase");
+      }
+      if (proposal.kind === "rematch" && room.state.phase !== "finished") {
+        this.#cancelRestartProposal(room, "match-not-finished");
+        return failure("wrong-phase");
+      }
+
+      this.#restartRoom(room, proposal);
+      return { ok: true, accepted: true, version: room.version };
+    });
+    room.queue = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   updateAim(rawCode, side, target) {
@@ -292,7 +364,7 @@ export class RoomManager {
     return true;
   }
 
-  submitCommand(rawCode, side, command) {
+  submitCommand(rawCode, side, command, { isAdmin = false } = {}) {
     const room = this.rooms.get(normalizeCode(rawCode));
     if (!room) return Promise.resolve(failure("room-not-found"));
     if (!room.seats[side]) return Promise.resolve(failure("seat-not-found"));
@@ -308,7 +380,10 @@ export class RoomManager {
         return { ...failure(room.state, "time-expired"), version: room.version };
       }
 
-      const result = processGameCommand(room.state, side, command, { random: this.random });
+      const result = processGameCommand(room.state, side, command, {
+        random: this.random,
+        authority: isAdmin ? "admin" : "player"
+      });
       if (!result.ok) return { ...result, version: room.version };
 
       const previousState = room.state;
@@ -317,6 +392,9 @@ export class RoomManager {
       this.#updateClockAfterCommand(room, previousState, room.state, now);
       room.version += 1;
       room.lastActivityAt = this.now();
+      if (room.state.phase === "finished" && room.restartProposal?.kind === "settings") {
+        this.#cancelRestartProposal(room, "match-finished");
+      }
       this.#clearAllAims(room);
       this.#broadcastSnapshots(room, "state");
       if (previousAbility && ["bomb", "antiBomb", "pointDestroy"].includes(previousAbility.type)
@@ -387,6 +465,55 @@ export class RoomManager {
     return { tokenHash: hashToken(token), connection: null, disconnectedAt };
   }
 
+  #cancelRestartProposal(room, reason) {
+    const proposal = room.restartProposal;
+    if (!proposal) return false;
+    room.restartProposal = null;
+    this.#broadcastEphemeral(room, {
+      type: "restart-cancelled",
+      roomCode: room.code,
+      proposalId: proposal.id,
+      reason
+    });
+    return true;
+  }
+
+  #restartRoom(room, proposal) {
+    this.#stopClock(room);
+    room.restartProposal = null;
+    room.state = createGameState(proposal.settings, this.random);
+    const oldX = room.seats.X;
+    const oldO = room.seats.O;
+    if (this.sideRandom() < 0.5) room.seats = { X: oldX, O: oldO };
+    else room.seats = { X: oldO, O: oldX };
+    for (const side of SIDES) {
+      if (room.seats[side]?.connection) room.seats[side].connection.side = side;
+    }
+    room.aims = { X: null, O: null };
+    const clockMinutes = proposal.settings.clockMinutes;
+    room.clock = {
+      enabled: !proposal.settings.unlimitedTime,
+      remainingMs: {
+        X: proposal.settings.unlimitedTime ? null : clockMinutes * 60_000,
+        O: proposal.settings.unlimitedTime ? null : clockMinutes * 60_000
+      },
+      activePlayer: null,
+      deadlineAt: null,
+      timer: null,
+      generation: room.clock.generation + 1
+    };
+    room.version += 1;
+    room.lastActivityAt = this.now();
+    if (room.state.phase === "playing") this.#startClock(room, room.state.currentPlayer, this.now());
+    this.#broadcastSnapshots(room, "state", { restartKind: proposal.kind });
+    this.#broadcastEphemeral(room, {
+      type: "restart-complete",
+      roomCode: room.code,
+      kind: proposal.kind,
+      version: room.version
+    });
+  }
+
   #setAim(room, side, target) {
     const previous = room.aims[side];
     if (JSON.stringify(previous) === JSON.stringify(target)) return;
@@ -421,7 +548,7 @@ export class RoomManager {
     }
   }
 
-  #broadcastSnapshots(room, type) {
+  #broadcastSnapshots(room, type, extra = {}) {
     for (const side of SIDES) {
       const connection = room.seats[side]?.connection;
       if (!connection || (type !== "room-ready" && room.version <= connection.lastSentVersion)) continue;
@@ -430,6 +557,7 @@ export class RoomManager {
         roomCode: room.code,
         side,
         version: room.version,
+        ...extra,
         state: getPlayerView(room.state, side),
         clock: this.#clockSnapshot(room)
       };
@@ -513,6 +641,7 @@ export class RoomManager {
     }
     room.state = result.state;
     this.#stopClock(room);
+    if (room.restartProposal?.kind === "settings") this.#cancelRestartProposal(room, "match-finished");
     room.version += 1;
     room.lastActivityAt = now;
     this.#clearAllAims(room);

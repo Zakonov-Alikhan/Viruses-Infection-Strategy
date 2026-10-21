@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_SETTINGS } from "../ui/game.js";
+import { DEFAULT_SETTINGS, getLegalMoves } from "../ui/game.js";
 import { RoomManager } from "./rooms.js";
 
 const TEST_SETTINGS = {
@@ -15,6 +15,7 @@ const TEST_SETTINGS = {
   freeStartingPositions: true,
   adminMode: true
 };
+const VALID_ROOM_SETTINGS = Object.fromEntries(Object.entries(TEST_SETTINGS).filter(([key]) => key !== "adminMode"));
 
 function makeManager(options = {}) {
   let nextCode = 0;
@@ -242,6 +243,30 @@ test("serializes consecutive commands and publishes monotonically increasing ver
   assert.deepEqual(xVersions, [1, 2, 3, 4]);
   assert.equal(manager.getSnapshot(room.roomCode, "X").state.board[0][2], "X");
   assert.equal(manager.getSnapshot(room.roomCode, "X").state.piecesLeft, 1);
+});
+
+test("authorized board edit updates both player snapshots without consuming a turn or changing clock ownership", async () => {
+  const manager = makeManager();
+  const room = manager.createRoom({ ...VALID_ROOM_SETTINGS, unlimitedTime: true });
+  manager.joinRoom(room.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(room.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(room.roomCode, "O", (message) => received.O.push(message));
+  await startGame(manager, room.roomCode, received);
+  const before = manager.getSnapshot(room.roomCode, "X");
+
+  const result = await manager.submitCommand(room.roomCode, "O", {
+    type: "board-edit", object: { kind: "item", itemType: "bomb", row: 4, col: 4 }
+  }, { isAdmin: true });
+  assert.equal(result.ok, true);
+  const xSnapshot = received.X.at(-1);
+  const oSnapshot = received.O.at(-1);
+  assert.equal(xSnapshot.version, before.version + 1);
+  assert.equal(oSnapshot.version, xSnapshot.version);
+  assert.deepEqual(xSnapshot.state.eventItems, oSnapshot.state.eventItems);
+  assert.equal(xSnapshot.state.currentPlayer, before.state.currentPlayer);
+  assert.equal(xSnapshot.state.piecesLeft, before.state.piecesLeft);
+  assert.deepEqual(xSnapshot.clock, oSnapshot.clock);
 });
 
 test("rejects a command that cannot be used in the current phase without mutating room state", async () => {
@@ -537,4 +562,162 @@ test("aim updates use core target validation, do not change game state, and clea
   assert.equal(manager.updateAim(created.roomCode, "X", { row: 2, col: 2 }).ok, true);
   manager.detachConnection(created.roomCode, "X", x.connection);
   assert.equal(received.O.filter(({ type }) => type === "aim").at(-1).target, null);
+});
+
+test("settings restart requires both connected players and resets the whole authoritative match", async () => {
+  const sideChoices = [0.25, 0.75];
+  const manager = makeManager({ sideRandom: () => sideChoices.shift() ?? 0.25 });
+  const created = manager.createRoom({ ...VALID_ROOM_SETTINGS, piecesPerTurn: 1, freeStartingPositions: false });
+  manager.joinRoom(created.roomCode);
+  const messages = { X: [], O: [] };
+  const x = manager.attachConnection(created.roomCode, "X", (message) => messages.X.push(message)).connection;
+  manager.attachConnection(created.roomCode, "O", (message) => messages.O.push(message));
+  const { row, col } = getLegalMoves(manager.getSnapshot(created.roomCode, "X").state)[0];
+  const placed = await manager.submitCommand(created.roomCode, "X", { type: "place", row, col });
+  assert.equal(placed.ok, true);
+  const oldState = manager.getSnapshot(created.roomCode, "X").state;
+  const proposal = await manager.proposeRestart(created.roomCode, "X", "settings", {
+    ...VALID_ROOM_SETTINGS, width: 12, height: 10, piecesPerTurn: 2,
+    freeStartingPositions: false, disabledItems: ["bomb"],
+    unlimitedTime: false, clockMinutes: 2, incrementSeconds: 1
+  });
+  assert.equal(proposal.ok, true);
+  assert.equal(messages.O.at(-1).type, "restart-proposal");
+  assert.equal(messages.O.at(-1).settings.width, 12);
+  assert.equal(manager.getSnapshot(created.roomCode, "X").state.board.length, 10);
+
+  const accepted = await manager.voteRestart(created.roomCode, "O", proposal.proposalId, true);
+  assert.equal(accepted.ok, true);
+  const next = manager.getSnapshot(created.roomCode, x.side).state;
+  const internalNext = manager.rooms.get(created.roomCode).state;
+  assert.equal(next.board.length, 10);
+  assert.equal(next.board[0].length, 12);
+  assert.deepEqual(next.settings.disabledItems, ["bomb"]);
+  assert.equal(next.piecesLeft, 2);
+  assert.equal(next.winner, null);
+  assert.deepEqual(next.inventory, { X: [], O: [] });
+  assert.deepEqual(next.protections, []);
+  assert.deepEqual(next.eventItems, []);
+  assert.deepEqual(next.lastDestroyed, []);
+  assert.equal(next.selectedAbility, null);
+  assert.deepEqual(next.abilityTargets, []);
+  assert.deepEqual(internalNext.pendingExtraTurns, { X: [], O: [] });
+  assert.notEqual(next, oldState);
+  assert.notEqual(x.side, "X", "the seat is reassigned for the restarted game");
+  const resetSnapshot = messages.X.findLast((message) => message.type === "state");
+  assert.equal(resetSnapshot.restartKind, "settings");
+  assert.equal(resetSnapshot.state.board[0].length, 12);
+  assert.ok(resetSnapshot.clock.remainingMs.X <= 120_000 && resetSnapshot.clock.remainingMs.X > 119_000);
+  assert.equal(resetSnapshot.clock.remainingMs.O, 120_000);
+  assert.equal(resetSnapshot.clock.activePlayer, resetSnapshot.state.currentPlayer);
+  manager.stopAllClocks();
+});
+
+test("declining a settings restart leaves the current authoritative state untouched", async () => {
+  const manager = makeManager();
+  const created = manager.createRoom();
+  manager.joinRoom(created.roomCode);
+  const messages = { X: [], O: [] };
+  manager.attachConnection(created.roomCode, "X", (message) => messages.X.push(message));
+  manager.attachConnection(created.roomCode, "O", (message) => messages.O.push(message));
+  const before = manager.rooms.get(created.roomCode).state;
+  const proposal = await manager.proposeRestart(created.roomCode, "X", "settings", {
+    ...VALID_ROOM_SETTINGS, width: 12
+  });
+  assert.equal(proposal.ok, true);
+  const refused = await manager.voteRestart(created.roomCode, "O", proposal.proposalId, false);
+  assert.deepEqual(refused, { ok: true, accepted: false });
+  assert.equal(manager.rooms.get(created.roomCode).state, before);
+  assert.equal(manager.rooms.get(created.roomCode).restartProposal, null);
+  assert.equal(messages.X.at(-1).type, "restart-cancelled");
+  assert.equal(messages.X.at(-1).reason, "declined");
+});
+
+test("mutual rematch starts a fresh game with saved room settings and renewed sides", async () => {
+  const sideChoices = [0.25, 0.75];
+  const manager = makeManager({ sideRandom: () => sideChoices.shift() ?? 0.25 });
+  const created = manager.createRoom({ ...VALID_ROOM_SETTINGS, piecesPerTurn: 1, freeStartingPositions: false, disabledItems: ["pointDestroy"] });
+  manager.joinRoom(created.roomCode);
+  const messages = { X: [], O: [] };
+  const x = manager.attachConnection(created.roomCode, "X", (message) => messages.X.push(message)).connection;
+  manager.attachConnection(created.roomCode, "O", (message) => messages.O.push(message));
+  const finished = await manager.submitCommand(created.roomCode, "X", { type: "resign" });
+  assert.equal(finished.ok, true);
+  const oldState = manager.rooms.get(created.roomCode).state;
+  const offer = await manager.proposeRestart(created.roomCode, "X", "rematch");
+  assert.equal(offer.ok, true);
+  assert.equal(messages.O.at(-1).kind, "rematch");
+  const accepted = await manager.voteRestart(created.roomCode, "O", offer.proposalId, true);
+  assert.equal(accepted.ok, true);
+  const room = manager.rooms.get(created.roomCode);
+  assert.equal(room.state.phase, "playing");
+  assert.equal(room.state.winner, null);
+  assert.notEqual(room.state, oldState);
+  assert.deepEqual(room.state.settings.disabledItems, ["pointDestroy"]);
+  assert.deepEqual(room.state.inventory, { X: [], O: [] });
+  assert.equal(x.side, "O");
+  assert.equal(messages.X.findLast((message) => message.type === "state").restartKind, "rematch");
+  assert.equal(room.clock.remainingMs.X, null);
+});
+
+test("declining a rematch keeps the finished result and cannot be accepted by its proposer", async () => {
+  const manager = makeManager();
+  const created = manager.createRoom({ ...VALID_ROOM_SETTINGS, piecesPerTurn: 1, freeStartingPositions: false });
+  manager.joinRoom(created.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(created.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(created.roomCode, "O", (message) => received.O.push(message));
+  await manager.submitCommand(created.roomCode, "X", { type: "resign" });
+  const finishedState = manager.rooms.get(created.roomCode).state;
+  const offer = await manager.proposeRestart(created.roomCode, "X", "rematch");
+  const ownVote = await manager.voteRestart(created.roomCode, "X", offer.proposalId, true);
+  assert.equal(ownVote.error.code, "cannot-vote-own-proposal");
+  const declined = await manager.voteRestart(created.roomCode, "O", offer.proposalId, false);
+  assert.equal(declined.accepted, false);
+  assert.equal(manager.rooms.get(created.roomCode).state, finishedState);
+  assert.equal(manager.rooms.get(created.roomCode).state.phase, "finished");
+  assert.equal(received.X.at(-1).reason, "declined");
+});
+
+test("restarting a timed room invalidates the previous match deadline", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received } = makeTimedManager(scheduler);
+  await startGame(manager, room.roomCode, received);
+  const oldTimer = [...scheduler.timers.values()][0];
+  assert.ok(oldTimer);
+  const proposal = await manager.proposeRestart(room.roomCode, "X", "settings", {
+    ...manager.getSnapshot(room.roomCode, "X").state.settings,
+    freeStartingPositions: false,
+    clockMinutes: 2
+  });
+  assert.equal(proposal.ok, true);
+  const accepted = await manager.voteRestart(room.roomCode, "O", proposal.proposalId, true);
+  assert.equal(accepted.ok, true);
+  const reset = manager.rooms.get(room.roomCode).state;
+  assert.equal(reset.phase, "playing");
+  assert.equal(manager.rooms.get(room.roomCode).clock.remainingMs.X, 120_000);
+
+  await oldTimer.callback();
+  assert.equal(manager.rooms.get(room.roomCode).state, reset);
+  assert.equal(manager.rooms.get(room.roomCode).state.phase, "playing");
+  assert.equal(manager.rooms.get(room.roomCode).clock.remainingMs.X, 120_000);
+  manager.stopAllClocks();
+});
+
+test("disconnect cancels pending restart and clients cannot reset the game with a game command", async () => {
+  const manager = makeManager();
+  const created = manager.createRoom();
+  manager.joinRoom(created.roomCode);
+  const received = [];
+  const x = manager.attachConnection(created.roomCode, "X", () => {}).connection;
+  manager.attachConnection(created.roomCode, "O", (message) => received.push(message));
+  const before = manager.rooms.get(created.roomCode).state;
+  const proposal = await manager.proposeRestart(created.roomCode, "X", "settings", VALID_ROOM_SETTINGS);
+  const forged = await manager.submitCommand(created.roomCode, "X", { type: "restart" });
+  assert.equal(forged.ok, false);
+  assert.equal(manager.rooms.get(created.roomCode).state, before);
+  manager.detachConnection(created.roomCode, "X", x);
+  assert.equal(manager.rooms.get(created.roomCode).restartProposal, null);
+  assert.equal(received.at(-1).type, "restart-cancelled");
+  assert.equal(received.at(-1).proposalId, proposal.proposalId);
 });

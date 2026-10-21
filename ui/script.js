@@ -7,6 +7,7 @@ import {
   EMPTY_CELL,
   chooseStart,
   chooseAbilityTarget,
+  cancelAbilitySelection,
   createGameState,
   finishIfNoLegalMoves,
   flagFall,
@@ -18,6 +19,7 @@ import {
   isValidDebrisTarget,
   isValidPointDestroyTarget,
   isValidShieldTarget,
+  placeEditorObject,
   playMove,
   PLAYER_PERMISSIONS,
   resign,
@@ -25,12 +27,13 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=items-settings1";
+} from "./game.js?v=board-editor1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=items-settings1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=items-settings1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=restart-consensus1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
+import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
-import { MultiplayerClient } from "./multiplayer.js?v=online3";
+import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
 
 const boardElement = document.querySelector(".game-board");
 const boardShell = document.querySelector(".board-shell");
@@ -112,6 +115,15 @@ const resultTitle = document.querySelector("#result-title");
 const resultDescription = document.querySelector("#result-description");
 const resultRoast = document.querySelector("#result-roast");
 const resultNewGameButton = document.querySelector("#result-new-game");
+const resultRematchButton = document.querySelector("#result-rematch");
+const resultRematchStatus = document.querySelector("#result-rematch-status");
+const restartConfirmModal = document.querySelector("#restart-confirm-modal");
+const restartConfirmButton = document.querySelector("#restart-confirm");
+const restartCancelButton = document.querySelector("#restart-cancel");
+const restartProposalModal = document.querySelector("#restart-proposal-modal");
+const restartProposalDescription = document.querySelector("#restart-proposal-description");
+const restartProposalAcceptButton = document.querySelector("#restart-proposal-accept");
+const restartProposalDeclineButton = document.querySelector("#restart-proposal-decline");
 const settingsModal = document.querySelector("#settings-modal");
 const settingsButton = document.querySelector("#settings-button");
 const rulesButton = document.querySelector("#rules-button");
@@ -131,7 +143,20 @@ const adminModeToggle = document.querySelector("#admin-mode-toggle");
 const itemOptions = document.querySelector("#item-options");
 const adminTools = document.querySelector("#admin-tools");
 const adminItemList = document.querySelector("#admin-item-list");
+const adminTitle = document.querySelector("#admin-title");
 const adminHelp = document.querySelector("#admin-help");
+const boardEditorToggle = document.querySelector("#board-editor-toggle");
+const boardEditorControls = document.querySelector("#board-editor-controls");
+const boardEditorTools = document.querySelector("#board-editor-tools");
+const boardEditorStatus = document.querySelector("#board-editor-status");
+const boardEditorCancel = document.querySelector("#board-editor-cancel");
+const boardEditorExit = document.querySelector("#board-editor-exit");
+const adminAuthModal = document.querySelector("#admin-auth-modal");
+const adminAuthForm = document.querySelector("#admin-auth-form");
+const adminSecretInput = document.querySelector("#admin-secret-input");
+const adminAuthError = document.querySelector("#admin-auth-error");
+const adminAuthCancel = document.querySelector("#admin-auth-cancel");
+const adminAuthSubmit = document.querySelector("#admin-auth-submit");
 const animationsToggle = document.querySelector("#animations-toggle");
 const timeLimitHint = document.querySelector("#time-limit-hint");
 const timeControlFields = document.querySelector(".settings-time-control");
@@ -238,11 +263,16 @@ let menuDragFrame = null;
 let menuDragLastTime = null;
 let trainingSession = null;
 let trainingSavedSettings = null;
+let boardEditorActive = false;
+let boardEditorTool = null;
+let boardEditorMessageKey = null;
 let computerOpponent = { enabled: false, difficulty: "easy" };
 let onlineMode = false;
 let onlineSide = null;
 let onlineRoomCode = null;
 let onlineConnected = false;
+let onlineAdminAuthenticated = false;
+let pendingBoardEdit = false;
 let onlineCommandPending = false;
 let onlinePreviousSettings = null;
 let onlineStatusKey = null;
@@ -250,6 +280,8 @@ let onlineStatusError = null;
 let onlineClockSnapshot = null;
 let onlineClockReceivedAt = null;
 let onlineMenuError = null;
+let pendingSettings = null;
+let incomingRestartProposal = null;
 const multiplayerClient = new MultiplayerClient();
 let gameSessionId = 0;
 let computerActionToken = 0;
@@ -285,7 +317,8 @@ function canHumanAct() {
 }
 
 function sendOnlineCommand(command) {
-  if (!onlineMode || !canHumanAct()) return false;
+  const allowedAdminAction = onlineMode && onlineAdminAuthenticated && onlineConnected && !onlineCommandPending;
+  if (!onlineMode || (!canHumanAct() && !allowedAdminAction)) return false;
   if (!multiplayerClient.sendCommand(command)) {
     onlineConnected = false;
     onlineStatusKey = "online.disconnected";
@@ -449,9 +482,13 @@ function renderInventories() {
   }
   const hasAdminItemPermission = hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM);
   const adminToolsReady = state.phase === "playing";
-  adminTools.hidden = !hasAdminItemPermission;
-  adminHelp.textContent = t(adminToolsReady ? "admin.help" : "admin.waiting");
+  adminTools.hidden = !hasAdminItemPermission && !onlineMode;
+  adminTitle.textContent = t(onlineMode ? "admin.editorTitle" : "admin.title");
+  adminHelp.textContent = onlineMode
+    ? t(onlineAdminAuthenticated ? "admin.editorServerHelp" : "admin.editorAuthHelp")
+    : t(adminToolsReady ? "admin.help" : "admin.waiting");
   adminItemList.replaceChildren();
+  adminItemList.hidden = onlineMode;
   if (hasAdminItemPermission) {
     for (const type of EVENT_ITEMS) {
       if (!isItemEnabled(state, type)) continue;
@@ -471,6 +508,49 @@ function renderInventories() {
       button.append(icon, document.createTextNode(itemName));
       adminItemList.appendChild(button);
     }
+  }
+  boardEditorToggle.hidden = onlineMode ? !onlineConnected : !hasAdminItemPermission;
+  boardEditorControls.hidden = !boardEditorActive
+    || (onlineMode ? !onlineAdminAuthenticated : !hasAdminItemPermission);
+  boardEditorToggle.setAttribute("aria-pressed", String(boardEditorActive));
+  boardEditorTools.replaceChildren();
+  boardEditorStatus.textContent = t(boardEditorMessageKey || (boardEditorTool ? "admin.editorSelected" : "admin.editorNoTool"), {
+    object: boardEditorTool?.kind === "item"
+      ? t(EVENT_ITEM_DEFINITIONS[boardEditorTool.itemType].nameKey)
+      : t("admin.deadCell")
+  });
+  if ((hasAdminItemPermission || (onlineMode && onlineAdminAuthenticated)) && boardEditorActive) {
+    for (const type of EVENT_ITEMS) {
+      if (!isItemEnabled(state, type)) continue;
+      const definition = EVENT_ITEM_DEFINITIONS[type];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "admin-item-button editor-tool-button";
+      button.dataset.editorKind = "item";
+      button.dataset.itemType = type;
+      button.classList.toggle("is-selected", boardEditorTool?.kind === "item" && boardEditorTool.itemType === type);
+      button.disabled = !adminToolsReady || isComputerControlledTurn()
+        || (onlineMode && (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated));
+      const icon = document.createElement("img");
+      icon.src = definition.icon;
+      icon.alt = "";
+      icon.setAttribute("aria-hidden", "true");
+      button.append(icon, document.createTextNode(t(definition.nameKey)));
+      boardEditorTools.appendChild(button);
+    }
+    const blockedButton = document.createElement("button");
+    blockedButton.type = "button";
+    blockedButton.className = "admin-item-button editor-tool-button";
+    blockedButton.dataset.editorKind = "blocked";
+    blockedButton.classList.toggle("is-selected", boardEditorTool?.kind === "blocked");
+    blockedButton.disabled = !adminToolsReady || isComputerControlledTurn()
+      || (onlineMode && (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated));
+    const blockedIcon = document.createElement("span");
+    blockedIcon.className = "legend-blocked";
+    blockedIcon.textContent = "×";
+    blockedIcon.setAttribute("aria-hidden", "true");
+    blockedButton.append(blockedIcon, document.createTextNode(t("admin.deadCell")));
+    boardEditorTools.appendChild(blockedButton);
   }
 }
 
@@ -1127,6 +1207,11 @@ function clearOnlinePresentation() {
   onlineSide = null;
   onlineRoomCode = null;
   onlineConnected = false;
+  onlineAdminAuthenticated = false;
+  pendingBoardEdit = false;
+  boardEditorActive = false;
+  boardEditorTool = null;
+  boardEditorMessageKey = null;
   onlineCommandPending = false;
   onlineStatusKey = null;
   onlineStatusError = null;
@@ -1134,6 +1219,8 @@ function clearOnlinePresentation() {
   onlineClockReceivedAt = null;
   onlineGameStatus.hidden = true;
   onlineGameStatus.textContent = "";
+  incomingRestartProposal = null;
+  if (restartProposalModal.open) restartProposalModal.close();
   gameScreen.classList.remove("is-online");
   if (onlinePreviousSettings) settings = { ...onlinePreviousSettings };
   onlinePreviousSettings = null;
@@ -1146,6 +1233,8 @@ function leaveOnlineSession({ showMenu = false } = {}) {
   lastSentAim = null;
   multiplayerClient.leave();
   if (resultModal.open) resultModal.close();
+  if (restartConfirmModal.open) restartConfirmModal.close();
+  if (restartProposalModal.open) restartProposalModal.close();
   if (onlineRoomModal.open) onlineRoomModal.close();
   onlineRoomEntry.hidden = false;
   onlineRoomLobby.hidden = true;
@@ -1250,6 +1339,9 @@ function enterOnlineGame(message) {
     stopClock();
     if (resultModal.open) resultModal.close();
     onlinePreviousSettings = { ...settings };
+    onlineAdminAuthenticated = false;
+    boardEditorActive = false;
+    boardEditorTool = null;
     computerOpponent = { enabled: false, difficulty: "easy" };
     settings = { ...settings, ...message.state.settings, adminMode: false };
     onlineMode = true;
@@ -1285,6 +1377,10 @@ function enterOnlineGame(message) {
 }
 
 function handleMultiplayerEvent(event) {
+  if (event.type === "admin-authenticated" && onlineMode && event.roomCode === onlineRoomCode) {
+    onlineAdminAuthenticated = true;
+    return;
+  }
   if (event.type === "room-created" || event.type === "room-joined") {
     showOnlineRoom(event);
     return;
@@ -1327,18 +1423,98 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
+  if (event.type === "restart-proposal" && onlineMode && event.roomCode === onlineRoomCode) {
+    incomingRestartProposal = event;
+    const offeredSettings = event.settings || {};
+    const disabledNames = (offeredSettings.disabledItems || [])
+      .map((type) => EVENT_ITEM_DEFINITIONS[type]?.nameKey)
+      .filter(Boolean)
+      .map((key) => t(key));
+    restartProposalDescription.textContent = event.kind === "rematch"
+      ? t("dialog.rematchOffer")
+      : t("dialog.restartSettingsOffer", {
+        width: offeredSettings.width ?? "?",
+        height: offeredSettings.height ?? "?",
+        pieces: offeredSettings.piecesPerTurn ?? "?",
+        clock: offeredSettings.unlimitedTime
+          ? t("clock.unlimited")
+          : t("clock.summary", { minutes: offeredSettings.clockMinutes ?? "?", seconds: offeredSettings.incrementSeconds ?? "?" }),
+        disabled: disabledNames.length ? disabledNames.join(", ") : t("settings.itemsNoneDisabled"),
+        events: t(offeredSettings.randomEvents ? "settings.randomEnabled" : "settings.randomDisabled")
+      });
+    restartProposalModal.showModal();
+    restartProposalAcceptButton.focus();
+    return;
+  }
+  if (event.type === "restart-cancelled" && onlineMode && event.roomCode === onlineRoomCode) {
+    incomingRestartProposal = null;
+    if (resultRematchButton) resultRematchButton.disabled = false;
+    if (restartProposalModal.open) restartProposalModal.close();
+    const message = t("dialog.restartCancelled", { reason: t("dialog.restartReason." + event.reason) });
+    if (resultModal.open) {
+      resultRematchStatus.textContent = message;
+      resultRematchStatus.hidden = false;
+    } else {
+      onlineGameStatus.textContent = message;
+      onlineGameStatus.hidden = false;
+    }
+    return;
+  }
+  if (event.type === "restart-complete" && onlineMode && event.roomCode === onlineRoomCode) {
+    incomingRestartProposal = null;
+    resultRematchButton.disabled = false;
+    if (restartProposalModal.open) restartProposalModal.close();
+    resultRematchStatus.hidden = true;
+    return;
+  }
+  if (event.type === "restart-proposal-created" && onlineMode && event.roomCode === onlineRoomCode) {
+    resultRematchButton.disabled = event.kind === "rematch";
+    const message = t("dialog.restartWaiting");
+    if (resultModal.open) {
+      resultRematchStatus.textContent = message;
+      resultRematchStatus.hidden = false;
+    } else {
+      onlineGameStatus.textContent = message;
+      onlineGameStatus.hidden = false;
+    }
+    return;
+  }
   if (event.type === "state" && onlineMode && event.roomCode === onlineRoomCode) {
     onlineConnected = true;
+    onlineSide = event.side || onlineSide;
+    settings = { ...event.state.settings, adminMode: false };
+    document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
     onlineCommandPending = false;
+    if (pendingBoardEdit) {
+      pendingBoardEdit = false;
+      boardEditorMessageKey = "admin.editorPlaced";
+      boardEditorStatus.textContent = t(boardEditorMessageKey);
+    }
     onlineStatusError = null;
     onlineClockSnapshot = event.clock || null;
     onlineClockReceivedAt = performance.now();
     lastSentAim = null;
+    if (event.restartKind) {
+      beginGameSession();
+      boardEditorActive = false;
+      boardEditorTool = null;
+      activeAreaEffect = null;
+      newlyPlacedCells.clear();
+      newlySpawnedItems.clear();
+      remoteAim = null;
+      lastSentAim = null;
+    }
     updateState(event.state, { serverUpdate: true });
     return;
   }
   if (event.type === "disconnected") {
+    incomingRestartProposal = null;
+    if (restartProposalModal.open) restartProposalModal.close();
     onlineConnected = false;
+    onlineAdminAuthenticated = false;
+    boardEditorActive = false;
+    boardEditorTool = null;
+    pendingBoardEdit = false;
     onlineCommandPending = false;
     onlineStatusKey = "online.reconnecting";
     if (onlineMode) {
@@ -1352,6 +1528,10 @@ function handleMultiplayerEvent(event) {
   }
   if (event.type === "reconnect-failed" || event.type === "room-closed") {
     onlineConnected = false;
+    onlineAdminAuthenticated = false;
+    boardEditorActive = false;
+    boardEditorTool = null;
+    pendingBoardEdit = false;
     remoteAim = null;
     lastSentAim = null;
     onlineCommandPending = false;
@@ -1363,7 +1543,14 @@ function handleMultiplayerEvent(event) {
     return;
   }
   if (event.type === "server-error" || event.type === "command-error" || event.type === "transport-error") {
-    if (event.type === "command-error") onlineCommandPending = false;
+    if (event.type === "command-error") {
+      onlineCommandPending = false;
+      if (pendingBoardEdit) {
+        pendingBoardEdit = false;
+        boardEditorMessageKey = "admin.editorInvalid";
+        boardEditorStatus.textContent = t(boardEditorMessageKey);
+      }
+    }
     onlineStatusError = event.code;
     if (onlineMode) {
       onlineGameStatus.textContent = onlineErrorMessage(event.code);
@@ -1579,6 +1766,13 @@ function saveMenuSettings() {
 }
 
 function setupGame() {
+  boardEditorActive = false;
+  boardEditorTool = null;
+  boardEditorMessageKey = null;
+  pendingSettings = null;
+  incomingRestartProposal = null;
+  if (restartConfirmModal.open) restartConfirmModal.close();
+  if (restartProposalModal.open) restartProposalModal.close();
   beginGameSession();
   stopClock();
   if (resultModal.open) resultModal.close();
@@ -1654,6 +1848,7 @@ function updateState(nextState, { serverUpdate = false } = {}) {
     shell.classList.add("bomb-screen-shake");
   }
   state = nextState;
+  if (state.phase !== "finished" && resultModal.open) resultModal.close();
   if (state.phase === "playing") startClock();
   else stopClock();
   if (state.phase === "finished") invalidateComputerAction();
@@ -1662,14 +1857,41 @@ function updateState(nextState, { serverUpdate = false } = {}) {
   else if (!onlineMode) scheduleComputerAction();
 }
 
+function placeBoardEditorObject(row, col) {
+  if (!boardEditorTool || !state || state.phase !== "playing" || isComputerControlledTurn()) return;
+  if (onlineMode) {
+    if (!onlineConnected || !onlineAdminAuthenticated || onlineCommandPending) return;
+    pendingBoardEdit = true;
+    if (!sendOnlineCommand({
+      type: "board-edit",
+      object: { ...boardEditorTool, row, col }
+    })) {
+      pendingBoardEdit = false;
+      boardEditorMessageKey = "admin.editorInvalid";
+      boardEditorStatus.textContent = t(boardEditorMessageKey);
+    }
+    return;
+  }
+  const nextState = placeEditorObject(state, state.currentPlayer, { ...boardEditorTool, row, col });
+  if (nextState === state) {
+    boardEditorStatus.textContent = t("admin.editorInvalid");
+    return;
+  }
+  boardEditorMessageKey = "admin.editorPlaced";
+  boardEditorStatus.textContent = t(boardEditorMessageKey);
+  updateState(nextState);
+}
+
 function showResult() {
   const loser = state.winner === "X" ? "O" : "X";
   messageElement.textContent = t("game.winner", { player: state.winner, reason: formatMessage(state.finishReason) });
   resultTitle.textContent = t("dialog.win", { player: state.winner });
   resultDescription.textContent = t("dialog.congrats", { reason: formatMessage(state.finishReason) });
   resultRoast.textContent = t("dialog.roast", { player: loser });
+  resultRematchStatus.hidden = true;
+  resultRematchButton.hidden = false;
   resultModal.showModal();
-  resultNewGameButton.focus();
+  resultRematchButton.focus();
 }
 
 function formatMessage(value) {
@@ -1686,6 +1908,8 @@ function markLegalCell(cell, player) {
 }
 
 function render() {
+  settingsButton.disabled = Boolean(onlineMode
+    && (state?.phase === "finished" || !onlineConnected || onlineCommandPending));
   const animationNow = performance.now();
   for (const [key, startedAt] of newlyPlacedCells) {
     if (animationNow - startedAt >= 720) newlyPlacedCells.delete(key);
@@ -1752,7 +1976,13 @@ function render() {
         cell.disabled = true;
       }
 
-      if (isComputerControlledTurn() || (onlineMode && !canHumanAct())) {
+      if (boardEditorActive && state.phase === "playing" && !isComputerControlledTurn()
+        && (!onlineMode || (onlineConnected && onlineAdminAuthenticated && !onlineCommandPending))) {
+        const editableCell = value === EMPTY_CELL;
+        cell.disabled = !editableCell;
+        cell.classList.toggle("editor-target", editableCell && Boolean(boardEditorTool));
+        if (editableCell) cell.addEventListener("click", () => placeBoardEditorObject(row, col));
+      } else if (isComputerControlledTurn() || (onlineMode && !canHumanAct())) {
         cell.disabled = true;
       } else if (state.phase === "setup-x" || state.phase === "setup-o") {
         cell.disabled = value !== EMPTY_CELL;
@@ -2175,7 +2405,7 @@ function applySettings(event) {
     return;
   }
 
-  settings = {
+  pendingSettings = {
     width,
     height,
     piecesPerTurn,
@@ -2185,12 +2415,54 @@ function applySettings(event) {
     randomEvents,
     animationsEnabled,
     freeStartingPositions: freeStartToggle.checked,
-    adminMode,
+    ...(onlineMode ? {} : { adminMode }),
     disabledItems: disabledItemsFrom(itemOptions)
   };
-  document.documentElement.dataset.gameAnimations = animationsEnabled ? "on" : "off";
   settingsModal.close();
+  restartConfirmModal.showModal();
+  restartConfirmButton.focus();
+}
+
+function cancelSettingsRestart() {
+  settings = resolveSettingsRestart(settings, pendingSettings, false);
+  pendingSettings = null;
+  if (restartConfirmModal.open) restartConfirmModal.close();
+}
+
+function confirmSettingsRestart() {
+  if (!pendingSettings) {
+    restartConfirmModal.close();
+    return;
+  }
+  const nextSettings = pendingSettings;
+  pendingSettings = null;
+  restartConfirmModal.close();
+  if (onlineMode) {
+    multiplayerClient.proposeRestart("settings", nextSettings).catch((error) => {
+      onlineStatusError = error.code;
+      onlineGameStatus.textContent = onlineErrorMessage(error.code);
+      onlineGameStatus.hidden = false;
+    });
+    onlineGameStatus.textContent = t("dialog.restartSending");
+    onlineGameStatus.hidden = false;
+    return;
+  }
+  settings = resolveSettingsRestart(settings, nextSettings, true);
+  document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
   setupGame();
+}
+
+async function answerRestartProposal(accept) {
+  const proposal = incomingRestartProposal;
+  if (!proposal) return;
+  incomingRestartProposal = null;
+  if (restartProposalModal.open) restartProposalModal.close();
+  try {
+    await multiplayerClient.voteRestart(proposal.proposalId, accept);
+  } catch (error) {
+    onlineGameStatus.textContent = onlineErrorMessage(error.code);
+    onlineGameStatus.hidden = false;
+  }
 }
 
 widthInput.addEventListener("input", () => {
@@ -2327,7 +2599,32 @@ rulesCloseButton.addEventListener("click", () => rulesModal.close());
 settingsCloseButton.addEventListener("click", () => settingsModal.close());
 settingsCancelButton.addEventListener("click", () => settingsModal.close());
 settingsForm.addEventListener("submit", applySettings);
+restartConfirmButton.addEventListener("click", confirmSettingsRestart);
+restartCancelButton.addEventListener("click", cancelSettingsRestart);
+restartConfirmModal.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  cancelSettingsRestart();
+});
+restartProposalAcceptButton.addEventListener("click", () => answerRestartProposal(true));
+restartProposalDeclineButton.addEventListener("click", () => answerRestartProposal(false));
+restartProposalModal.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  answerRestartProposal(false);
+});
 resultModal.addEventListener("cancel", (event) => event.preventDefault());
+resultRematchButton.addEventListener("click", async () => {
+  if (!state || state.phase !== "finished") return;
+  if (!onlineMode) {
+    setupGame();
+    return;
+  }
+  resultRematchButton.disabled = true;
+  multiplayerClient.proposeRestart("rematch").catch((error) => {
+    resultRematchButton.disabled = false;
+    resultRematchStatus.textContent = onlineErrorMessage(error.code);
+    resultRematchStatus.hidden = false;
+  });
+});
 resultNewGameButton.addEventListener("click", () => {
   if (onlineMode) leaveOnlineSession({ showMenu: true });
   else setupGame();
@@ -2394,8 +2691,86 @@ document.addEventListener("languagechange", () => {
 reduceMotionQuery.addEventListener?.("change", syncMenuAmbient);
 adminItemList.addEventListener("click", (event) => {
   const button = event.target.closest(".admin-item-button");
-  if (!button || !canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
+  if (!button || boardEditorActive || !canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
   updateState(selectAbility(state, button.dataset.itemId));
+});
+boardEditorToggle.addEventListener("click", () => {
+  if (onlineMode) {
+    if (!onlineConnected || onlineCommandPending) return;
+    if (!onlineAdminAuthenticated) {
+      adminAuthError.hidden = true;
+      adminSecretInput.value = "";
+      adminAuthModal.showModal();
+      adminSecretInput.focus();
+      return;
+    }
+    boardEditorActive = !boardEditorActive;
+    boardEditorTool = null;
+    boardEditorMessageKey = null;
+    render();
+    return;
+  }
+  if (isComputerControlledTurn()
+    || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
+  boardEditorActive = !boardEditorActive;
+  boardEditorTool = null;
+  boardEditorMessageKey = null;
+  if (boardEditorActive && state.selectedAbility !== null) {
+    updateState(cancelAbilitySelection(state));
+    return;
+  }
+  render();
+});
+boardEditorTools.addEventListener("click", (event) => {
+  const button = event.target.closest(".editor-tool-button");
+  if (!button || !boardEditorActive
+    || (onlineMode ? (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated)
+      : !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM))) return;
+  boardEditorTool = button.dataset.editorKind === "item"
+    ? { kind: "item", itemType: button.dataset.itemType }
+    : { kind: "blocked" };
+  boardEditorMessageKey = null;
+  render();
+});
+boardEditorCancel.addEventListener("click", () => {
+  boardEditorTool = null;
+  boardEditorMessageKey = null;
+  render();
+});
+boardEditorExit.addEventListener("click", () => {
+  boardEditorActive = false;
+  boardEditorTool = null;
+  boardEditorMessageKey = null;
+  render();
+});
+adminAuthForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!onlineMode || !onlineConnected || !adminSecretInput.value) return;
+  adminAuthSubmit.disabled = true;
+  adminAuthError.hidden = true;
+  try {
+    await multiplayerClient.authenticateAdmin(adminSecretInput.value);
+    if (onlineMode && onlineConnected) {
+      onlineAdminAuthenticated = true;
+      boardEditorActive = true;
+      boardEditorTool = null;
+      adminAuthModal.close();
+      render();
+    }
+  } catch {
+    adminAuthError.textContent = t("admin.authFailed");
+    adminAuthError.hidden = false;
+  } finally {
+    adminSecretInput.value = "";
+    adminAuthSubmit.disabled = false;
+  }
+});
+adminAuthCancel.addEventListener("click", () => {
+  adminSecretInput.value = "";
+  adminAuthModal.close();
+});
+adminAuthModal.addEventListener("close", () => {
+  adminSecretInput.value = "";
 });
 startButton.addEventListener("click", setupGame);
 resizeMenuAmbient();

@@ -166,6 +166,29 @@ export class MultiplayerClient {
     return this.#send({ type: "command", command, requestId });
   }
 
+  authenticateAdmin(secret) {
+    if (typeof secret !== "string" || secret.length < 1 || secret.length > 512) {
+      return Promise.reject(new MultiplayerError("invalid-admin-secret"));
+    }
+    return this.#request("admin-auth", { secret }, "admin-authenticated");
+  }
+
+  proposeRestart(kind, settings = undefined) {
+    if (!["settings", "rematch"].includes(kind)) return Promise.reject(new MultiplayerError("invalid-restart-kind"));
+    if (kind === "settings" && (!settings || typeof settings !== "object" || Array.isArray(settings))) {
+      return Promise.reject(new MultiplayerError("invalid-settings"));
+    }
+    const fields = kind === "settings" ? { kind, settings } : { kind };
+    return this.#request("restart-propose", fields, "restart-proposal-created");
+  }
+
+  voteRestart(proposalId, accept) {
+    if (typeof proposalId !== "string" || typeof accept !== "boolean") {
+      return Promise.reject(new MultiplayerError("invalid-restart-vote"));
+    }
+    return this.#request("restart-vote", { proposalId, accept }, "restart-vote-recorded");
+  }
+
   sendAim(row, col) {
     if (!this.connected) return false;
     if (row === null && col === null) return this.#send({ type: "aim", row: null, col: null });

@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { RoomManager } from "./rooms.js";
 
@@ -12,6 +13,7 @@ const VERSIONED_MESSAGE_TYPES = new Set([
 const DEFAULT_ROOM_CREATE_LIMIT = Object.freeze({ max: 5, windowMs: 10 * 60_000 });
 const DEFAULT_ROOM_JOIN_LIMIT = Object.freeze({ max: 30, windowMs: 60_000 });
 const DEFAULT_AIM_UPDATE_LIMIT = Object.freeze({ max: 30, windowMs: 1_000 });
+const DEFAULT_ADMIN_AUTH_LIMIT = Object.freeze({ max: 6, windowMs: 10 * 60_000 });
 
 class FixedWindowRateLimiter {
   constructor({ max, windowMs, now, maxKeys = 10_000 }) {
@@ -59,6 +61,13 @@ function exactKeys(value, allowed) {
   return Object.keys(value).every((key) => allowed.includes(key));
 }
 
+function matchesAdminSecret(supplied, configured) {
+  if (typeof supplied !== "string" || typeof configured !== "string" || !configured) return false;
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  const configuredBytes = Buffer.from(configured, "utf8");
+  return suppliedBytes.length === configuredBytes.length && timingSafeEqual(suppliedBytes, configuredBytes);
+}
+
 function isValidRequestId(requestId) {
   return requestId === undefined
     || (typeof requestId === "string" && requestId.length > 0 && requestId.length <= 64);
@@ -100,6 +109,8 @@ export function createMultiplayerServer({
   roomCreationRateLimit = DEFAULT_ROOM_CREATE_LIMIT,
   roomJoinRateLimit = DEFAULT_ROOM_JOIN_LIMIT,
   aimUpdateRateLimit = DEFAULT_AIM_UPDATE_LIMIT,
+  adminAuthRateLimit = DEFAULT_ADMIN_AUTH_LIMIT,
+  adminSecret = null,
   now = Date.now
 } = {}) {
   const httpServer = createServer((request, response) => {
@@ -120,6 +131,7 @@ export function createMultiplayerServer({
   const createLimiter = new FixedWindowRateLimiter({ ...roomCreationRateLimit, now });
   const joinLimiter = new FixedWindowRateLimiter({ ...roomJoinRateLimit, now });
   const aimLimiter = new FixedWindowRateLimiter({ ...aimUpdateRateLimit, now });
+  const adminAuthLimiter = new FixedWindowRateLimiter({ ...adminAuthRateLimit, now });
   let cleanupTimer = null;
   let closing = false;
 
@@ -178,7 +190,8 @@ export function createMultiplayerServer({
         if (!attached.ok) return sendError(socket, attached.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: created.roomCode,
-          connection: attached.connection
+          connection: attached.connection,
+          isAdmin: false
         });
         safeJsonSend(socket, {
           type: "room-created",
@@ -208,7 +221,8 @@ export function createMultiplayerServer({
         if (!attached.ok) return sendError(socket, attached.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: joined.roomCode,
-          connection: attached.connection
+          connection: attached.connection,
+          isAdmin: false
         });
         safeJsonSend(socket, {
           type: "room-joined",
@@ -237,7 +251,8 @@ export function createMultiplayerServer({
         if (!resumed.ok) return sendError(socket, resumed.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: resumed.roomCode,
-          connection: resumed.connection
+          connection: resumed.connection,
+          isAdmin: false
         });
         safeJsonSend(socket, {
           type: "room-resumed",
@@ -258,7 +273,9 @@ export function createMultiplayerServer({
           return sendError(socket, "invalid-message", message.requestId);
         }
         if (!context) return sendError(socket, "not-in-room", message.requestId);
-        roomManager.submitCommand(context.roomCode, context.connection.side, message.command).then((result) => {
+        roomManager.submitCommand(context.roomCode, context.connection.side, message.command, {
+          isAdmin: context.isAdmin === true
+        }).then((result) => {
           if (!result.ok && socket.readyState === WebSocket.OPEN) {
             safeJsonSend(socket, {
               type: "command-error",
@@ -268,6 +285,62 @@ export function createMultiplayerServer({
             });
           }
         }).catch(() => sendError(socket, "command-failed", message.requestId));
+        return;
+      }
+
+      if (message.type === "admin-auth") {
+        if (!exactKeys(message, ["type", "secret", "requestId"])
+          || typeof message.secret !== "string" || message.secret.length < 1 || message.secret.length > 512) {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (!context) return sendError(socket, "not-in-room", message.requestId);
+        if (!adminAuthLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
+        if (!matchesAdminSecret(message.secret, adminSecret)) return sendError(socket, "admin-auth-failed", message.requestId);
+        context.isAdmin = true;
+        safeJsonSend(socket, { type: "admin-authenticated", roomCode: context.roomCode, requestId: message.requestId });
+        return;
+      }
+
+      if (message.type === "restart-propose") {
+        const expected = message.kind === "settings"
+          ? ["type", "kind", "settings", "requestId"]
+          : ["type", "kind", "requestId"];
+        if (!exactKeys(message, expected) || !["settings", "rematch"].includes(message.kind)
+          || (message.kind === "settings" && (!message.settings || typeof message.settings !== "object" || Array.isArray(message.settings)))) {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (!context) return sendError(socket, "not-in-room", message.requestId);
+        roomManager.proposeRestart(context.roomCode, context.connection.side, message.kind, message.settings)
+          .then((result) => {
+            if (!result.ok) return sendError(socket, result.error.code, message.requestId);
+            safeJsonSend(socket, {
+              type: "restart-proposal-created",
+              roomCode: context.roomCode,
+              proposalId: result.proposalId,
+              kind: result.kind,
+              requestId: message.requestId
+            });
+          }).catch(() => sendError(socket, "restart-failed", message.requestId));
+        return;
+      }
+
+      if (message.type === "restart-vote") {
+        if (!exactKeys(message, ["type", "proposalId", "accept", "requestId"])
+          || typeof message.proposalId !== "string" || typeof message.accept !== "boolean") {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (!context) return sendError(socket, "not-in-room", message.requestId);
+        roomManager.voteRestart(context.roomCode, context.connection.side, message.proposalId, message.accept)
+          .then((result) => {
+            if (!result.ok) return sendError(socket, result.error.code, message.requestId);
+            safeJsonSend(socket, {
+              type: "restart-vote-recorded",
+              roomCode: context.roomCode,
+              accepted: result.accepted,
+              version: result.version,
+              requestId: message.requestId
+            });
+          }).catch(() => sendError(socket, "restart-failed", message.requestId));
         return;
       }
 

@@ -43,8 +43,11 @@ If GitHub access is not connected to Render, connect the repository from Render 
   - `MULTIPLAYER_HOST` = `0.0.0.0`
   - `MULTIPLAYER_ALLOWED_ORIGINS` = `https://<actual-go-service>.onrender.com`
   - `MULTIPLAYER_TRUST_PROXY` = `true` so the room request limiter can use the client address forwarded by Render's proxy.
+  - `MULTIPLAYER_ADMIN_SECRET` = optional high-entropy secret used to authorize the board editor. Set it only in the Node service's private Environment settings. If unset, online board editing stays unavailable. Never put this value in `render.yaml`, the Go service environment, client runtime configuration, invitation links, or logs.
 
 Use exact web origins in `MULTIPLAYER_ALLOWED_ORIGINS`, comma-separated if you have more than one, for example the Render domain and a custom domain. Do not include paths or trailing slashes. The server rejects a missing or non-allow-listed `Origin` on WebSocket upgrades.
+
+To enable the online board editor, set `MULTIPLAYER_ADMIN_SECRET` to a randomly generated, private value in the Node service dashboard. The editor asks for the secret over the WebSocket connection; the server authorizes only that connection. The secret is not stored in browser storage, and an administrator must enter it again after reconnecting. Without this setting, regular online players cannot use board-edit commands.
 
 ## Set the cross-service addresses
 

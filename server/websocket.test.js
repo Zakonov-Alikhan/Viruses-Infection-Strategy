@@ -161,6 +161,49 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.deepEqual(xMoveState.state, oMoveState.state);
 });
 
+test("WebSocket board editing requires the configured admin secret and broadcasts the authoritative snapshot", async (t) => {
+  const secret = "test-admin-secret-not-for-client-state";
+  const { server, address } = await makeTestServer({ adminSecret: secret });
+  const peers = [];
+  t.after(async () => {
+    await Promise.all(peers.map((peer) => peer.close().catch(() => {})));
+    await server.close();
+  });
+
+  const x = await openPeer(address);
+  peers.push(x);
+  x.send({ type: "create-room", settings: { freeStartingPositions: false }, requestId: "create" });
+  const created = await x.next("room-created");
+  const o = await openPeer(address);
+  peers.push(o);
+  o.send({ type: "join-room", code: created.roomCode, requestId: "join" });
+  await o.next("room-joined");
+  await x.next("room-ready");
+  const readyO = await o.next("room-ready");
+  assert.equal(readyO.state.phase, "playing");
+
+  x.send({ type: "command", command: {
+    type: "board-edit", object: { kind: "item", itemType: "bomb", row: 4, col: 4 }
+  }, requestId: "unauthorized" });
+  assert.equal((await x.next("command-error")).code, "admin-required");
+
+  x.send({ type: "admin-auth", secret: "wrong", requestId: "bad-auth" });
+  assert.equal((await x.next("server-error")).code, "admin-auth-failed");
+  x.send({ type: "admin-auth", secret, requestId: "auth" });
+  assert.equal((await x.next("admin-authenticated")).requestId, "auth");
+  x.send({ type: "command", command: {
+    type: "board-edit", object: { kind: "item", itemType: "bomb", row: 4, col: 4 }
+  }, requestId: "edit" });
+
+  const [xState, oState] = await Promise.all([x.next("state"), o.next("state")]);
+  assert.equal(xState.version, oState.version);
+  assert.deepEqual(xState.state.eventItems, oState.state.eventItems);
+  assert.equal(xState.state.eventItems.at(-1).type, "bomb");
+  assert.equal(xState.state.currentPlayer, "X");
+  assert.equal(xState.state.piecesLeft, readyO.state.piecesLeft);
+  assert.equal(JSON.stringify(x.messages.concat(o.messages)).includes(secret), false);
+});
+
 test("forwards validated room settings through WebSocket creation to both players", async (t) => {
   const { server, address } = await makeTestServer();
   const peers = [];

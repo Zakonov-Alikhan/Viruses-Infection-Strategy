@@ -319,3 +319,28 @@ test("player view does not retain setup choices after the initial positions are 
   assert.equal(view.board[2][3], "X");
   assert.equal(view.board[7][8], "O");
 });
+
+test("board editor command requires server authority and can edit without consuming or changing the active turn", () => {
+  const state = playingState();
+  const command = { type: "board-edit", object: { kind: "item", itemType: "bomb", row: 4, col: 4 } };
+  const denied = processGameCommand(state, "O", command);
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, "admin-required");
+  assert.equal(denied.state, state);
+
+  const edited = processGameCommand(state, "O", command, { authority: "admin" });
+  assert.equal(edited.ok, true);
+  assert.deepEqual(edited.state.eventItems.at(-1), {
+    id: state.nextEventItemId, type: "bomb", row: 4, col: 4
+  });
+  assert.equal(edited.state.currentPlayer, state.currentPlayer);
+  assert.equal(edited.state.piecesLeft, state.piecesLeft);
+  assert.equal(state.eventItems.length, 0);
+
+  const invalid = processGameCommand(state, "O", {
+    type: "board-edit", object: { kind: "blocked", row: 0, col: 9 }
+  }, { authority: "admin" });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.error.code, "invalid-action");
+  assert.equal(invalid.state, state);
+});

@@ -4,6 +4,7 @@ import {
   flagFall,
   getSelectedAbility,
   playMove,
+  placeEditorObject,
   resign,
   selectAbility,
   useAntiBomb,
@@ -17,6 +18,7 @@ const COMMAND_FIELDS = Object.freeze({
   place: ["type", "row", "col"],
   "select-ability": ["type", "itemId"],
   "ability-target": ["type", "itemId", "row", "col"],
+  "board-edit": ["type", "object"],
   resign: ["type"],
   timeout: ["type"]
 });
@@ -46,6 +48,20 @@ function hasExactCommandShape(command) {
 
 function isCoordinate(row, col) {
   return Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0;
+}
+
+function isValidEditorObject(object) {
+  if (!object || typeof object !== "object" || Array.isArray(object)) return false;
+  if (object.kind === "item") {
+    return Object.keys(object).every((key) => ["kind", "itemType", "row", "col"].includes(key))
+      && Object.keys(object).length === 4
+      && typeof object.itemType === "string"
+      && isCoordinate(object.row, object.col);
+  }
+  return object.kind === "blocked"
+    && Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))
+    && Object.keys(object).length === 3
+    && isCoordinate(object.row, object.col);
 }
 
 function isSetupPhase(phase) {
@@ -84,6 +100,14 @@ export function processGameCommand(state, side, command, {
     if (state.phase !== "playing") return failure(state, "wrong-phase");
     if (side !== state.currentPlayer) return failure(state, "not-your-turn");
     return { ok: true, state: flagFall(state) };
+  }
+
+  if (command.type === "board-edit") {
+    if (authority !== "admin") return failure(state, "admin-required");
+    if (state.phase !== "playing") return failure(state, "wrong-phase");
+    if (!isValidEditorObject(command.object)) return failure(state, "invalid-editor-object");
+    const next = placeEditorObject(state, side, command.object, { admin: true });
+    return next === state ? failure(state, "invalid-action") : { ok: true, state: next };
   }
 
   if (command.type === "choose-start") {

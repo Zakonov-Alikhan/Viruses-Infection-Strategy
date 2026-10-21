@@ -40,9 +40,10 @@ export function startMultiplayerServer({
   allowedOrigins = parseAllowedOrigins(process.env.MULTIPLAYER_ALLOWED_ORIGINS, {
     production: process.env.NODE_ENV === "production"
   }),
-  trustProxy = process.env.MULTIPLAYER_TRUST_PROXY === "true"
+  trustProxy = process.env.MULTIPLAYER_TRUST_PROXY === "true",
+  adminSecret = process.env.MULTIPLAYER_ADMIN_SECRET || null
 } = {}) {
-  const server = createMultiplayerServer({ port, host, allowedOrigins, trustProxy });
+  const server = createMultiplayerServer({ port, host, allowedOrigins, trustProxy, adminSecret });
   return server.listen().then((address) => {
     console.log(`Multiplayer WebSocket listening on ${address.address}:${address.port} at /ws`);
     return server;

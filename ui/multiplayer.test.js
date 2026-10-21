@@ -41,7 +41,7 @@ function eventLog(client) {
   };
 }
 
-async function makeFixture(t, { sideRandom = () => 0.25 } = {}) {
+async function makeFixture(t, { sideRandom = () => 0.25, adminSecret = null } = {}) {
   let codeNumber = 0;
   let tokenNumber = 0;
   const roomManager = new RoomManager({
@@ -63,7 +63,8 @@ async function makeFixture(t, { sideRandom = () => 0.25 } = {}) {
     port: 0,
     cleanupIntervalMs: 0,
     allowedOrigins: new Set(["http://localhost:3000"]),
-    roomManager
+    roomManager,
+    adminSecret
   });
   const address = await server.listen();
   const storageX = new MemoryStorage();
@@ -140,6 +141,22 @@ test("client creates and joins a room, then relays confirmed authoritative turns
   o.leave();
   assert.equal(storageX.getItem("viruses.online-room"), null);
   assert.equal(storageO.getItem("viruses.online-room"), null);
+});
+
+test("client submits the admin secret only for the current connection and does not persist it", async (t) => {
+  const secret = "client-test-private-admin-secret";
+  const { x, o, storageX } = await makeFixture(t, { adminSecret: secret });
+  const xEvents = eventLog(x);
+  const created = await x.createRoom({
+    width: 10, height: 10, piecesPerTurn: 1, clockMinutes: 5, incrementSeconds: 0,
+    unlimitedTime: true, randomEvents: false, animationsEnabled: true,
+    freeStartingPositions: true, disabledItems: []
+  });
+  await o.joinRoom(created.roomCode);
+  await xEvents.waitFor((event) => event.type === "room-ready");
+  const authorized = await x.authenticateAdmin(secret);
+  assert.equal(authorized.type, "admin-authenticated");
+  assert.equal(JSON.stringify([...storageX.values.values()]).includes(secret), false);
 });
 
 test("clients receive randomized sides and the creator's saved session is updated", async (t) => {
@@ -257,6 +274,49 @@ test("online clients receive validated opponent aim and confirmed attack visuals
   assert.equal(oEvent.roomCode, created.roomCode);
   const clear = await oEvents.waitFor((event) => event.type === "aim" && event.target === null);
   assert.equal(clear.roomCode, created.roomCode);
+});
+
+test("online settings restart and rematch require the second player's approval", async (t) => {
+  const { x, o, roomManager } = await makeFixture(t);
+  const xEvents = eventLog(x);
+  const oEvents = eventLog(o);
+  const baseSettings = {
+    width: 10, height: 10, piecesPerTurn: 1, clockMinutes: 5, incrementSeconds: 0,
+    unlimitedTime: true, randomEvents: false, animationsEnabled: true,
+    freeStartingPositions: false, disabledItems: ["pointDestroy"]
+  };
+  const created = await x.createRoom(baseSettings);
+  await o.joinRoom(created.roomCode);
+  const readyX = await xEvents.waitFor((event) => event.type === "room-ready" && event.side);
+  const readyO = await oEvents.waitFor((event) => event.type === "room-ready" && event.side);
+  const players = { [readyX.side]: x, [readyO.side]: o };
+  const events = { X: readyX.side === "X" ? xEvents : oEvents, O: readyO.side === "O" ? oEvents : xEvents };
+
+  const declinedOffer = await players.X.proposeRestart("settings", { ...baseSettings, width: 12 });
+  const settingsPrompt = await events.O.waitFor((event) => event.type === "restart-proposal" && event.proposalId === declinedOffer.proposalId);
+  assert.equal(settingsPrompt.settings.width, 12);
+  await players.O.voteRestart(declinedOffer.proposalId, false);
+  await events.X.waitFor((event) => event.type === "restart-cancelled" && event.proposalId === declinedOffer.proposalId);
+  assert.equal(roomManager.getSnapshot(created.roomCode, "X").state.board[0].length, 10);
+
+  const acceptedOffer = await players.X.proposeRestart("settings", { ...baseSettings, width: 12 });
+  await events.O.waitFor((event) => event.type === "restart-proposal" && event.proposalId === acceptedOffer.proposalId);
+  await players.O.voteRestart(acceptedOffer.proposalId, true);
+  const restarted = await Promise.all([xEvents, oEvents].map((log) => log.waitFor((event) => event.type === "state" && event.restartKind === "settings")));
+  assert.deepEqual(restarted.map((event) => event.state.board[0].length), [12, 12]);
+  assert.deepEqual(restarted[0].state.settings.disabledItems, ["pointDestroy"]);
+
+  const xPlayer = restarted.find((event) => event.side === "X") === restarted[0] ? x : o;
+  const oPlayer = xPlayer === x ? o : x;
+  await xPlayer.sendCommand({ type: "resign" });
+  await Promise.all([xEvents, oEvents].map((log) => log.waitFor((event) => event.type === "state" && event.state.phase === "finished")));
+  const rematchOffer = await xPlayer.proposeRestart("rematch");
+  await (xPlayer === x ? oEvents : xEvents).waitFor((event) => event.type === "restart-proposal" && event.proposalId === rematchOffer.proposalId);
+  await oPlayer.voteRestart(rematchOffer.proposalId, true);
+  const rematchStates = await Promise.all([xEvents, oEvents].map((log) => log.waitFor((event) => event.type === "state" && event.restartKind === "rematch")));
+  assert.ok(rematchStates.every((event) => event.state.phase === "playing" && event.state.winner === null));
+  assert.equal(rematchStates[0].side, rematchStates[1].side === "X" ? "O" : "X");
+  assert.ok(rematchStates.every((event) => event.state.settings.width === 12));
 });
 
 test("WebSocket address defaults are local-only and secure on HTTPS origins", () => {

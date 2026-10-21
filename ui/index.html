@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=online3">
+  <link rel="stylesheet" href="/ui/style.css?v=restart-consensus1">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -214,9 +214,21 @@
         </section>
         <section class="side-card admin-tools" id="admin-tools" aria-label="Предметы администратора" data-i18n-aria-label="admin.label" hidden>
           <p class="eyebrow" data-i18n="admin.mode">Режим администратора</p>
-          <h2 data-i18n="admin.title">Предметы для проверки</h2>
+          <h2 id="admin-title" data-i18n="admin.title">Предметы для проверки</h2>
           <p id="admin-help" data-i18n="admin.help">Способности не расходуют обычный инвентарь.</p>
           <div class="admin-item-list" id="admin-item-list"></div>
+          <div class="board-editor-entry">
+            <button class="button" id="board-editor-toggle" type="button" data-i18n="admin.editorStart">Редактировать поле</button>
+          </div>
+          <div id="board-editor-controls" hidden>
+            <p class="editor-mode-label" data-i18n="admin.editorChoose">Выберите объект для размещения</p>
+            <div class="admin-item-list" id="board-editor-tools"></div>
+            <p id="board-editor-status" class="editor-status" data-i18n="admin.editorNoTool">Инструмент не выбран</p>
+            <div class="editor-actions">
+              <button class="button" id="board-editor-cancel" type="button" data-i18n="admin.editorCancel">Отменить инструмент</button>
+              <button class="button" id="board-editor-exit" type="button" data-i18n="admin.editorExit">Выйти из редактора</button>
+            </div>
+          </div>
         </section>
         <details class="side-card rules-card">
           <summary class="rules-summary"><span data-i18n="rules.short">Коротко о правилах</span> <span aria-hidden="true">⌄</span></summary>
@@ -376,6 +388,42 @@
       </div>
     </section>
   </dialog>
+  <dialog id="restart-confirm-modal" class="resign-confirm-modal" aria-labelledby="restart-confirm-title" aria-describedby="restart-confirm-description">
+    <section class="resign-confirm-card">
+      <p class="eyebrow resign-confirm-eyebrow" data-i18n="dialog.confirm">Подтверждение</p>
+      <h2 id="restart-confirm-title" data-i18n="dialog.restartTitle">Перезапустить партию?</h2>
+      <p id="restart-confirm-description" data-i18n="dialog.restartText">Новая конфигурация сбросит текущую партию. В сетевой игре соперник тоже должен согласиться.</p>
+      <div class="resign-confirm-actions">
+        <button id="restart-cancel" class="button button-secondary" type="button" data-i18n="settings.cancel">Отмена</button>
+        <button id="restart-confirm" class="button button-primary" type="button" data-i18n="dialog.restartConfirm">Перезапустить</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="restart-proposal-modal" class="resign-confirm-modal" aria-labelledby="restart-proposal-title" aria-describedby="restart-proposal-description">
+    <section class="resign-confirm-card">
+      <p class="eyebrow resign-confirm-eyebrow" data-i18n="dialog.confirm">Подтверждение</p>
+      <h2 id="restart-proposal-title" data-i18n="dialog.restartProposalTitle">Соперник предлагает перезапуск</h2>
+      <p id="restart-proposal-description"></p>
+      <div class="resign-confirm-actions">
+        <button id="restart-proposal-decline" class="button button-secondary" type="button" data-i18n="dialog.restartDecline">Отказаться</button>
+        <button id="restart-proposal-accept" class="button button-primary" type="button" data-i18n="dialog.restartAccept">Согласиться</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="admin-auth-modal" class="resign-confirm-modal" aria-labelledby="admin-auth-title">
+    <form id="admin-auth-form" class="resign-confirm-card">
+      <p class="eyebrow resign-confirm-eyebrow" data-i18n="admin.mode">Режим администратора</p>
+      <h2 id="admin-auth-title" data-i18n="admin.authTitle">Авторизация редактора</h2>
+      <p data-i18n="admin.authHelp">Введите секрет администратора, настроенный на игровом сервере.</p>
+      <label class="admin-secret-label" for="admin-secret-input" data-i18n="admin.authLabel">Секрет администратора</label>
+      <input id="admin-secret-input" class="text-input" type="password" autocomplete="off" required maxlength="512">
+      <p id="admin-auth-error" class="editor-status" role="status" hidden></p>
+      <div class="resign-confirm-actions">
+        <button id="admin-auth-cancel" class="button button-secondary" type="button" data-i18n="admin.authCancel">Отмена</button>
+        <button id="admin-auth-submit" class="button button-primary" type="submit" data-i18n="admin.authSubmit">Проверить</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="result-modal" class="result-modal" aria-labelledby="result-title" aria-describedby="result-description">
     <section class="result-card">
       <p class="eyebrow result-eyebrow" data-i18n="dialog.result">Партия завершена</p>
@@ -383,10 +431,12 @@
       <h2 id="result-title" class="result-title" data-i18n="dialog.winDefault">Победа!</h2>
       <p id="result-description" class="result-description"></p>
       <p id="result-roast" class="result-roast"></p>
+      <button id="result-rematch" class="button button-secondary result-rematch" type="button" data-i18n="dialog.rematch">Реванш</button>
+      <p id="result-rematch-status" class="result-rematch-status" aria-live="polite" hidden></p>
       <button id="result-new-game" class="button button-primary" type="button" data-i18n="dialog.newGame">Начать новую партию</button>
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=items-settings1"></script>
+  <script type="module" src="/ui/script.js?v=restart-consensus1"></script>
 </body>
 </html>

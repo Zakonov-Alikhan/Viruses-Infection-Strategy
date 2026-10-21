@@ -3,6 +3,7 @@ import test from "node:test";
 import { applyComputerAction, chooseComputerAction } from "./ai.js";
 import {
   BLOCKED_CELL,
+  cancelAbilitySelection,
   DEFAULT_SETTINGS,
   EVENT_ITEMS,
   canCompleteTurn,
@@ -12,6 +13,7 @@ import {
   isLegalMove,
   isItemEnabled,
   isValidDebrisTarget,
+  placeEditorObject,
   playMove,
   selectAbility,
   useBomb
@@ -285,4 +287,58 @@ test("admin-selected attack items stay selected and can be used repeatedly witho
   assert.equal(secondUse.selectedAbility, "admin:bomb");
   assert.equal(secondUse.board[4][4], "");
   assert.equal(selected.board[4][4], "");
+});
+
+test("board editor adds canonical event items and dead cells without changing unrelated game data", () => {
+  const state = makePlayingState({ adminMode: true });
+  const itemState = placeEditorObject(state, "X", { kind: "item", itemType: "bomb", row: 0, col: 1 });
+  assert.notEqual(itemState, state);
+  assert.deepEqual(itemState.eventItems, [{ id: state.nextEventItemId, type: "bomb", row: 0, col: 1 }]);
+  assert.equal(itemState.nextEventItemId, state.nextEventItemId + 1);
+  assert.equal(itemState.currentPlayer, state.currentPlayer);
+  assert.equal(itemState.piecesLeft, state.piecesLeft);
+  assert.deepEqual(state.eventItems, []);
+
+  const blockedState = placeEditorObject(state, "X", { kind: "blocked", row: 0, col: 1 });
+  assert.equal(blockedState.board[0][1], BLOCKED_CELL);
+  assert.equal(blockedState.board[0][0], state.board[0][0]);
+  assert.deepEqual(blockedState.eventItems, state.eventItems);
+  assert.equal(blockedState.currentPlayer, state.currentPlayer);
+  assert.equal(blockedState.piecesLeft, state.piecesLeft);
+});
+
+test("board editor rejects unauthorized, overlapping, disabled, excessive, and turn-breaking placements atomically", () => {
+  const admin = makePlayingState({ adminMode: true, disabledItems: ["bomb"] });
+  const nonAdmin = makePlayingState();
+  const overlapState = { ...admin, eventItems: [{ id: 3, type: "shield", row: 0, col: 1 }] };
+  const fullItemState = { ...admin, eventItems: [1, 2, 3].map((id, index) => ({
+    id, type: "shield", row: index + 1, col: 1
+  })) };
+  for (const [source, result] of [
+    [nonAdmin, placeEditorObject(nonAdmin, "X", { kind: "item", itemType: "bomb", row: 0, col: 1 })],
+    [admin, placeEditorObject(admin, "X", { kind: "item", itemType: "bomb", row: 0, col: 1 })],
+    [admin, placeEditorObject(admin, "X", { kind: "item", itemType: "unknown", row: 0, col: 1 })],
+    [admin, placeEditorObject(admin, "X", { kind: "blocked", row: 0, col: 0 })],
+    [overlapState, placeEditorObject(overlapState, "X", { kind: "blocked", row: 0, col: 1 })],
+    [fullItemState, placeEditorObject(fullItemState, "X", { kind: "item", itemType: "shield", row: 0, col: 1 })]
+  ]) assert.equal(result, source);
+
+  const sparseBoard = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  sparseBoard[0][0] = "X";
+  sparseBoard[9][9] = "O";
+  sparseBoard[0][1] = "";
+  const constrained = { ...admin, board: sparseBoard, currentPlayer: "X", piecesLeft: 1 };
+  const original = structuredClone(constrained);
+  assert.equal(placeEditorObject(constrained, "X", { kind: "blocked", row: 0, col: 1 }), constrained);
+  assert.deepEqual(constrained, original);
+});
+
+test("admin can cancel a pending ability selection before entering board edit mode", () => {
+  const state = makePlayingState({ adminMode: true });
+  const selected = selectAbility(state, "admin:bomb");
+  const cancelled = cancelAbilitySelection(selected, "X");
+  assert.equal(cancelled.selectedAbility, null);
+  assert.deepEqual(cancelled.abilityTargets, []);
+  assert.equal(state.selectedAbility, null);
+  assert.equal(cancelAbilitySelection(selected, "O"), selected);
 });

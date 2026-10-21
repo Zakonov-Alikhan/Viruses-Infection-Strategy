@@ -184,6 +184,52 @@ export function isItemEnabled(state, type) {
     && !(Array.isArray(disabledItems) && disabledItems.includes(type));
 }
 
+/** Place an existing board object through the local administrator editor.
+ * The editor deliberately uses the game's canonical eventItems and board cells.
+ */
+export function placeEditorObject(state, player, object, { admin = false } = {}) {
+  if (!state || state.phase !== "playing" || !["X", "O"].includes(player)
+    || (!admin && !hasPermission(state, player, PLAYER_PERMISSIONS.USE_ANY_ITEM))
+    || !object || typeof object !== "object" || Array.isArray(object)
+    || !Number.isInteger(object.row) || !Number.isInteger(object.col)
+    || !inBounds(object.row, object.col, state.board)) return state;
+
+  if (state.board[object.row][object.col] !== EMPTY_CELL) return state;
+  const itemAtTarget = state.eventItems.some((item) => item.row === object.row && item.col === object.col);
+  const protectionAtTarget = state.protections.some((protection) => protection.row === object.row && protection.col === object.col);
+
+  if (object.kind === "item") {
+    if (Object.keys(object).some((key) => !["kind", "itemType", "row", "col"].includes(key))
+      || !isItemEnabled(state, object.itemType) || itemAtTarget || protectionAtTarget
+      || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD
+      || !Number.isSafeInteger(state.nextEventItemId) || state.nextEventItemId < 0) return state;
+    const usedIds = new Set(state.eventItems.map((item) => item.id));
+    let itemId = state.nextEventItemId;
+    while (usedIds.has(itemId) && Number.isSafeInteger(itemId)) itemId += 1;
+    if (!Number.isSafeInteger(itemId + 1)) return state;
+    return {
+      ...state,
+      eventItems: [...state.eventItems, {
+        id: itemId,
+        type: object.itemType,
+        row: object.row,
+        col: object.col
+      }],
+      nextEventItemId: itemId + 1
+    };
+  }
+
+  if (object.kind === "blocked" && Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))
+    && !itemAtTarget && !protectionAtTarget) {
+    const board = copyBoard(state.board);
+    board[object.row][object.col] = BLOCKED_CELL;
+    if (!canCompleteTurn({ ...state, board }, state.currentPlayer, state.piecesLeft)) return state;
+    return { ...state, board, lastDestroyed: [] };
+  }
+
+  return state;
+}
+
 function getAbility(state, player, itemId) {
   const owned = state.inventory[player].find((item) => item.id === itemId);
   if (owned) return isItemEnabled(state, owned.type) ? owned : null;
@@ -387,6 +433,12 @@ export function selectAbility(state, itemId) {
       ? message("message.disabled")
       : message(instructions[item.type])
   };
+}
+
+export function cancelAbilitySelection(state, player = state?.currentPlayer) {
+  if (!state || state.phase !== "playing" || player !== state.currentPlayer
+    || (state.selectedAbility === null && !(state.abilityTargets?.length))) return state;
+  return { ...state, selectedAbility: null, abilityTargets: [] };
 }
 
 export function isValidAreaTarget(state, row, col) {
