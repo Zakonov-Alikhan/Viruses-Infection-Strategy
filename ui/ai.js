@@ -11,7 +11,7 @@ import {
   useAntiBomb,
   useBomb,
   usePointDestroy
-} from "./game.js?v=random-artifact1";
+} from "./game.js?v=wormhole-settings1";
 
 export const AI_DIFFICULTIES = Object.freeze(["easy", "medium", "hard"]);
 export const AI_SEARCH_LIMITS = Object.freeze({

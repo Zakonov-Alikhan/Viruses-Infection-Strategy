@@ -13,12 +13,14 @@ import {
   isLegalMove,
   isItemEnabled,
   isValidDebrisTarget,
+  isValidShieldTarget,
   placeEditorObject,
   playMove,
   selectAbility,
-  useBomb
+  useBomb,
+  usePointDestroy
 } from "./game.js";
-import { processGameCommand } from "../server/game-service.js";
+import { getPlayerView, processGameCommand } from "../server/game-service.js";
 
 function makePlayingState(overrides = {}) {
   return createGameState({
@@ -490,6 +492,185 @@ test("admin-selected attack items stay selected and can be used repeatedly witho
   assert.equal(secondUse.selectedAbility, "admin:bomb");
   assert.equal(secondUse.board[4][4], "");
   assert.equal(selected.board[4][4], "");
+});
+
+function roundBoundaryState(overrides = {}) {
+  const base = makePlayingState({ randomEvents: false, ...overrides });
+  return {
+    ...base,
+    settings: { ...base.settings, randomEvents: true },
+    eventItems: [],
+    protections: [],
+    wormholePair: null
+  };
+}
+
+test("wormhole pair spawns on free cells with a shared lifetime in the board-size range", () => {
+  let state = roundBoundaryState();
+  state = playMove(state, 0, 1, () => 1);
+  const values = [0, 0, 0.4, 0.999, 1];
+  let index = 0;
+  state = playMove(state, 9, 8, () => values[index++] ?? 1);
+
+  assert.ok(state.wormholePair);
+  const { orange, blue } = state.wormholePair.endpoints;
+  assert.notDeepEqual(orange, blue);
+  assert.equal(state.board[orange.row][orange.col], "");
+  assert.equal(state.board[blue.row][blue.col], "");
+  assert.ok(state.wormholePair.roundsRemaining >= 3);
+  assert.ok(state.wormholePair.roundsRemaining <= Math.round(Math.sqrt(100)));
+  assert.equal(state.wormholePair.roundsRemaining, 10);
+  assert.ok(Number.isInteger(state.wormholePair.roundsRemaining));
+});
+
+test("wormhole spawning excludes items and shielded cells and never replaces an active pair", () => {
+  let state = roundBoundaryState();
+  state = {
+    ...state,
+    eventItems: [{ id: 91, type: "bomb", row: 0, col: 1 }],
+    protections: [{ row: 0, col: 2, owner: "O", permanent: true }]
+  };
+  state = playMove(state, 0, 1, () => 1);
+  let rng = [0, 0, 0, 0, 1];
+  let cursor = 0;
+  state = playMove(state, 9, 8, () => rng[cursor++] ?? 1);
+  assert.ok(state.wormholePair);
+  assert.equal(state.wormholePair.roundsRemaining, 3);
+  for (const endpoint of Object.values(state.wormholePair.endpoints)) {
+    assert.notDeepEqual(endpoint, { row: 0, col: 2 });
+    assert.notDeepEqual(endpoint, { row: 0, col: 1 });
+  }
+
+  const active = { ...state, wormholePair: { ...state.wormholePair, roundsRemaining: 4 } };
+  const xTurn = playMove(active, 0, 2, () => 1);
+  const oTurn = playMove(xTurn, 9, 7, () => 0);
+  assert.equal(oTurn.wormholePair.id, active.wormholePair.id);
+});
+
+test("both players can continue a chain through the paired portal, but not place on portals or beyond the exit", () => {
+  const base = makePlayingState();
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[2][1] = "X";
+  board[9][9] = "O";
+  board[7][8] = "";
+  const pair = { id: 1, endpoints: { orange: { row: 2, col: 2 }, blue: { row: 7, col: 7 } }, roundsRemaining: 3 };
+  const xState = { ...base, board, currentPlayer: "X", piecesLeft: 1, wormholePair: pair };
+  assert.equal(isLegalMove(xState, 7, 8), true);
+  assert.ok(getLegalMoves(xState).some(({ row, col }) => row === 7 && col === 8));
+  assert.equal(canCompleteTurn(xState, "X", 1), true);
+  assert.equal(canCompleteTurn(xState, "X", 2), false);
+  assert.equal(isLegalMove(xState, 7, 7), false);
+  assert.equal(isLegalMove(xState, 5, 5), false);
+  const action = chooseComputerAction(xState, "easy", { random: () => 0 });
+  assert.deepEqual({ row: action.row, col: action.col }, { row: 7, col: 8 });
+  const localTransition = playMove(xState, action.row, action.col, () => 1);
+  const aiTransition = applyComputerAction(xState, action, () => 1);
+  const serverTransition = processGameCommand(xState, "X", {
+    type: "place", row: action.row, col: action.col
+  }, { random: () => 1 });
+  assert.equal(serverTransition.ok, true);
+  assert.deepEqual(aiTransition, localTransition);
+  assert.deepEqual(serverTransition.state, localTransition);
+
+  const oBoard = board.map((row) => row.slice());
+  oBoard[2][1] = "";
+  oBoard[9][9] = "X";
+  oBoard[7][8] = "O";
+  const oState = { ...xState, board: oBoard, currentPlayer: "O" };
+  assert.equal(isLegalMove(oState, 2, 1), true);
+  assert.equal(canCompleteTurn(oState, "O", 1), true);
+});
+
+test("wormholes do not cause contact destruction, and overlapping debris or shields are rejected", () => {
+  const base = makePlayingState();
+  const board = base.board.map((row) => row.slice());
+  board[1][1] = "X";
+  board[8][8] = "O";
+  const state = {
+    ...base,
+    board,
+    wormholePair: { id: 1, endpoints: { orange: { row: 2, col: 2 }, blue: { row: 7, col: 7 } }, roundsRemaining: 3 }
+  };
+  const moved = playMove(state, 1, 2, () => 1);
+  assert.equal(moved.board[8][8], "O");
+  assert.equal(isValidDebrisTarget(state, 2, 2), false);
+  assert.equal(isValidShieldTarget(state, 7, 7), false);
+  assert.equal(placeEditorObject(state, "X", { kind: "blocked", row: 2, col: 2 }, { admin: true }), state);
+  assert.equal(placeEditorObject(state, "X", { kind: "item", itemType: "bomb", row: 7, col: 7 }, { admin: true }), state);
+});
+
+test("destructive abilities clear the entire pair atomically when they hit either endpoint", () => {
+  const base = makePlayingState();
+  const pair = { id: 4, endpoints: { orange: { row: 2, col: 2 }, blue: { row: 7, col: 7 } }, roundsRemaining: 3 };
+  const bombState = {
+    ...base, wormholePair: pair, inventory: { X: [{ id: 501, type: "bomb" }], O: [] }
+  };
+  const bombed = useBomb(selectAbility(bombState, 501), 501, 2, 2);
+  assert.equal(bombed.wormholePair, null);
+
+  const pointState = {
+    ...base, wormholePair: pair, inventory: { X: [{ id: 502, type: "pointDestroy" }], O: [] }
+  };
+  const destroyed = usePointDestroy(selectAbility(pointState, 502), 502, 7, 7);
+  assert.equal(destroyed.wormholePair, null);
+});
+
+test("wormhole lifetime decreases only at the completed O-to-X round boundary and then expires", () => {
+  let state = {
+    ...makePlayingState(),
+    wormholePair: { id: 8, endpoints: { orange: { row: 4, col: 4 }, blue: { row: 6, col: 6 } }, roundsRemaining: 2 }
+  };
+  state = playMove(state, 0, 1, () => 1);
+  assert.equal(state.wormholePair.roundsRemaining, 2);
+  state = playMove(state, 9, 8, () => 1);
+  assert.equal(state.wormholePair.roundsRemaining, 1);
+  state = playMove(state, 0, 2, () => 1);
+  state = playMove(state, 9, 7, () => 1);
+  assert.equal(state.wormholePair, null);
+  assert.equal(state.roundNumber, 3);
+});
+
+test("a round with fewer than two available cells cannot spawn a partial wormhole pair", () => {
+  const base = roundBoundaryState();
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[0][0] = "X";
+  board[9][9] = "O";
+  board[0][1] = "";
+  board[0][2] = "";
+  board[9][8] = "";
+  let state = { ...base, board };
+  state = playMove(state, 0, 1, () => 1);
+  state = playMove(state, 9, 8, () => 0);
+  assert.equal(state.currentPlayer, "X");
+  assert.equal(state.phase, "playing");
+  assert.equal(state.wormholePair, null);
+});
+
+test("wormhole generation requires both random events and the wormhole setting", () => {
+  assert.equal(DEFAULT_SETTINGS.wormholesEnabled, true);
+  for (const settings of [
+    { randomEvents: false, wormholesEnabled: true },
+    { randomEvents: true, wormholesEnabled: false }
+  ]) {
+    let state = roundBoundaryState();
+    state = { ...state, settings: { ...state.settings, ...settings } };
+    state = playMove(state, 0, 1, () => 0);
+    state = playMove(state, 9, 8, () => 0);
+    assert.equal(state.wormholePair, null);
+  }
+});
+
+test("server player views expose the same detached public wormhole pair to both sides", () => {
+  const base = makePlayingState();
+  const pair = { id: 2, endpoints: { orange: { row: 1, col: 2 }, blue: { row: 7, col: 8 } }, roundsRemaining: 5 };
+  const state = { ...base, wormholePair: pair, nextWormholeId: 3, roundNumber: 9 };
+  const xView = getPlayerView(state, "X");
+  const oView = getPlayerView(state, "O");
+  assert.deepEqual(xView.wormholePair, pair);
+  assert.deepEqual(oView.wormholePair, pair);
+  assert.notEqual(xView.wormholePair, pair);
+  xView.wormholePair.endpoints.orange.row = 99;
+  assert.equal(state.wormholePair.endpoints.orange.row, 1);
 });
 
 test("board editor adds canonical event items and dead cells without changing unrelated game data", () => {

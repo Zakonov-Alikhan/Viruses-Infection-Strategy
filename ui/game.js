@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   incrementSeconds: 0,
   unlimitedTime: false,
   randomEvents: true,
+  wormholesEnabled: true,
   animationsEnabled: true,
   freeStartingPositions: true,
   adminMode: false,
@@ -52,7 +53,15 @@ function neighbors(row, col, board) {
     .filter(({ row: nextRow, col: nextCol }) => inBounds(nextRow, nextCol, board));
 }
 
-function hasEnoughConnectedCells(player, count, board) {
+function wormholeAt(pair, row, col) {
+  if (!pair) return null;
+  const { orange, blue } = pair.endpoints || {};
+  if (orange?.row === row && orange?.col === col) return "orange";
+  if (blue?.row === row && blue?.col === col) return "blue";
+  return null;
+}
+
+function hasEnoughConnectedCells(player, count, board, wormholePair = null) {
   if (count <= 0) return true;
   const visited = new Set();
   const queue = [];
@@ -73,6 +82,24 @@ function hasEnoughConnectedCells(player, count, board) {
     for (const next of neighbors(current.row, current.col, board)) {
       const key = next.row + "," + next.col;
       if (visited.has(key)) continue;
+      const portal = wormholeAt(wormholePair, next.row, next.col);
+      if (portal) {
+        visited.add(key);
+        const paired = wormholePair.endpoints[portal === "orange" ? "blue" : "orange"];
+        for (const exit of neighbors(paired.row, paired.col, board)) {
+          const exitKey = exit.row + "," + exit.col;
+          if (visited.has(exitKey)) continue;
+          const exitValue = board[exit.row][exit.col];
+          if (exitValue !== EMPTY_CELL && exitValue !== player) continue;
+          visited.add(exitKey);
+          if (exitValue === EMPTY_CELL) {
+            reachableEmpty += 1;
+            if (reachableEmpty >= count) return true;
+          }
+          queue.push({ row: exit.row, col: exit.col });
+        }
+        continue;
+      }
       const value = board[next.row][next.col];
       if (value !== EMPTY_CELL && value !== player) continue;
       visited.add(key);
@@ -91,7 +118,54 @@ export function canCompleteTurn(state, player = state?.currentPlayer, count = st
   return Boolean(state?.board?.length)
     && (player === "X" || player === "O")
     && Number.isInteger(count)
-    && hasEnoughConnectedCells(player, count, state.board);
+    && hasEnoughConnectedCells(player, count, state.board, state.wormholePair);
+}
+
+function isWormholeCell(state, row, col) {
+  return Boolean(wormholeAt(state?.wormholePair, row, col));
+}
+
+function randomIndex(random, length) {
+  return Math.min(length - 1, Math.floor(Math.max(0, Math.min(0.999999999999, random())) * length));
+}
+
+function maybeSpawnWormholePair(state, random) {
+  if (!state.settings.randomEvents || !state.settings.wormholesEnabled || state.wormholePair || random() >= EVENT_SPAWN_CHANCE) return state;
+  const occupiedByItems = new Set(state.eventItems.map(({ row, col }) => row + "," + col));
+  const occupiedByProtection = new Set(state.protections.map(({ row, col }) => row + "," + col));
+  const available = [];
+  for (let row = 0; row < state.board.length; row += 1) {
+    for (let col = 0; col < state.board[row].length; col += 1) {
+      const key = row + "," + col;
+      if (state.board[row][col] === EMPTY_CELL && !occupiedByItems.has(key) && !occupiedByProtection.has(key)) {
+        available.push({ row, col });
+      }
+    }
+  }
+  if (available.length < 2) return state;
+
+  const firstIndex = randomIndex(random, available.length);
+  const [orange] = available.splice(firstIndex, 1);
+  const blue = available[randomIndex(random, available.length)];
+  const maxRounds = Math.max(3, Math.round(Math.sqrt(state.settings.width * state.settings.height)));
+  const roundsRemaining = 3 + randomIndex(random, maxRounds - 2);
+  return {
+    ...state,
+    wormholePair: { id: state.nextWormholeId, endpoints: { orange, blue }, roundsRemaining },
+    nextWormholeId: state.nextWormholeId + 1
+  };
+}
+
+function advanceRound(state) {
+  const roundNumber = state.roundNumber + 1;
+  let wormholePair = state.wormholePair;
+  let expired = false;
+  if (wormholePair) {
+    const roundsRemaining = wormholePair.roundsRemaining - 1;
+    expired = roundsRemaining <= 0;
+    wormholePair = expired ? null : { ...wormholePair, roundsRemaining };
+  }
+  return { ...state, roundNumber, wormholePair };
 }
 
 function isProtected(state, row, col) {
@@ -149,7 +223,8 @@ function spawnEventItem(state, random, guaranteed = false) {
   const available = [];
   for (let row = 0; row < state.board.length; row += 1) {
     for (let col = 0; col < state.board[row].length; col += 1) {
-      if (state.board[row][col] === EMPTY_CELL && !occupiedByEvent.has(row + "," + col)) {
+      if (state.board[row][col] === EMPTY_CELL && !occupiedByEvent.has(row + "," + col)
+        && !isWormholeCell(state, row, col)) {
         available.push({ row, col });
       }
     }
@@ -201,7 +276,7 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
     || !Number.isInteger(object.row) || !Number.isInteger(object.col)
     || !inBounds(object.row, object.col, state.board)) return state;
 
-  if (state.board[object.row][object.col] !== EMPTY_CELL) return state;
+  if (state.board[object.row][object.col] !== EMPTY_CELL || isWormholeCell(state, object.row, object.col)) return state;
   const itemAtTarget = state.eventItems.some((item) => item.row === object.row && item.col === object.col);
   const protectionAtTarget = state.protections.some((protection) => protection.row === object.row && protection.col === object.col);
 
@@ -359,6 +434,9 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
     lastDestroyed: [],
     eventItems: [],
     nextEventItemId: 1,
+    wormholePair: null,
+    nextWormholeId: 1,
+    roundNumber: 1,
     inventory: { X: [], O: [] },
     selectedAbility: null,
     abilityTargets: [],
@@ -383,10 +461,21 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
 }
 
 export function isLegalMove(state, row, col) {
-  if (state.phase !== "playing" || !inBounds(row, col, state.board) || state.board[row][col] !== EMPTY_CELL) return false;
+  if (state.phase !== "playing" || !inBounds(row, col, state.board) || state.board[row][col] !== EMPTY_CELL
+    || isWormholeCell(state, row, col)) return false;
   const selected = getSelectedAbility(state);
   if (selected) return selected.type === "freePlacement";
-  return neighbors(row, col, state.board).some(({ row: nextRow, col: nextCol }) => state.board[nextRow][nextCol] === state.currentPlayer);
+  if (neighbors(row, col, state.board).some(({ row: nextRow, col: nextCol }) => state.board[nextRow][nextCol] === state.currentPlayer)) return true;
+  const pair = state.wormholePair;
+  if (!pair) return false;
+  return Object.entries(pair.endpoints).some(([color, endpoint]) => {
+    const paired = pair.endpoints[color === "orange" ? "blue" : "orange"];
+    const connectedToEntry = neighbors(endpoint.row, endpoint.col, state.board)
+      .some(({ row: ownRow, col: ownCol }) => state.board[ownRow][ownCol] === state.currentPlayer);
+    const adjacentToExit = neighbors(paired.row, paired.col, state.board)
+      .some(({ row: targetRow, col: targetCol }) => targetRow === row && targetCol === col);
+    return connectedToEntry && adjacentToExit;
+  });
 }
 
 export function getLegalMoves(state) {
@@ -492,6 +581,15 @@ function removeProtectionsAt(state, coordinates) {
   return state.protections.filter((protection) => !cleared.has(protection.row + "," + protection.col));
 }
 
+function clearWormholePairAt(state, coordinates) {
+  const cleared = new Set(coordinates.map(({ row, col }) => row + "," + col));
+  const pair = state.wormholePair;
+  if (!pair || !Object.values(pair.endpoints).some(({ row, col }) => cleared.has(row + "," + col))) {
+    return pair ?? null;
+  }
+  return null;
+}
+
 function startTurn(state, player, piecesPerTurn) {
   return {
     ...state,
@@ -525,13 +623,14 @@ function useAreaAbility(state, itemId, row, col, type) {
     inventory,
     eventItems: clearEventItemsAt(state, cleared),
     protections: removeProtectionsAt(state, cleared),
+    wormholePair: clearWormholePairAt(state, cleared),
     selectedAbility: item.adminGranted ? itemId : null,
     abilityTargets: [],
     lastDestroyed: cleared,
     message: message(isBomb ? "message.bomb" : "message.antiBomb")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.wormholePair)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -566,13 +665,14 @@ export function usePointDestroy(state, itemId, row, col) {
     inventory,
     eventItems: clearEventItemsAt(state, cleared),
     protections: removeProtectionsAt(state, cleared),
+    wormholePair: clearWormholePairAt(state, cleared),
     selectedAbility: item.adminGranted ? itemId : null,
     abilityTargets: [],
     lastDestroyed: cleared,
     message: message("message.pointDestroy")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.wormholePair)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -583,6 +683,7 @@ export function isValidDebrisTarget(state, row, col) {
   return state.phase === "playing"
     && inBounds(row, col, state.board)
     && state.board[row][col] === EMPTY_CELL
+    && !isWormholeCell(state, row, col)
     && !state.abilityTargets.some((target) => target.row === row && target.col === col);
 }
 
@@ -590,6 +691,7 @@ export function isValidShieldTarget(state, row, col) {
   return state.phase === "playing"
     && inBounds(row, col, state.board)
     && (state.board[row][col] === "X" || state.board[row][col] === "O" || state.board[row][col] === EMPTY_CELL)
+    && !isWormholeCell(state, row, col)
     && !isProtected(state, row, col)
     && !state.abilityTargets.some((target) => target.row === row && target.col === col);
 }
@@ -632,7 +734,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
       lastDestroyed: abilityTargets,
       message: message("message.debris")
     };
-    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
+    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.wormholePair)) {
       const winner = state.currentPlayer === "X" ? "O" : "X";
       return finish(next, winner, message("message.cannotFinishDebris", { player: state.currentPlayer }));
     }
@@ -753,7 +855,7 @@ export function playMove(state, row, col, random = Math.random) {
     next.message = appendMessage(next.message, message("message.freePlacementUsed"));
   }
 
-  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board)) {
+  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board, next.wormholePair)) {
     const winner = player === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinish", { player, count: state.settings.piecesPerTurn }));
   }
@@ -772,7 +874,7 @@ export function playMove(state, row, col, random = Math.random) {
       };
       next = withPendingExtraTurnQueues(next, pendingExtraTurns);
       next = startTurn(next, player, state.settings.piecesPerTurn);
-      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board)) {
+      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board, next.wormholePair)) {
         const winner = player === "X" ? "O" : "X";
         return finish(next, winner, message("message.extraCannotFinish", { player }));
       }
@@ -781,9 +883,13 @@ export function playMove(state, row, col, random = Math.random) {
 
     const nextPlayer = player === "X" ? "O" : "X";
     next = startTurn(next, nextPlayer, state.settings.piecesPerTurn);
-    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board)) {
+    const completedRound = player === "O";
+    const pairExpired = completedRound && Boolean(next.wormholePair && next.wormholePair.roundsRemaining <= 1);
+    if (completedRound) next = advanceRound(next);
+    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board, next.wormholePair)) {
       return finish(next, player, message("message.opponentCannotFinish", { count: state.settings.piecesPerTurn }));
     }
+    if (completedRound && !pairExpired) next = maybeSpawnWormholePair(next, random);
     return maybeSpawnEventItem(next, random);
   }
 

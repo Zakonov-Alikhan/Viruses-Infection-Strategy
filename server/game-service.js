@@ -30,6 +30,7 @@ const PUBLIC_SETTING_FIELDS = Object.freeze([
   "incrementSeconds",
   "unlimitedTime",
   "randomEvents",
+  "wormholesEnabled",
   "animationsEnabled",
   "freeStartingPositions",
   "disabledItems"
@@ -192,6 +193,14 @@ export function getPlayerView(state, side) {
     },
     lastDestroyed: (state.lastDestroyed || []).map(({ row, col }) => ({ row, col })),
     eventItems: (state.eventItems || []).map(({ id, type, row, col }) => ({ id, type, row, col })),
+    wormholePair: state.wormholePair ? {
+      id: state.wormholePair.id,
+      endpoints: {
+        orange: { ...state.wormholePair.endpoints.orange },
+        blue: { ...state.wormholePair.endpoints.blue }
+      },
+      roundsRemaining: state.wormholePair.roundsRemaining
+    } : null,
     inventory: copyPublicInventory(state.inventory, new Set(settings.disabledItems || [])),
     selectedAbility: maySeePrivateAction ? state.selectedAbility ?? null : null,
     abilityTargets: maySeePrivateAction

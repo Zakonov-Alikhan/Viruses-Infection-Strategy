@@ -346,13 +346,14 @@ test("player view is allow-listed and strips server-only fields and role metadat
   assert.deepEqual(Object.keys(view).sort(), [
     "abilityTargets", "board", "currentPlayer", "eventItems",
     "finishReason", "inventory", "lastDestroyed", "message", "phase", "piecesLeft",
-    "protections", "selectedAbility", "settings", "setupPlayer", "startChoices", "winner"
+    "protections", "selectedAbility", "settings", "setupPlayer", "startChoices", "winner", "wormholePair"
   ].sort());
   assert.equal("serverSecret" in view, false);
   assert.equal("playerRoles" in view, false);
   assert.equal("pendingExtraTurn" in view, false);
   assert.equal("nextEventItemId" in view, false);
   assert.equal("adminMode" in view.settings, false);
+  assert.equal(view.settings.wormholesEnabled, true);
   assert.deepEqual(view.inventory.X, [{ id: "item-1", type: "bomb" }]);
   view.message.params.nested.private = false;
   assert.equal(state.message.params.nested.private, true);

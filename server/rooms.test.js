@@ -142,6 +142,7 @@ test("applies validated per-room settings to game state and clock, and rejects i
     incrementSeconds: 4,
     unlimitedTime: false,
     randomEvents: false,
+    wormholesEnabled: false,
     animationsEnabled: false,
     freeStartingPositions: false,
     disabledItems: ["bomb", "shield"]
@@ -161,9 +162,11 @@ test("applies validated per-room settings to game state and clock, and rejects i
   const invalidPieces = manager.createRoom({ ...customSettings, piecesPerTurn: 13 });
   const unknownSetting = manager.createRoom({ ...customSettings, adminMode: true });
   const unknownItem = manager.createRoom({ ...customSettings, disabledItems: ["not-an-item"] });
+  const invalidWormholeSetting = manager.createRoom({ ...customSettings, wormholesEnabled: "false" });
   assert.deepEqual(invalidPieces.error, { code: "invalid-settings" });
   assert.deepEqual(unknownSetting.error, { code: "invalid-settings" });
   assert.deepEqual(unknownItem.error, { code: "invalid-settings" });
+  assert.deepEqual(invalidWormholeSetting.error, { code: "invalid-settings" });
   assert.equal(manager.roomCount, roomCount);
 });
 
@@ -177,6 +180,7 @@ test("unlimited-time rooms accept absent time values and keep finite settings wi
     incrementSeconds: null,
     unlimitedTime: true,
     randomEvents: false,
+    wormholesEnabled: false,
     animationsEnabled: true,
     freeStartingPositions: false
   });
@@ -223,6 +227,28 @@ test("routes commands with the assigned side and sends per-player allow-listed v
   assert.equal(wrongSide.error.code, "not-your-turn");
   assert.equal(result.version, 1);
   assert.equal(wrongSide.version, 1);
+});
+
+test("confirmed room snapshots synchronize the public wormhole pair to both players", async () => {
+  const manager = makeManager();
+  const room = manager.createRoom();
+  manager.joinRoom(room.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(room.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(room.roomCode, "O", (message) => received.O.push(message));
+  await startGame(manager, room.roomCode, received);
+  const pair = { id: 7, endpoints: { orange: { row: 2, col: 2 }, blue: { row: 7, col: 7 } }, roundsRemaining: 4 };
+  manager.rooms.get(room.roomCode).state.wormholePair = pair;
+
+  const move = getLegalMoves(manager.rooms.get(room.roomCode).state)[0];
+  const result = await manager.submitCommand(room.roomCode, "X", { type: "place", ...move });
+  assert.equal(result.ok, true);
+  const xState = received.X.filter(({ type }) => type === "state").at(-1).state;
+  const oState = received.O.filter(({ type }) => type === "state").at(-1).state;
+  assert.deepEqual(xState.wormholePair, pair);
+  assert.deepEqual(oState.wormholePair, pair);
+  assert.equal(received.X.filter(({ type }) => type === "state").at(-1).version,
+    received.O.filter(({ type }) => type === "state").at(-1).version);
 });
 
 test("room broadcasts one server-resolved random artifact reward to both clients", async () => {

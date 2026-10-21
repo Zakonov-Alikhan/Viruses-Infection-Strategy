@@ -1,5 +1,5 @@
-import ruLocale from "./locale-ru.js?v=random-artifact1";
-import enLocale from "./locale-en.js?v=random-artifact1";
+import ruLocale from "./locale-ru.js?v=wormhole-settings1";
+import enLocale from "./locale-en.js?v=wormhole-settings1";
 
 const dictionaries = Object.freeze({ ru: ruLocale, en: enLocale });
 const supportedLanguages = Object.keys(dictionaries);

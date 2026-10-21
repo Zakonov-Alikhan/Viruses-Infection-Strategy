@@ -225,6 +225,7 @@ test("forwards validated room settings through WebSocket creation to both player
       incrementSeconds: 6,
       unlimitedTime: false,
       randomEvents: false,
+      wormholesEnabled: false,
       animationsEnabled: false,
       freeStartingPositions: false,
       disabledItems: ["bomb", "shield"]
@@ -240,6 +241,7 @@ test("forwards validated room settings through WebSocket creation to both player
     incrementSeconds: 6,
     unlimitedTime: false,
     randomEvents: false,
+    wormholesEnabled: false,
     animationsEnabled: false,
     freeStartingPositions: false,
     disabledItems: ["bomb", "shield"]

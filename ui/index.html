@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10191c">
   <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
   <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=restart-consensus1">
+  <link rel="stylesheet" href="/ui/style.css?v=wormhole-settings1">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -83,6 +83,7 @@
             </div>
             <label class="toggle-row" for="online-unlimited-time"><span class="toggle-copy"><strong data-i18n="settings.unlimited">Без ограничения по времени</strong></span><input class="switch-input" id="online-unlimited-time" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
             <label class="toggle-row" for="online-random-events"><span class="toggle-copy"><strong data-i18n="settings.random">Случайные события на карте</strong></span><input class="switch-input" id="online-random-events" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
+            <label class="toggle-row" for="online-wormholes"><span class="toggle-copy"><strong data-i18n="settings.wormholes">Червоточины</strong><small data-i18n="settings.wormholesHelp">Пары порталов появляются, если включены случайные события</small></span><input class="switch-input" id="online-wormholes" type="checkbox" role="switch" checked><span class="switch-track" aria-hidden="true"><span></span></span></label>
             <label class="toggle-row" for="online-free-start"><span class="toggle-copy"><strong data-i18n="settings.freeStart">Свободное расположение в начале партии</strong></span><input class="switch-input" id="online-free-start" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
             <fieldset class="item-options"><legend data-i18n="settings.itemsTitle">Предметы в партии</legend><p class="settings-summary" data-i18n="settings.itemsHelp">Отключённые предметы не появляются и не могут быть использованы.</p><div id="online-item-options" class="item-options-grid"></div></fieldset>
           </div>
@@ -308,6 +309,11 @@
           <input id="random-events-toggle" class="switch-input" type="checkbox" role="switch" checked>
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>
+        <label class="toggle-row" for="wormholes-toggle">
+          <span class="toggle-copy"><strong data-i18n="settings.wormholes">Червоточины</strong><small data-i18n="settings.wormholesHelp">Пары порталов появляются, если включены случайные события</small></span>
+          <input id="wormholes-toggle" class="switch-input" type="checkbox" role="switch" checked>
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
         <fieldset class="item-options"><legend data-i18n="settings.itemsTitle">Предметы в партии</legend><p class="settings-summary" data-i18n="settings.itemsHelp">Отключённые предметы не появляются и не могут быть использованы.</p><div id="item-options" class="item-options-grid"></div></fieldset>
         <label class="toggle-row" for="animations-toggle">
           <span class="toggle-copy"><strong data-i18n="settings.animations">Игровые анимации</strong><small data-i18n="settings.animationsHelp">Лёгкий вирусный эффект при постановке фигур; отключите, чтобы снизить нагрузку</small></span>
@@ -358,6 +364,7 @@
         <section id="rules-items" class="rules-section">
           <p class="rules-kicker" data-i18n="rules.section3">03 · Предметы и способности</p><h3 data-i18n="rules.events">Случайные события</h3>
           <p class="rules-intro" data-i18n="rules.pickup">Если случайные события включены, предметы появляются на пустых клетках. Поставьте на такую клетку фигуру, чтобы подобрать предмет. В инвентаре помещается до трёх предметов; новый заменяет самый старый.</p>
+          <p class="rules-intro" data-i18n="rules.wormhole">Если включены случайные события и червоточины, может появиться одна пара порталов. Поставьте фигуру рядом с одним порталом, чтобы продолжить цепочку рядом с парным. Порталы нейтральны, не считаются клетками и исчезают после указанного числа полных раундов.</p>
           <div class="rules-item-grid">
             <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/bomb.svg" alt=""><div><h4 data-i18n="rules.item.bomb">Бомба</h4><p data-i18n="rules.desc.bomb">В свой ход выберите верхний левый угол области 2×2. Все клетки области освобождаются и снова доступны.</p></div><img class="rules-example-image" src="/ui/assets/rules/bomb.svg" alt="Схема: красная область 2 на 2 очищается бомбой" data-i18n-alt="rules.alt.bomb"></article>
             <article class="rules-item-card"><img class="rules-item-icon" src="/ui/assets/items/point-destroy.svg" alt=""><div><h4 data-i18n="rules.item.pointDestroy">Точечное уничтожение</h4><p data-i18n="rules.desc.pointDestroy">В свой ход выберите одну клетку: фигура, предмет или обломок на ней будут уничтожены, а клетка освободится. Эффект сопровождается короткой вспышкой и тряской.</p></div><img class="rules-example-image" src="/ui/assets/rules/point-destroy.svg" alt="Схема: белая вспышка точечно очищает одну клетку" data-i18n-alt="rules.alt.pointDestroy"></article>
@@ -439,6 +446,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=random-artifact1"></script>
+  <script type="module" src="/ui/script.js?v=wormhole-settings1"></script>
 </body>
 </html>

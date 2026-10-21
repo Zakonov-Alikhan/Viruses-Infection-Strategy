@@ -81,6 +81,15 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 .cell.event-item-debris { border-color: rgba(215, 197, 162, .78); }
 .cell.event-item-shield, .cell.event-item-gangstaShield { border-color: rgba(125, 240, 206, .75); }
 .cell.event-item::after { position: absolute; z-index: 3; inset: -72%; background: linear-gradient(180deg, transparent 44%, rgba(255,255,255,.2) 50%, transparent 56%); content: ""; pointer-events: none; transform: rotate(60deg) translate(-32%, 52%); animation: item-sheen 3.4s ease-in-out infinite; }
+.cell.wormhole-endpoint { overflow: hidden; border-color: currentColor; background: #111d22; }
+.cell.wormhole-orange { color: #ff9c42; box-shadow: inset 0 0 15px rgba(255, 119, 40, .24), 0 0 10px rgba(255, 119, 40, .34); }
+.cell.wormhole-blue { color: #46c9ff; box-shadow: inset 0 0 15px rgba(52, 177, 255, .23), 0 0 10px rgba(52, 177, 255, .32); }
+.wormhole-vortex { position: absolute; inset: 17%; border: 2px solid currentColor; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.88) 0 5%, currentColor 9%, transparent 24%); box-shadow: 0 0 8px currentColor, inset 0 0 8px currentColor; animation: wormhole-pulse 3.2s ease-in-out infinite; pointer-events: none; }
+.wormhole-rounds { position: absolute; z-index: 2; right: 4%; bottom: 2%; min-width: 1.15em; padding: 0 .2em; border: 1px solid currentColor; border-radius: 999px; background: rgba(9, 17, 21, .92); color: #f2fbff; font-size: clamp(8px, 28%, 12px); font-weight: 800; line-height: 1.35; text-align: center; text-shadow: 0 0 5px currentColor; }
+.wormhole-entering .wormhole-vortex { animation: wormhole-appear .7s cubic-bezier(.18,.75,.3,1) var(--wormhole-animation-delay, 0ms) both, wormhole-pulse 3.2s ease-in-out .7s infinite; }
+[data-game-animations="off"] .wormhole-vortex { animation: none; }
+@keyframes wormhole-pulse { 50% { transform: scale(.88) rotate(18deg); filter: brightness(1.14); } }
+@keyframes wormhole-appear { from { transform: scale(.12); opacity: .15; } to { transform: scale(1); opacity: 1; } }
 .cell.event-item > img { position: relative; z-index: 2; display: block; width: 68%; height: 68%; object-fit: contain; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); animation: item-shimmer 6.2s ease-in-out infinite; }
 .cell.event-item-entering::before { position: absolute; z-index: 1; inset: 0; background: radial-gradient(circle, rgba(255,255,255,.98) 0, rgba(255,255,255,.78) 34%, rgba(255,255,255,.08) 72%, transparent 100%); clip-path: circle(0 at 50% 50%); content: ""; pointer-events: none; animation: item-white-flash .34s cubic-bezier(.2,.8,.25,1) var(--item-animation-delay, 0ms) both; }
 .cell.event-item-entering > img { opacity: 0; animation: item-reveal .28s ease-out calc(var(--item-animation-delay, 0ms) + 110ms) both; }

@@ -27,9 +27,9 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=random-artifact1";
+} from "./game.js?v=wormhole-settings1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=random-artifact1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=wormhole-settings1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -66,6 +66,7 @@ const onlineClockMinutesInput = document.querySelector("#online-clock-minutes");
 const onlineClockIncrementInput = document.querySelector("#online-clock-increment");
 const onlineUnlimitedTimeToggle = document.querySelector("#online-unlimited-time");
 const onlineRandomEventsToggle = document.querySelector("#online-random-events");
+const onlineWormholesToggle = document.querySelector("#online-wormholes");
 const onlineFreeStartToggle = document.querySelector("#online-free-start");
 const onlineItemOptions = document.querySelector("#online-item-options");
 const onlineJoinForm = document.querySelector("#online-join-form");
@@ -139,6 +140,7 @@ const clockMinutesInput = document.querySelector("#clock-minutes-input");
 const clockIncrementInput = document.querySelector("#clock-increment-input");
 const unlimitedTimeToggle = document.querySelector("#unlimited-time-toggle");
 const randomEventsToggle = document.querySelector("#random-events-toggle");
+const wormholesToggle = document.querySelector("#wormholes-toggle");
 const adminModeToggle = document.querySelector("#admin-mode-toggle");
 const itemOptions = document.querySelector("#item-options");
 const adminTools = document.querySelector("#admin-tools");
@@ -238,6 +240,7 @@ let settings = { ...DEFAULT_SETTINGS };
 let state;
 let newlyPlacedCells = new Map();
 let newlySpawnedItems = new Map();
+let newlySpawnedWormholes = new Map();
 let activeAreaEffect = null;
 let bombAimCell = null;
 let remoteAim = null;
@@ -1274,6 +1277,7 @@ function syncOnlineRoomSettings() {
   onlineClockIncrementInput.value = String(settings.incrementSeconds);
   onlineUnlimitedTimeToggle.checked = settings.unlimitedTime;
   onlineRandomEventsToggle.checked = settings.randomEvents;
+  onlineWormholesToggle.checked = settings.wormholesEnabled;
   onlineFreeStartToggle.checked = settings.freeStartingPositions;
   renderItemOptions(onlineItemOptions, settings.disabledItems);
   onlineClockMinutesInput.disabled = settings.unlimitedTime;
@@ -1313,6 +1317,7 @@ function collectOnlineRoomSettings() {
     incrementSeconds,
     unlimitedTime,
     randomEvents: onlineRandomEventsToggle.checked,
+    wormholesEnabled: onlineWormholesToggle.checked,
     animationsEnabled: settings.animationsEnabled,
     freeStartingPositions: onlineFreeStartToggle.checked,
     disabledItems: disabledItemsFrom(onlineItemOptions)
@@ -1367,6 +1372,7 @@ function enterOnlineGame(message) {
     state = message.state;
     newlyPlacedCells.clear();
     newlySpawnedItems.clear();
+    newlySpawnedWormholes.clear();
     activeAreaEffect = null;
     remoteAim = null;
     clockRemaining = { X: 0, O: 0 };
@@ -1446,7 +1452,8 @@ function handleMultiplayerEvent(event) {
           ? t("clock.unlimited")
           : t("clock.summary", { minutes: offeredSettings.clockMinutes ?? "?", seconds: offeredSettings.incrementSeconds ?? "?" }),
         disabled: disabledNames.length ? disabledNames.join(", ") : t("settings.itemsNoneDisabled"),
-        events: t(offeredSettings.randomEvents ? "settings.randomEnabled" : "settings.randomDisabled")
+        events: t(offeredSettings.randomEvents ? "settings.randomEnabled" : "settings.randomDisabled"),
+        wormholes: t(offeredSettings.wormholesEnabled ? "settings.wormholesEnabled" : "settings.randomDisabled")
       });
     restartProposalModal.showModal();
     restartProposalAcceptButton.focus();
@@ -1507,6 +1514,7 @@ function handleMultiplayerEvent(event) {
       activeAreaEffect = null;
       newlyPlacedCells.clear();
       newlySpawnedItems.clear();
+      newlySpawnedWormholes.clear();
       remoteAim = null;
       lastSentAim = null;
     }
@@ -1784,6 +1792,7 @@ function setupGame() {
   if (resultModal.open) resultModal.close();
   newlyPlacedCells.clear();
   newlySpawnedItems.clear();
+  newlySpawnedWormholes.clear();
   activeAreaEffect = null;
   state = createGameState(settings);
   clockRemaining = {
@@ -1825,6 +1834,9 @@ function updateState(nextState, { serverUpdate = false } = {}) {
     const previousItems = new Set(previousState.eventItems.map((item) => item.id));
     for (const item of nextState.eventItems) {
       if (!previousItems.has(item.id)) newlySpawnedItems.set(item.id, animationStartedAt);
+    }
+    if (nextState.wormholePair && nextState.wormholePair.id !== previousState.wormholePair?.id) {
+      newlySpawnedWormholes.set(nextState.wormholePair.id, animationStartedAt);
     }
   }
   let bombStarted = false;
@@ -1939,6 +1951,9 @@ function render() {
   for (const [id, startedAt] of newlySpawnedItems) {
     if (animationNow - startedAt >= 680) newlySpawnedItems.delete(id);
   }
+  for (const [id, startedAt] of newlySpawnedWormholes) {
+    if (animationNow - startedAt >= 760) newlySpawnedWormholes.delete(id);
+  }
   if (activeAreaEffect && animationNow - activeAreaEffect.startedAt >= 520) activeAreaEffect = null;
   boardElement.innerHTML = "";
   const destroyedCells = new Set(state.lastDestroyed.map(({ row, col }) => row + "," + col));
@@ -1955,6 +1970,12 @@ function render() {
     for (let col = 0; col < state.settings.width; col += 1) {
       const value = state.board[row][col];
       const eventItem = state.eventItems.find((item) => item.row === row && item.col === col);
+      const endpoints = state.wormholePair?.endpoints;
+      const wormholeEndpoint = endpoints?.orange?.row === row && endpoints.orange.col === col
+        ? ["orange", endpoints.orange]
+        : endpoints?.blue?.row === row && endpoints.blue.col === col
+          ? ["blue", endpoints.blue]
+          : null;
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className = "cell";
@@ -1963,7 +1984,30 @@ function render() {
       cell.setAttribute("role", "gridcell");
       const contents = value === EMPTY_CELL ? t("game.empty") : value === BLOCKED_CELL ? t("game.blocked") : t("game.player", { player: value });
       const itemLabel = eventItem ? t("game.item", { item: t(EVENT_ITEM_DEFINITIONS[eventItem.type].nameKey) }) : "";
-      cell.setAttribute("aria-label", t("game.cell", { row: row + 1, col: columnLabel(col), contents, item: itemLabel }));
+      const wormholeLabel = wormholeEndpoint
+        ? t("wormhole.cell", { color: t(`wormhole.${wormholeEndpoint[0]}`), rounds: state.wormholePair.roundsRemaining })
+        : "";
+      cell.setAttribute("aria-label", t("game.cell", {
+        row: row + 1, col: columnLabel(col), contents, item: [itemLabel, wormholeLabel].filter(Boolean).join(". ")
+      }));
+
+      if (wormholeEndpoint) {
+        const [color] = wormholeEndpoint;
+        cell.classList.add("wormhole-endpoint", `wormhole-${color}`);
+        const startedAt = newlySpawnedWormholes.get(state.wormholePair.id);
+        if (startedAt !== undefined && state.settings.animationsEnabled) {
+          cell.classList.add("wormhole-entering");
+          cell.style.setProperty("--wormhole-animation-delay", `-${animationNow - startedAt}ms`);
+        }
+        const vortex = document.createElement("span");
+        vortex.className = "wormhole-vortex";
+        vortex.setAttribute("aria-hidden", "true");
+        const rounds = document.createElement("span");
+        rounds.className = "wormhole-rounds";
+        rounds.textContent = String(state.wormholePair.roundsRemaining);
+        rounds.setAttribute("aria-hidden", "true");
+        cell.append(vortex, rounds);
+      }
 
       if (eventItem) {
         const itemIcon = document.createElement("img");
@@ -2000,7 +2044,7 @@ function render() {
 
       if (boardEditorActive && state.phase === "playing" && !isComputerControlledTurn()
         && (!onlineMode || (onlineConnected && onlineAdminAuthenticated && !onlineCommandPending))) {
-        const editableCell = value === EMPTY_CELL;
+        const editableCell = value === EMPTY_CELL && !wormholeEndpoint;
         cell.disabled = !editableCell;
         cell.classList.toggle("editor-target", editableCell && Boolean(boardEditorTool));
         if (editableCell) cell.addEventListener("click", () => placeBoardEditorObject(row, col));
@@ -2361,6 +2405,7 @@ function openSettings() {
   clockIncrementInput.value = String(settings.incrementSeconds);
   unlimitedTimeToggle.checked = settings.unlimitedTime;
   randomEventsToggle.checked = settings.randomEvents;
+  wormholesToggle.checked = settings.wormholesEnabled;
   animationsToggle.checked = settings.animationsEnabled;
   adminModeToggle.checked = settings.adminMode;
   freeStartToggle.checked = settings.freeStartingPositions;
@@ -2435,6 +2480,7 @@ function applySettings(event) {
     incrementSeconds,
     unlimitedTime,
     randomEvents,
+    wormholesEnabled: wormholesToggle.checked,
     animationsEnabled,
     freeStartingPositions: freeStartToggle.checked,
     ...(onlineMode ? {} : { adminMode }),

@@ -32,7 +32,7 @@ function normalizeCode(code) {
 
 const ROOM_SETTING_FIELDS = new Set([
   "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds",
-  "unlimitedTime", "randomEvents", "animationsEnabled", "freeStartingPositions", "disabledItems"
+  "unlimitedTime", "randomEvents", "wormholesEnabled", "animationsEnabled", "freeStartingPositions", "disabledItems"
 ]);
 
 function normalizeRoomSettings(input, defaults) {
@@ -58,7 +58,7 @@ function normalizeRoomSettings(input, defaults) {
     || settings.piecesPerTurn > Math.floor(settings.width * settings.height / 10)
     || !Number.isInteger(settings.clockMinutes) || settings.clockMinutes < 1 || settings.clockMinutes > 60
     || !Number.isInteger(settings.incrementSeconds) || settings.incrementSeconds < 0 || settings.incrementSeconds > 60
-    || !["unlimitedTime", "randomEvents", "animationsEnabled", "freeStartingPositions"]
+    || !["unlimitedTime", "randomEvents", "wormholesEnabled", "animationsEnabled", "freeStartingPositions"]
       .every((key) => typeof settings[key] === "boolean")) return null;
   return settings;
 }
