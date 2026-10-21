@@ -35,6 +35,8 @@ import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
+import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
+import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import {
   appendHistoryEntry,
   createHistoryEntry,
@@ -130,6 +132,9 @@ const resultRoast = document.querySelector("#result-roast");
 const resultNewGameButton = document.querySelector("#result-new-game");
 const resultRematchButton = document.querySelector("#result-rematch");
 const resultRematchStatus = document.querySelector("#result-rematch-status");
+const resultExportPngButton = document.querySelector("#result-export-png");
+const resultExportJsonButton = document.querySelector("#result-export-json");
+const resultExportStatus = document.querySelector("#result-export-status");
 const restartConfirmModal = document.querySelector("#restart-confirm-modal");
 const restartConfirmButton = document.querySelector("#restart-confirm");
 const restartCancelButton = document.querySelector("#restart-cancel");
@@ -223,8 +228,12 @@ function renderItemOptions(container, disabledItems = []) {
   container.replaceChildren();
   for (const type of EVENT_ITEMS) {
     const definition = EVENT_ITEM_DEFINITIONS[type];
+    const category = getItemCategory(type);
+    const categoryKey = getItemCategoryLocalizationKey(type);
     const label = document.createElement("label");
     label.className = "item-option";
+    label.dataset.itemCategory = category;
+    label.title = t(categoryKey);
     const input = document.createElement("input");
     input.type = "checkbox";
     input.dataset.itemType = type;
@@ -234,9 +243,30 @@ function renderItemOptions(container, disabledItems = []) {
     icon.alt = "";
     icon.setAttribute("aria-hidden", "true");
     const name = document.createElement("span");
+    name.className = "item-option-name";
     name.textContent = t(definition.nameKey);
-    label.append(input, icon, name);
+    const categoryBadge = document.createElement("span");
+    categoryBadge.className = "item-category-chip item-option-category";
+    categoryBadge.textContent = t(categoryKey);
+    label.append(input, icon, name, categoryBadge);
     container.append(label);
+  }
+}
+
+function decorateRuleItemCards() {
+  for (const card of document.querySelectorAll(".rules-item-card[data-item-type]")) {
+    const categoryKey = getItemCategoryLocalizationKey(card.dataset.itemType);
+    const category = getItemCategory(card.dataset.itemType);
+    const heading = card.querySelector("h4");
+    if (!category || !heading) continue;
+    card.dataset.itemCategory = category;
+    let badge = card.querySelector(".item-category-chip");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "item-category-chip rules-item-category";
+      heading.before(badge);
+    }
+    badge.textContent = t(categoryKey);
   }
 }
 
@@ -318,6 +348,40 @@ let gameSessionId = 0;
 let computerActionToken = 0;
 let computerActionTimer = null;
 const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+let screenTransitionTimer = null;
+let screenTransitionId = 0;
+const SCREEN_TRANSITION_MS = 170;
+
+function transitionScreens(showGame) {
+  const target = showGame ? gameScreen : mainMenuScreen;
+  const outgoing = showGame ? mainMenuScreen : gameScreen;
+  const shouldAnimate = !reduceMotionQuery.matches && !outgoing.hidden;
+  if (screenTransitionTimer !== null) window.clearTimeout(screenTransitionTimer);
+  screenTransitionTimer = null;
+  const transitionId = ++screenTransitionId;
+  for (const screen of [target, outgoing]) {
+    screen.classList.remove("screen-entering", "screen-exiting");
+  }
+  target.hidden = false;
+  target.inert = false;
+  if (!shouldAnimate) {
+    outgoing.hidden = true;
+    outgoing.inert = false;
+    return;
+  }
+  outgoing.inert = true;
+  target.classList.add("screen-entering");
+  if (!outgoing.hidden) outgoing.classList.add("screen-exiting");
+  screenTransitionTimer = window.setTimeout(() => {
+    if (transitionId !== screenTransitionId) return;
+    outgoing.hidden = true;
+    outgoing.inert = false;
+    target.classList.remove("screen-entering");
+    outgoing.classList.remove("screen-exiting");
+    screenTransitionTimer = null;
+  }, SCREEN_TRANSITION_MS);
+}
+
 document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
 
 function invalidateComputerAction() {
@@ -501,12 +565,16 @@ function renderInventories(displayState = state) {
       slot.dataset.itemId = item ? String(item.id) : "";
       if (!item) {
         slot.disabled = true;
+        delete slot.dataset.itemCategory;
         slot.setAttribute("aria-label", t("inventory.empty"));
         slot.removeAttribute("title");
         return;
       }
 
       const definition = EVENT_ITEM_DEFINITIONS[item.type];
+      const category = getItemCategory(item.type);
+      const categoryName = t(getItemCategoryLocalizationKey(item.type));
+      slot.dataset.itemCategory = category;
       const icon = document.createElement("img");
       icon.src = definition.icon;
       icon.alt = "";
@@ -515,7 +583,7 @@ function renderInventories(displayState = state) {
       slot.disabled = historyViewId !== null || state.phase !== "playing" || state.currentPlayer !== player
         || item.type === "extraTurn" || !canHumanAct();
       const itemName = t(definition.nameKey);
-      slot.setAttribute("aria-label", t(item.type === "extraTurn" ? "inventory.auto" : "inventory.choose", { name: itemName }));
+      slot.setAttribute("aria-label", `${t(item.type === "extraTurn" ? "inventory.auto" : "inventory.choose", { name: itemName })}. ${categoryName}.`);
       slot.title = itemName + (item.type === "extraTurn"
         ? t("inventory.autoHelp")
         : item.type === "freePlacement" ? t("inventory.freeHelp") : t("inventory.useHelp"));
@@ -538,14 +606,17 @@ function renderInventories(displayState = state) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "admin-item-button" + (state.selectedAbility === itemId ? " is-selected" : "");
+      button.dataset.itemCategory = getItemCategory(type);
       button.dataset.itemId = itemId;
       button.disabled = historyViewId !== null || !adminToolsReady || !canHumanAct();
       const itemName = t(definition.nameKey);
-      button.title = t(adminToolsReady ? "admin.item" : "admin.itemWaiting", { name: itemName });
+      const categoryName = t(getItemCategoryLocalizationKey(type));
+      button.title = `${t(adminToolsReady ? "admin.item" : "admin.itemWaiting", { name: itemName })} · ${categoryName}`;
       const icon = document.createElement("img");
       icon.src = definition.icon;
       icon.alt = "";
       icon.setAttribute("aria-hidden", "true");
+      button.setAttribute("aria-label", `${itemName}, ${categoryName}`);
       button.append(icon, document.createTextNode(itemName));
       adminItemList.appendChild(button);
     }
@@ -567,6 +638,7 @@ function renderInventories(displayState = state) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "admin-item-button editor-tool-button";
+      button.dataset.itemCategory = getItemCategory(type);
       button.dataset.editorKind = "item";
       button.dataset.itemType = type;
       button.classList.toggle("is-selected", boardEditorTool?.kind === "item" && boardEditorTool.itemType === type);
@@ -576,6 +648,9 @@ function renderInventories(displayState = state) {
       icon.src = definition.icon;
       icon.alt = "";
       icon.setAttribute("aria-hidden", "true");
+      const categoryName = t(getItemCategoryLocalizationKey(type));
+      button.title = categoryName;
+      button.setAttribute("aria-label", `${t(definition.nameKey)}, ${categoryName}`);
       button.append(icon, document.createTextNode(t(definition.nameKey)));
       boardEditorTools.appendChild(button);
     }
@@ -1289,8 +1364,7 @@ function leaveOnlineSession({ showMenu = false } = {}) {
   if (showMenu) {
     beginGameSession();
     stopClock();
-    gameScreen.hidden = true;
-    mainMenuScreen.hidden = false;
+    transitionScreens(false);
     syncMenuAmbient();
   }
 }
@@ -1397,8 +1471,7 @@ function enterOnlineGame(message) {
     settings = { ...settings, ...message.state.settings, adminMode: false };
     onlineMode = true;
     gameScreen.classList.add("is-online");
-    mainMenuScreen.hidden = true;
-    gameScreen.hidden = false;
+    transitionScreens(true);
     syncMenuAmbient();
   }
   onlineRoomCode = message.roomCode || onlineRoomCode || multiplayerClient.savedSession?.roomCode;
@@ -1704,8 +1777,7 @@ function openLocalGame() {
   if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
   leaveTraining(true);
   computerOpponent = { enabled: false, difficulty: "easy" };
-  mainMenuScreen.hidden = true;
-  gameScreen.hidden = false;
+  transitionScreens(true);
   syncMenuAmbient();
   setupGame();
   startButton.focus();
@@ -1721,8 +1793,7 @@ function startComputerGame(difficulty) {
   computerOpponent = { enabled: true, difficulty };
   computerDifficultyModal.close();
   leaveTraining(true);
-  mainMenuScreen.hidden = true;
-  gameScreen.hidden = false;
+  transitionScreens(true);
   syncMenuAmbient();
   setupGame();
 }
@@ -1736,8 +1807,7 @@ function returnToMainMenu() {
   leaveTraining(true);
   stopClock();
   computerOpponent = { enabled: false, difficulty: "easy" };
-  gameScreen.hidden = true;
-  mainMenuScreen.hidden = false;
+  transitionScreens(false);
   syncMenuAmbient();
 }
 
@@ -1782,8 +1852,7 @@ function startTraining(lessonIndex = 0) {
   };
   trainingSession = { lessonIndex, completed: false, feedbackKey: null, hintShown: false, piecePlaced: false };
   clockRemaining = { X: 0, O: 0 };
-  mainMenuScreen.hidden = true;
-  gameScreen.hidden = false;
+  transitionScreens(true);
   syncMenuAmbient();
   render();
 }
@@ -1888,8 +1957,7 @@ function advanceTraining() {
     startTraining(trainingSession.lessonIndex + 1);
   } else {
     leaveTraining(true);
-    gameScreen.hidden = true;
-    mainMenuScreen.hidden = false;
+    transitionScreens(false);
     syncMenuAmbient();
   }
 }
@@ -2172,8 +2240,39 @@ function showResult() {
   resultRoast.textContent = t("dialog.roast", { player: loser });
   resultRematchStatus.hidden = true;
   resultRematchButton.hidden = false;
+  resultExportPngButton.hidden = false;
+  resultExportJsonButton.hidden = false;
+  resultExportStatus.hidden = true;
   resultModal.showModal();
   resultRematchButton.focus();
+}
+
+async function exportFinalMap(format) {
+  const exportState = state;
+  if (!exportState || exportState.phase !== "finished") {
+    resultExportStatus.textContent = t("export.failed");
+    resultExportStatus.hidden = false;
+    return;
+  }
+  const button = format === "png" ? resultExportPngButton : resultExportJsonButton;
+  button.disabled = true;
+  resultExportStatus.textContent = t("export.preparing");
+  resultExportStatus.hidden = false;
+  try {
+    if (format === "png") {
+      await downloadBoardPng(exportState, {
+        itemIconUrl: (type) => EVENT_ITEM_DEFINITIONS[type]?.icon,
+        shieldIconUrl: (permanent) => EVENT_ITEM_DEFINITIONS[permanent ? "gangstaShield" : "shield"]?.icon
+      });
+    } else {
+      downloadMapJson(exportState);
+    }
+    resultExportStatus.textContent = t("export.complete");
+  } catch {
+    resultExportStatus.textContent = t("export.failed");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function formatMessage(value) {
@@ -2238,7 +2337,9 @@ function renderGamePosition(state) {
       cell.dataset.col = String(col);
       cell.setAttribute("role", "gridcell");
       const contents = value === EMPTY_CELL ? t("game.empty") : value === BLOCKED_CELL ? t("game.blocked") : t("game.player", { player: value });
-      const itemLabel = eventItem ? t("game.item", { item: t(EVENT_ITEM_DEFINITIONS[eventItem.type].nameKey) }) : "";
+      const itemLabel = eventItem ? t("game.item", {
+        item: `${t(EVENT_ITEM_DEFINITIONS[eventItem.type].nameKey)} · ${t(getItemCategoryLocalizationKey(eventItem.type))}`
+      }) : "";
       const wormholeLabel = wormholeEndpoint
         ? t("wormhole.cell", { color: t(`wormhole.${wormholeEndpoint[0]}`), rounds: state.wormholePair.roundsRemaining })
         : "";
@@ -2270,6 +2371,7 @@ function renderGamePosition(state) {
         itemIcon.alt = "";
         itemIcon.setAttribute("aria-hidden", "true");
         cell.classList.add("event-item", "event-item-" + eventItem.type);
+        cell.dataset.itemCategory = getItemCategory(eventItem.type);
         const itemAnimationStartedAt = newlySpawnedItems.get(eventItem.id);
         if (itemAnimationStartedAt !== undefined && state.settings.animationsEnabled) {
           cell.classList.add("event-item-entering");
@@ -3029,6 +3131,8 @@ undoProposalModal.addEventListener("cancel", (event) => {
   answerUndoProposal(false);
 });
 resultModal.addEventListener("cancel", (event) => event.preventDefault());
+resultExportPngButton.addEventListener("click", () => exportFinalMap("png"));
+resultExportJsonButton.addEventListener("click", () => exportFinalMap("json"));
 resultRematchButton.addEventListener("click", async () => {
   if (!state || state.phase !== "finished") return;
   if (!onlineMode) {
@@ -3076,13 +3180,18 @@ for (const player of ["X", "O"]) {
 }
 languageSelect.value = getLanguage();
 applyTranslations();
+decorateRuleItemCards();
 languageSelect.addEventListener("change", () => setLanguage(languageSelect.value));
 document.addEventListener("languagechange", () => {
   applyTranslations();
+  decorateRuleItemCards();
   for (const container of [itemOptions, onlineItemOptions]) {
     for (const input of container.querySelectorAll("input[data-item-type]")) {
-      const name = input.parentElement.querySelector("span");
+      const name = input.parentElement.querySelector(".item-option-name");
       if (name) name.textContent = t(EVENT_ITEM_DEFINITIONS[input.dataset.itemType].nameKey);
+      const badge = input.parentElement.querySelector(".item-option-category");
+      if (badge) badge.textContent = t(getItemCategoryLocalizationKey(input.dataset.itemType));
+      input.parentElement.title = t(getItemCategoryLocalizationKey(input.dataset.itemType));
     }
   }
   languageSelect.value = getLanguage();
