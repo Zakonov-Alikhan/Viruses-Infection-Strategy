@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DEFAULT_SETTINGS } from "../ui/game.js";
 import { RoomManager } from "./rooms.js";
 
 const TEST_SETTINGS = {
@@ -136,6 +137,29 @@ test("applies validated per-room settings to game state and clock, and rejects i
   assert.deepEqual(invalidPieces.error, { code: "invalid-settings" });
   assert.deepEqual(unknownSetting.error, { code: "invalid-settings" });
   assert.equal(manager.roomCount, roomCount);
+});
+
+test("unlimited-time rooms accept absent time values and keep finite settings with disabled clocks", () => {
+  const manager = makeManager();
+  const created = manager.createRoom({
+    width: 10,
+    height: 10,
+    piecesPerTurn: 1,
+    clockMinutes: null,
+    incrementSeconds: null,
+    unlimitedTime: true,
+    randomEvents: false,
+    animationsEnabled: true,
+    freeStartingPositions: false
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(created.clock.enabled, false);
+  assert.deepEqual(created.clock.remainingMs, { X: null, O: null });
+  assert.equal(Number.isFinite(created.state.settings.clockMinutes), true);
+  assert.equal(Number.isFinite(created.state.settings.incrementSeconds), true);
+  assert.equal(created.state.settings.clockMinutes, DEFAULT_SETTINGS.clockMinutes);
+  assert.equal(created.state.settings.incrementSeconds, DEFAULT_SETTINGS.incrementSeconds);
 });
 
 test("rejects a third seat and unknown room codes", () => {

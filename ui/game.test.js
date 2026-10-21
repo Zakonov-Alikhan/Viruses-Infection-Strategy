@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyComputerAction, chooseComputerAction } from "./ai.js";
-import { DEFAULT_SETTINGS, createGameState, playMove } from "./game.js";
+import {
+  BLOCKED_CELL,
+  DEFAULT_SETTINGS,
+  canCompleteTurn,
+  chooseAbilityTarget,
+  createGameState,
+  getLegalMoves,
+  isLegalMove,
+  isValidDebrisTarget,
+  playMove,
+  selectAbility
+} from "./game.js";
 import { processGameCommand } from "../server/game-service.js";
 
 function makePlayingState(overrides = {}) {
@@ -76,4 +87,129 @@ test("local, computer, and server command paths apply the same legal placement t
   assert.deepEqual(serverResult.state, localNext);
   assert.equal(state.board[action.row][action.col], "");
   assert.equal(state.currentPlayer, "X");
+});
+
+test("debris rejects both players' occupied cells in core, local admin, and server command paths", () => {
+  const base = makePlayingState();
+  const board = base.board.map((row) => row.slice());
+  board[0][1] = "X";
+  board[9][8] = "O";
+  const state = {
+    ...base,
+    board,
+    inventory: { X: [{ id: "debris-1", type: "debris" }], O: [] },
+    selectedAbility: "debris-1",
+    abilityTargets: []
+  };
+  const before = JSON.stringify(state);
+
+  for (const target of [{ row: 0, col: 1 }, { row: 9, col: 8 }]) {
+    assert.equal(isValidDebrisTarget(state, target.row, target.col), false);
+    assert.equal(chooseAbilityTarget(state, "debris-1", target.row, target.col), state);
+    const rejected = processGameCommand(state, "X", {
+      type: "ability-target", itemId: "debris-1", ...target
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.state, state);
+  }
+  assert.equal(JSON.stringify(state), before);
+
+  const adminState = createGameState({
+    ...DEFAULT_SETTINGS,
+    width: 10,
+    height: 10,
+    piecesPerTurn: 1,
+    randomEvents: false,
+    freeStartingPositions: false,
+    adminMode: true
+  }, () => 0);
+  const adminSelected = selectAbility(adminState, "admin:debris");
+  const adminBoard = adminSelected.board.map((row) => row.slice());
+  adminBoard[0][1] = "X";
+  assert.equal(isValidDebrisTarget({ ...adminSelected, board: adminBoard }, 0, 1), false);
+
+  let validDebrisState = {
+    ...base,
+    inventory: { X: [{ id: "debris-valid", type: "debris" }], O: [] },
+    selectedAbility: "debris-valid",
+    abilityTargets: []
+  };
+  for (const target of [{ row: 0, col: 1 }, { row: 1, col: 1 }, { row: 2, col: 1 }]) {
+    validDebrisState = chooseAbilityTarget(validDebrisState, "debris-valid", target.row, target.col);
+  }
+  assert.deepEqual([validDebrisState.board[0][1], validDebrisState.board[1][1], validDebrisState.board[2][1]], [
+    BLOCKED_CELL, BLOCKED_CELL, BLOCKED_CELL
+  ]);
+});
+
+test("a shield on an empty cell does not reserve it and still protects the piece placed there", () => {
+  const base = makePlayingState({ piecesPerTurn: 1 });
+  const state = {
+    ...base,
+    protections: [{ row: 0, col: 1, owner: "O", permanent: true }]
+  };
+  assert.equal(isLegalMove(state, 0, 1), true);
+  assert.ok(getLegalMoves(state).some(({ row, col }) => row === 0 && col === 1));
+  assert.equal(canCompleteTurn(state, "X", 1), true);
+
+  const occupied = playMove(state, 0, 1, () => 1);
+  assert.equal(occupied.board[0][1], "X");
+  assert.equal(occupied.protections.length, 1);
+
+  const contactBoard = occupied.board.map((row) => row.slice());
+  contactBoard[1][2] = "O";
+  const contactState = {
+    ...occupied,
+    board: contactBoard,
+    currentPlayer: "O",
+    piecesLeft: 1
+  };
+  const adjacentAttack = playMove(contactState, 0, 2, () => 1);
+  assert.equal(adjacentAttack.board[0][1], "X");
+  assert.ok(adjacentAttack.protections.some(({ row, col }) => row === 0 && col === 1));
+});
+
+test("free placement does not create a full extra turn and leaves queued extra-turn items independent", () => {
+  const base = makePlayingState({ piecesPerTurn: 1 });
+  const extraTurnId = "extra-turn-1";
+  const state = {
+    ...base,
+    inventory: {
+      X: [
+        { id: "teleport-1", type: "freePlacement" },
+        { id: extraTurnId, type: "extraTurn" }
+      ],
+      O: []
+    },
+    pendingExtraTurns: { X: [extraTurnId], O: [] },
+    pendingExtraTurn: extraTurnId
+  };
+
+  const localSelected = selectAbility(state, "teleport-1");
+  const localNext = playMove(localSelected, 5, 5, () => 1);
+  const computerNext = applyComputerAction(state, {
+    type: "place", abilityId: "teleport-1", row: 5, col: 5
+  }, () => 1);
+  const serverSelected = processGameCommand(state, "X", {
+    type: "select-ability", itemId: "teleport-1"
+  });
+  const serverNext = processGameCommand(serverSelected.state, "X", {
+    type: "place", row: 5, col: 5
+  }, { random: () => 1 });
+
+  assert.equal(serverNext.ok, true);
+  assert.deepEqual(computerNext, localNext);
+  assert.deepEqual(serverNext.state, localNext);
+  assert.equal(localNext.currentPlayer, "X");
+  assert.equal(localNext.piecesLeft, 1);
+  assert.deepEqual(localNext.pendingExtraTurns.X, [extraTurnId]);
+  assert.equal(state.currentPlayer, "X");
+  assert.deepEqual(state.pendingExtraTurns.X, [extraTurnId]);
+
+  const normalPiece = playMove(localNext, 0, 1, () => 1);
+  assert.equal(normalPiece.currentPlayer, "X");
+  assert.equal(normalPiece.piecesLeft, 1);
+  assert.deepEqual(normalPiece.pendingExtraTurns.X, []);
+  const completedExtraTurn = playMove(normalPiece, 0, 2, () => 1);
+  assert.equal(completedExtraTurn.currentPlayer, "O");
 });

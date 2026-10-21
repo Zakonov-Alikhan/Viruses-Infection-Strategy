@@ -50,11 +50,8 @@ function neighbors(row, col, board) {
     .filter(({ row: nextRow, col: nextCol }) => inBounds(nextRow, nextCol, board));
 }
 
-function hasEnoughConnectedCells(player, count, board, protections = []) {
+function hasEnoughConnectedCells(player, count, board) {
   if (count <= 0) return true;
-  const unavailable = new Set(protections
-    .filter((protection) => protection.owner !== player)
-    .map((protection) => protection.row + "," + protection.col));
   const visited = new Set();
   const queue = [];
 
@@ -76,7 +73,6 @@ function hasEnoughConnectedCells(player, count, board, protections = []) {
       if (visited.has(key)) continue;
       const value = board[next.row][next.col];
       if (value !== EMPTY_CELL && value !== player) continue;
-      if (value === EMPTY_CELL && unavailable.has(key)) continue;
       visited.add(key);
       if (value === EMPTY_CELL) {
         reachableEmpty += 1;
@@ -93,7 +89,7 @@ export function canCompleteTurn(state, player = state?.currentPlayer, count = st
   return Boolean(state?.board?.length)
     && (player === "X" || player === "O")
     && Number.isInteger(count)
-    && hasEnoughConnectedCells(player, count, state.board, state.protections || []);
+    && hasEnoughConnectedCells(player, count, state.board);
 }
 
 function isProtected(state, row, col) {
@@ -322,8 +318,6 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
 
 export function isLegalMove(state, row, col) {
   if (state.phase !== "playing" || !inBounds(row, col, state.board) || state.board[row][col] !== EMPTY_CELL) return false;
-  const reservation = state.protections.find((shield) => shield.row === row && shield.col === col);
-  if (reservation && reservation.owner !== state.currentPlayer) return false;
   const selected = getSelectedAbility(state);
   if (selected) return selected.type === "freePlacement";
   return neighbors(row, col, state.board).some(({ row: nextRow, col: nextCol }) => state.board[nextRow][nextCol] === state.currentPlayer);
@@ -440,7 +434,7 @@ function useAreaAbility(state, itemId, row, col, type) {
     message: message(isBomb ? "message.bomb" : "message.antiBomb")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.protections)) {
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -481,7 +475,7 @@ export function usePointDestroy(state, itemId, row, col) {
     message: message("message.pointDestroy")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.protections)) {
+  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -541,7 +535,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
       lastDestroyed: abilityTargets,
       message: message("message.debris")
     };
-    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.protections)) {
+    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board)) {
       const winner = state.currentPlayer === "X" ? "O" : "X";
       return finish(next, winner, message("message.cannotFinishDebris", { player: state.currentPlayer }));
     }
@@ -646,7 +640,7 @@ export function playMove(state, row, col, random = Math.random) {
     next.message = appendMessage(next.message, message("message.freePlacementUsed"));
   }
 
-  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board, next.protections)) {
+  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board)) {
     const winner = player === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinish", { player, count: state.settings.piecesPerTurn }));
   }
@@ -665,7 +659,7 @@ export function playMove(state, row, col, random = Math.random) {
       };
       next = withPendingExtraTurnQueues(next, pendingExtraTurns);
       next = startTurn(next, player, state.settings.piecesPerTurn);
-      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board, next.protections)) {
+      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board)) {
         const winner = player === "X" ? "O" : "X";
         return finish(next, winner, message("message.extraCannotFinish", { player }));
       }
@@ -674,7 +668,7 @@ export function playMove(state, row, col, random = Math.random) {
 
     const nextPlayer = player === "X" ? "O" : "X";
     next = startTurn(next, nextPlayer, state.settings.piecesPerTurn);
-    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board, next.protections)) {
+    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board)) {
       return finish(next, player, message("message.opponentCannotFinish", { count: state.settings.piecesPerTurn }));
     }
     return maybeSpawnEventItem(next, random);

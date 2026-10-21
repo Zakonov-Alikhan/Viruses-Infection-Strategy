@@ -92,6 +92,21 @@ test("rejects an illegal move without mutating the source state", () => {
   assert.equal(JSON.stringify(state), before);
 });
 
+test("server accepts an opponent placement on a shielded empty cell", () => {
+  const base = playingState();
+  const state = {
+    ...base,
+    protections: [{ row: 0, col: 8, owner: "O", permanent: true }]
+  };
+  const before = JSON.stringify(state);
+  const result = processGameCommand(state, "X", { type: "place", row: 0, col: 8 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state.board[0][8], "X");
+  assert.equal(result.state.protections.length, 1);
+  assert.equal(JSON.stringify(state), before);
+});
+
 test("applies a selected bomb through core ability transitions", () => {
   const base = playingState();
   const board = base.board.map((row) => row.slice());

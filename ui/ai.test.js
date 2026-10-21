@@ -105,7 +105,7 @@ test("reports setup, terminal, and no-placement states explicitly", () => {
   });
 });
 
-test("free placement permits remote cells and respects shield reservations", () => {
+test("free placement permits remote cells even when an empty target has a shield", () => {
   const state = makeState();
   const freeId = "free-placement-test";
   const withFreeItem = {
@@ -126,16 +126,20 @@ test("free placement permits remote cells and respects shield reservations", () 
   assert.equal(afterFreePlacement.board[5][5], "X");
   assert.equal(afterFreePlacement.piecesLeft, selected.piecesLeft);
 
-  const protectedState = {
+  const shieldedState = {
     ...selected,
     protections: [{ row: 5, col: 5, owner: "O", permanent: false }]
   };
-  assert.equal(getLegalMoves(protectedState).some(({ row, col }) => row === 5 && col === 5), false);
-  const nextAction = chooseComputerAction(protectedState, "easy", { random: () => 0.5 });
-  assert.notDeepEqual({ row: nextAction.row, col: nextAction.col }, { row: 5, col: 5 });
+  const shieldedMoves = getLegalMoves(shieldedState);
+  const shieldedIndex = shieldedMoves.findIndex(({ row, col }) => row === 5 && col === 5);
+  assert.ok(shieldedIndex >= 0);
+  const nextAction = chooseComputerAction(shieldedState, "easy", {
+    random: () => (shieldedIndex + 0.1) / shieldedMoves.length
+  });
+  assert.deepEqual({ row: nextAction.row, col: nextAction.col }, { row: 5, col: 5 });
 });
 
-test("turn capacity excludes empty cells reserved by the opponent", () => {
+test("turn capacity includes empty cells protected by either player", () => {
   const state = makeBlockedState();
   const board = state.board.map((row) => row.slice());
   board[4][4] = "X";
@@ -148,7 +152,7 @@ test("turn capacity excludes empty cells reserved by the opponent", () => {
   const oneEmptyCell = reserved.board.map((row) => row.slice());
   oneEmptyCell[4][5] = EMPTY_CELL;
   const onlyReservedRoute = { ...reserved, board: oneEmptyCell };
-  assert.equal(canCompleteTurn(onlyReservedRoute, "X", 1), false);
+  assert.equal(canCompleteTurn(onlyReservedRoute, "X", 1), true);
   assert.equal(canCompleteTurn({
     ...onlyReservedRoute,
     protections: [{ row: 4, col: 5, owner: "X", permanent: true }]

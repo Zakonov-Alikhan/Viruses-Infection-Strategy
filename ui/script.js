@@ -24,9 +24,10 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=20261021-onlinefix1";
-import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261021-onlinefix1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261021-onlinefix1";
+} from "./game.js?v=20261021-rulesfix1";
+import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261021-rulesfix1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261021-rulesfix1";
+import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=online3";
 
@@ -1156,13 +1157,18 @@ function collectOnlineRoomSettings() {
   const width = Number(onlineBoardWidthInput.value);
   const height = Number(onlineBoardHeightInput.value);
   const piecesPerTurn = Number(onlinePiecesInput.value);
-  const clockMinutes = Number(onlineClockMinutesInput.value);
-  const incrementSeconds = Number(onlineClockIncrementInput.value);
+  const unlimitedTime = onlineUnlimitedTimeToggle.checked;
+  const resolvedClock = resolveClockSettings({
+    unlimitedTime,
+    clockMinutes: onlineClockMinutesInput.value,
+    incrementSeconds: onlineClockIncrementInput.value
+  }, DEFAULT_SETTINGS);
+  const clockMinutes = resolvedClock?.clockMinutes ?? Number(onlineClockMinutesInput.value);
+  const incrementSeconds = resolvedClock?.incrementSeconds ?? Number(onlineClockIncrementInput.value);
   onlinePiecesInput.max = String(Math.floor(width * height / 10));
   if (![width, height].every((value) => Number.isInteger(value) && value >= MIN_BOARD_DIMENSION && value <= MAX_BOARD_DIMENSION)
     || !Number.isInteger(piecesPerTurn) || piecesPerTurn < 1 || piecesPerTurn > Math.floor(width * height / 10)
-    || !Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60
-    || !Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60) {
+    || !resolvedClock) {
     onlineErrorElement.textContent = t("online.error.invalid-settings");
     onlineErrorElement.hidden = false;
     return null;
@@ -1173,7 +1179,7 @@ function collectOnlineRoomSettings() {
     piecesPerTurn,
     clockMinutes,
     incrementSeconds,
-    unlimitedTime: onlineUnlimitedTimeToggle.checked,
+    unlimitedTime,
     randomEvents: onlineRandomEventsToggle.checked,
     animationsEnabled: settings.animationsEnabled,
     freeStartingPositions: onlineFreeStartToggle.checked
@@ -2004,8 +2010,13 @@ function applySettings(event) {
   const randomEvents = randomEventsToggle.checked;
   const animationsEnabled = animationsToggle.checked;
   const adminMode = adminModeToggle.checked;
-  const clockMinutes = unlimitedTime ? settings.clockMinutes : Number(clockMinutesInput.value);
-  const incrementSeconds = unlimitedTime ? settings.incrementSeconds : Number(clockIncrementInput.value);
+  const resolvedClock = resolveClockSettings({
+    unlimitedTime,
+    clockMinutes: clockMinutesInput.value,
+    incrementSeconds: clockIncrementInput.value
+  }, settings);
+  const clockMinutes = resolvedClock?.clockMinutes ?? Number(clockMinutesInput.value);
+  const incrementSeconds = resolvedClock?.incrementSeconds ?? Number(clockIncrementInput.value);
   let firstInvalid = null;
   if (!Number.isInteger(width) || width < MIN_BOARD_DIMENSION || width > MAX_BOARD_DIMENSION) {
     showFieldError(widthInput, widthError, t("validation.dimension", { min: MIN_BOARD_DIMENSION, max: MAX_BOARD_DIMENSION }));
@@ -2020,11 +2031,11 @@ function applySettings(event) {
     showFieldError(piecesInput, piecesError, t("validation.piecesArea", { max: maxPieces }));
     firstInvalid = firstInvalid || piecesInput;
   }
-  if (!unlimitedTime && (!Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60)) {
+  if (!unlimitedTime && (!resolvedClock || !Number.isInteger(clockMinutes) || clockMinutes < 1 || clockMinutes > 60)) {
     showFieldError(clockMinutesInput, clockMinutesError, t("validation.minutes"));
     firstInvalid = firstInvalid || clockMinutesInput;
   }
-  if (!unlimitedTime && (!Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60)) {
+  if (!unlimitedTime && (!resolvedClock || !Number.isInteger(incrementSeconds) || incrementSeconds < 0 || incrementSeconds > 60)) {
     showFieldError(clockIncrementInput, clockIncrementError, t("validation.increment"));
     firstInvalid = firstInvalid || clockIncrementInput;
   }

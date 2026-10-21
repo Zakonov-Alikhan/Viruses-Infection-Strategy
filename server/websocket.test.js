@@ -208,6 +208,38 @@ test("forwards validated room settings through WebSocket creation to both player
   assert.deepEqual(joined.clock.remainingMs, created.clock.remainingMs);
 });
 
+test("WebSocket room creation accepts blank clock values when time is unlimited", async (t) => {
+  const { server, address } = await makeTestServer();
+  const peer = await openPeer(address);
+  t.after(async () => {
+    await peer.close().catch(() => {});
+    await server.close();
+  });
+
+  peer.send({
+    type: "create-room",
+    requestId: "unlimited-create",
+    settings: {
+      width: 10,
+      height: 10,
+      piecesPerTurn: 1,
+      clockMinutes: null,
+      incrementSeconds: null,
+      unlimitedTime: true,
+      randomEvents: false,
+      animationsEnabled: true,
+      freeStartingPositions: false
+    }
+  });
+  const created = await peer.next("room-created");
+  assert.equal(created.requestId, "unlimited-create");
+  assert.equal(created.state.settings.unlimitedTime, true);
+  assert.equal(Number.isFinite(created.state.settings.clockMinutes), true);
+  assert.equal(Number.isFinite(created.state.settings.incrementSeconds), true);
+  assert.equal(created.clock.enabled, false);
+  assert.deepEqual(created.clock.remainingMs, { X: null, O: null });
+});
+
 test("handles malformed and unknown messages, binary frames, and rejects oversized frames", async (t) => {
   const { server, address } = await makeTestServer({ maxPayload: 1024 });
   const peers = [];

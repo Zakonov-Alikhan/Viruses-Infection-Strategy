@@ -36,6 +36,14 @@ function normalizeRoomSettings(input, defaults) {
   if (!input || typeof input !== "object" || Array.isArray(input)
     || Object.keys(input).some((key) => !ROOM_SETTING_FIELDS.has(key))) return null;
   const settings = { ...defaults, ...input, adminMode: false };
+  if (settings.unlimitedTime) {
+    if (!Number.isInteger(settings.clockMinutes) || settings.clockMinutes < 1 || settings.clockMinutes > 60) {
+      settings.clockMinutes = DEFAULT_SETTINGS.clockMinutes;
+    }
+    if (!Number.isInteger(settings.incrementSeconds) || settings.incrementSeconds < 0 || settings.incrementSeconds > 60) {
+      settings.incrementSeconds = DEFAULT_SETTINGS.incrementSeconds;
+    }
+  }
   const dimensionsValid = [settings.width, settings.height].every((value) =>
     Number.isInteger(value) && value >= MIN_BOARD_DIMENSION && value <= MAX_BOARD_DIMENSION);
   if (!dimensionsValid
