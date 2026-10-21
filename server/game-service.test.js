@@ -107,6 +107,22 @@ test("server accepts an opponent placement on a shielded empty cell", () => {
   assert.equal(JSON.stringify(state), before);
 });
 
+test("server rejects an owned disabled item and publishes a detached disabled-item configuration", () => {
+  const state = playingState({ disabledItems: ["bomb"] });
+  state.inventory.X.push({ id: 88, type: "bomb" });
+  const before = JSON.stringify(state);
+  const rejected = processGameCommand(state, "X", { type: "select-ability", itemId: 88 });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error.code, "invalid-action");
+  assert.equal(rejected.state, state);
+  assert.equal(JSON.stringify(state), before);
+
+  const view = getPlayerView(state, "X");
+  assert.deepEqual(view.settings.disabledItems, ["bomb"]);
+  view.settings.disabledItems.push("shield");
+  assert.deepEqual(state.settings.disabledItems, ["bomb"]);
+});
+
 test("applies a selected bomb through core ability transitions", () => {
   const base = playingState();
   const board = base.board.map((row) => row.slice());

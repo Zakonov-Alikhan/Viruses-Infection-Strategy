@@ -29,7 +29,8 @@ const PUBLIC_SETTING_FIELDS = Object.freeze([
   "unlimitedTime",
   "randomEvents",
   "animationsEnabled",
-  "freeStartingPositions"
+  "freeStartingPositions",
+  "disabledItems"
 ]);
 
 function failure(state, code) {
@@ -126,10 +127,12 @@ export function processGameCommand(state, side, command, {
   return next === state ? failure(state, "invalid-action") : { ok: true, state: next };
 }
 
-function copyPublicInventory(inventory = {}) {
+function copyPublicInventory(inventory = {}, disabledItems = new Set()) {
   const result = {};
   for (const side of SIDES) {
-    result[side] = (inventory[side] || []).map(({ id, type }) => ({ id, type }));
+    result[side] = (inventory[side] || [])
+      .filter(({ type }) => !disabledItems.has(type))
+      .map(({ id, type }) => ({ id, type }));
   }
   return result;
 }
@@ -141,7 +144,9 @@ export function getPlayerView(state, side) {
 
   const settings = {};
   for (const key of PUBLIC_SETTING_FIELDS) {
-    if (Object.hasOwn(state.settings || {}, key)) settings[key] = state.settings[key];
+    if (Object.hasOwn(state.settings || {}, key)) {
+      settings[key] = key === "disabledItems" ? [...(state.settings[key] || [])] : state.settings[key];
+    }
   }
 
   const setupPhase = isSetupPhase(state.phase);
@@ -163,7 +168,7 @@ export function getPlayerView(state, side) {
     },
     lastDestroyed: (state.lastDestroyed || []).map(({ row, col }) => ({ row, col })),
     eventItems: (state.eventItems || []).map(({ id, type, row, col }) => ({ id, type, row, col })),
-    inventory: copyPublicInventory(state.inventory),
+    inventory: copyPublicInventory(state.inventory, new Set(settings.disabledItems || [])),
     selectedAbility: maySeePrivateAction ? state.selectedAbility ?? null : null,
     abilityTargets: maySeePrivateAction
       ? (state.abilityTargets || []).map(({ row, col }) => ({ row, col }))

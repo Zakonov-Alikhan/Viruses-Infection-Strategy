@@ -69,6 +69,7 @@ async function makeTestServer(options = {}) {
       adminMode: false
     },
     random: () => 0.75,
+    sideRandom: () => 0.25,
     roomCodeFactory: () => `WSROOM${++codeNumber}`,
     playerTokenFactory: () => `ws-test-token-${String(++tokenNumber).padStart(32, "0")}`
   });
@@ -96,7 +97,7 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   peers.push(x);
   x.send({ type: "create-room", requestId: "create" });
   const created = await x.next("room-created");
-  assert.equal(created.side, "X");
+  assert.equal(created.side, null);
   assert.equal(created.status, "waiting");
   assert.equal(created.clock.enabled, true);
   assert.deepEqual(created.clock.remainingMs, { X: 5 * 60_000, O: 5 * 60_000 });
@@ -111,6 +112,7 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.equal(joined.playerToken.length >= 32, true);
   assert.equal(joined.clock.enabled, true);
   const ready = await x.next("room-ready");
+  assert.equal(ready.side, "X");
   assert.equal(ready.version, 0);
   assert.equal("playerToken" in ready, false);
 
@@ -181,7 +183,8 @@ test("forwards validated room settings through WebSocket creation to both player
       unlimitedTime: false,
       randomEvents: false,
       animationsEnabled: false,
-      freeStartingPositions: false
+      freeStartingPositions: false,
+      disabledItems: ["bomb", "shield"]
     }
   });
   const created = await host.next("room-created");
@@ -195,7 +198,8 @@ test("forwards validated room settings through WebSocket creation to both player
     unlimitedTime: false,
     randomEvents: false,
     animationsEnabled: false,
-    freeStartingPositions: false
+    freeStartingPositions: false,
+    disabledItems: ["bomb", "shield"]
   });
   assert.equal(created.state.phase, "playing");
   assert.deepEqual(created.clock.remainingMs, { X: 4 * 60_000, O: 4 * 60_000 });

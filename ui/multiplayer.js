@@ -45,8 +45,8 @@ function safeParseSession(storage) {
   try {
     const value = JSON.parse(storage.getItem(SESSION_STORAGE_KEY) || "null");
     if (typeof value?.roomCode !== "string" || typeof value?.playerToken !== "string"
-      || !["X", "O"].includes(value.side)) return null;
-    return { roomCode: value.roomCode, playerToken: value.playerToken, side: value.side };
+      || (value.side !== null && !["X", "O"].includes(value.side))) return null;
+    return { roomCode: value.roomCode, playerToken: value.playerToken, side: value.side ?? null };
   } catch {
     return null;
   }
@@ -252,6 +252,8 @@ export class MultiplayerClient {
       this.#saveSession(message);
     } else if (message.type === "room-closed") {
       this.#clearSavedSession();
+    } else if (["room-ready", "room-resumed", "state"].includes(message.type)) {
+      this.#updateSavedSide(message);
     }
 
     if (message.type === "server-error" && message.requestId) {
@@ -327,7 +329,8 @@ export class MultiplayerClient {
 
   #saveSession(message) {
     if (!this.storage || typeof message.roomCode !== "string"
-      || typeof message.playerToken !== "string" || !["X", "O"].includes(message.side)) return;
+      || typeof message.playerToken !== "string"
+      || (message.side !== null && !["X", "O"].includes(message.side))) return;
     try {
       const previous = safeParseSession(this.storage);
       if (previous && previous.roomCode !== message.roomCode) {
@@ -338,8 +341,20 @@ export class MultiplayerClient {
       this.storage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
         roomCode: message.roomCode,
         playerToken: message.playerToken,
-        side: message.side
+        side: message.side ?? null
       }));
+    } catch {
+      this.#emit({ type: "session-storage-unavailable" });
+    }
+  }
+
+  #updateSavedSide(message) {
+    if (!this.storage || typeof message.roomCode !== "string"
+      || (message.side !== null && !["X", "O"].includes(message.side))) return;
+    const previous = safeParseSession(this.storage);
+    if (!previous || previous.roomCode !== message.roomCode) return;
+    try {
+      this.storage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ ...previous, side: message.side ?? null }));
     } catch {
       this.#emit({ type: "session-storage-unavailable" });
     }

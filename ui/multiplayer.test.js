@@ -41,7 +41,7 @@ function eventLog(client) {
   };
 }
 
-async function makeFixture(t) {
+async function makeFixture(t, { sideRandom = () => 0.25 } = {}) {
   let codeNumber = 0;
   let tokenNumber = 0;
   const roomManager = new RoomManager({
@@ -54,6 +54,7 @@ async function makeFixture(t) {
       adminMode: false
     },
     random: () => 0.75,
+    sideRandom,
     roomCodeFactory: () => `CLIENT${++codeNumber}`,
     playerTokenFactory: () => `client-test-token-${String(++tokenNumber).padStart(32, "0")}`
   });
@@ -90,8 +91,12 @@ test("client creates and joins a room, then relays confirmed authoritative turns
   const xEvents = eventLog(x);
   const oEvents = eventLog(o);
 
-  const created = await x.createRoom();
-  assert.equal(created.side, "X");
+  const created = await x.createRoom({
+    width: 10, height: 10, piecesPerTurn: 1, clockMinutes: 5, incrementSeconds: 0,
+    unlimitedTime: false, randomEvents: false, animationsEnabled: true,
+    freeStartingPositions: true, disabledItems: ["bomb", "shield"]
+  });
+  assert.equal(created.side, null);
   assert.equal(created.status, "waiting");
   assert.equal(x.savedSession.playerToken, created.playerToken);
   assert.equal(x.url.includes(created.playerToken), false);
@@ -99,8 +104,10 @@ test("client creates and joins a room, then relays confirmed authoritative turns
   const joined = await o.joinRoom(created.roomCode.toLowerCase());
   assert.equal(joined.side, "O");
   assert.equal(o.savedSession.side, "O");
+  assert.deepEqual(created.state.settings.disabledItems, ["bomb", "shield"]);
   await xEvents.waitFor((event) => event.type === "room-ready");
   await oEvents.waitFor((event) => event.type === "room-ready");
+  assert.equal(x.savedSession.side, "X");
 
   assert.equal(x.sendCommand({ type: "choose-start", row: 1, col: 1 }), true);
   const xSetup = await xEvents.waitFor((event) => event.type === "state" && event.state.phase === "setup-o");
@@ -135,6 +142,26 @@ test("client creates and joins a room, then relays confirmed authoritative turns
   assert.equal(storageO.getItem("viruses.online-room"), null);
 });
 
+test("clients receive randomized sides and the creator's saved session is updated", async (t) => {
+  const { x, o, storageX } = await makeFixture(t, { sideRandom: () => 0.75 });
+  const xEvents = eventLog(x);
+  const oEvents = eventLog(o);
+  const created = await x.createRoom();
+  assert.equal(created.side, null);
+  const joined = await o.joinRoom(created.roomCode);
+  assert.equal(joined.side, "X");
+  const creatorReady = await xEvents.waitFor((event) => event.type === "room-ready");
+  assert.equal(creatorReady.side, "O");
+  assert.equal(x.savedSession.side, "O");
+  await oEvents.waitFor((event) => event.type === "room-ready");
+  assert.equal(o.savedSession.side, "X");
+  assert.equal(JSON.parse(storageX.getItem("viruses.online-room")).side, "O");
+  const creatorUpdate = xEvents.waitFor((event) => event.type === "state" && event.state.phase === "setup-o");
+  assert.equal(o.sendCommand({ type: "choose-start", row: 1, col: 1 }), true);
+  const afterXChoice = await creatorUpdate;
+  assert.equal(afterXChoice.state.setupPlayer, "O");
+});
+
 test("client handles reconnect snapshots and resets version for a new room", async (t) => {
   const { server, x, storageX } = await makeFixture(t);
   const events = eventLog(x);
@@ -145,7 +172,7 @@ test("client handles reconnect snapshots and resets version for a new room", asy
   const reconnected = events.waitFor((event) => event.type === "reconnected", 2500);
   rawSocket.terminate();
   const resumed = await reconnected;
-  assert.equal(resumed.room.side, "X");
+  assert.equal(resumed.room.side, null);
   assert.equal(resumed.room.roomCode, created.roomCode);
   assert.equal(resumed.room.clock.activePlayer, null);
   assert.equal(resumed.room.clock.enabled, true);
@@ -164,7 +191,7 @@ test("creator can reopen the waiting room in the same tab without trying to clai
   const resumed = await x.resumeSavedRoom();
   assert.equal(resumed.type, "room-resumed");
   assert.equal(resumed.roomCode, created.roomCode);
-  assert.equal(resumed.side, "X");
+  assert.equal(resumed.side, null);
   assert.equal(resumed.status, "waiting");
   assert.equal(x.connected, true);
 });

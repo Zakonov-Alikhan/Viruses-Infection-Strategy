@@ -404,6 +404,14 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .online-settings-grid .settings-time-control { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .online-settings-grid .toggle-row { padding: 10px 0; }
 .online-settings-grid .toggle-copy strong { font-size: 11px; }
+.item-options { min-width: 0; margin: 2px 0 0; padding: 10px 12px 12px; border: 1px solid rgba(191,225,209,.13); border-radius: 10px; }
+.item-options legend { padding: 0 5px; color: #dce8e2; font-size: 12px; font-weight: 750; }
+.item-options .settings-summary { margin: 0 0 10px; font-size: 11px; }
+.item-options-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; }
+.item-option { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 7px 8px; border: 1px solid rgba(191,225,209,.1); border-radius: 8px; color: #c2d0ca; background: rgba(12,20,22,.28); cursor: pointer; font-size: 11px; }
+.item-option input { accent-color: var(--lime); }
+.item-option img { width: 19px; height: 19px; object-fit: contain; }
+.item-option span { overflow: hidden; text-overflow: ellipsis; }
 .online-create-button { width: 100%; min-height: 48px; }
 .online-join-form { display: grid; gap: 8px; }
 .online-join-form > label { color: #c2d0ca; font-size: 12px; font-weight: 700; }

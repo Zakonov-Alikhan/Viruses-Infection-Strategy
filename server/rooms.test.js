@@ -22,6 +22,7 @@ function makeManager(options = {}) {
   return new RoomManager({
     settings: TEST_SETTINGS,
     random: () => 0.75,
+    sideRandom: () => 0.25,
     roomCodeFactory: () => `ROOM${String(++nextCode).padStart(4, "0")}`,
     playerTokenFactory: () => `test-token-${String(++nextToken).padStart(32, "0")}`,
     ...options
@@ -70,6 +71,7 @@ function makeTimedManager(scheduler, { unlimitedTime = false } = {}) {
     scheduleTimeout: scheduler.setTimeoutFn,
     cancelTimeout: scheduler.clearTimeoutFn,
     random: () => 0.75,
+    sideRandom: () => 0.25,
     roomCodeFactory: () => `CLOCK${++nextCode}`,
     playerTokenFactory: () => `clock-test-token-${String(++nextToken).padStart(32, "0")}`
   });
@@ -93,18 +95,40 @@ async function startGame(manager, code, connections) {
   assert.equal(connections.X.at(-1).type, "state");
 }
 
-test("creates private rooms and assigns X then O on the server", () => {
+test("creates private rooms without exposing a final side until the second player joins", () => {
   const manager = makeManager();
   const created = manager.createRoom();
   const joined = manager.joinRoom(created.roomCode.toLowerCase());
 
   assert.equal(created.ok, true);
   assert.equal(joined.ok, true);
-  assert.equal(created.side, "X");
+  assert.equal(created.side, null);
   assert.equal(joined.side, "O");
   assert.equal("adminMode" in created.state.settings, false);
   assert.equal("adminMode" in joined.state.settings, false);
   assert.equal(manager.roomCount, 1);
+});
+
+test("randomly assigns X and O after the second player joins and retains token ownership", () => {
+  for (const [sideRandom, expectedCreator, expectedJoiner] of [
+    [() => 0.25, "X", "O"],
+    [() => 0.75, "O", "X"]
+  ]) {
+    const manager = makeManager({ sideRandom });
+    const sentByCreator = [];
+    const created = manager.createRoom();
+    const creatorConnection = manager.attachConnection(created.roomCode, "X", (message) => sentByCreator.push(message));
+    const joined = manager.joinRoom(created.roomCode);
+    assert.equal(joined.side, expectedJoiner);
+    assert.equal(creatorConnection.connection.side, expectedCreator);
+    assert.equal(manager.resumeRoom(created.roomCode, created.playerToken, () => {}).error.code, "seat-already-connected");
+    manager.broadcastReady(created.roomCode);
+    assert.equal(sentByCreator.at(-1).side, expectedCreator);
+    manager.detachConnection(created.roomCode, expectedCreator, creatorConnection.connection);
+    const resumed = manager.resumeRoom(created.roomCode, created.playerToken, () => {});
+    assert.equal(resumed.side, expectedCreator);
+    assert.equal(resumed.state.settings.disabledItems.length, 0);
+  }
 });
 
 test("applies validated per-room settings to game state and clock, and rejects invalid settings", () => {
@@ -118,7 +142,8 @@ test("applies validated per-room settings to game state and clock, and rejects i
     unlimitedTime: false,
     randomEvents: false,
     animationsEnabled: false,
-    freeStartingPositions: false
+    freeStartingPositions: false,
+    disabledItems: ["bomb", "shield"]
   };
   const created = manager.createRoom(customSettings);
   assert.equal(created.ok, true);
@@ -134,8 +159,10 @@ test("applies validated per-room settings to game state and clock, and rejects i
   const roomCount = manager.roomCount;
   const invalidPieces = manager.createRoom({ ...customSettings, piecesPerTurn: 13 });
   const unknownSetting = manager.createRoom({ ...customSettings, adminMode: true });
+  const unknownItem = manager.createRoom({ ...customSettings, disabledItems: ["not-an-item"] });
   assert.deepEqual(invalidPieces.error, { code: "invalid-settings" });
   assert.deepEqual(unknownSetting.error, { code: "invalid-settings" });
+  assert.deepEqual(unknownItem.error, { code: "invalid-settings" });
   assert.equal(manager.roomCount, roomCount);
 });
 

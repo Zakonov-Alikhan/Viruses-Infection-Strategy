@@ -11,6 +11,7 @@ import {
   finishIfNoLegalMoves,
   flagFall,
   getSelectedAbility,
+  isItemEnabled,
   hasPermission,
   isLegalMove,
   isValidAreaTarget,
@@ -24,9 +25,9 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=20261021-rulesfix1";
-import { chooseComputerAction, applyComputerAction } from "./ai.js?v=20261021-rulesfix1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=20261021-rulesfix1";
+} from "./game.js?v=items-settings1";
+import { chooseComputerAction, applyComputerAction } from "./ai.js?v=items-settings1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=items-settings1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=online3";
@@ -63,6 +64,7 @@ const onlineClockIncrementInput = document.querySelector("#online-clock-incremen
 const onlineUnlimitedTimeToggle = document.querySelector("#online-unlimited-time");
 const onlineRandomEventsToggle = document.querySelector("#online-random-events");
 const onlineFreeStartToggle = document.querySelector("#online-free-start");
+const onlineItemOptions = document.querySelector("#online-item-options");
 const onlineJoinForm = document.querySelector("#online-join-form");
 const onlineRoomCodeInput = document.querySelector("#online-room-code");
 const onlineResumeButton = document.querySelector("#online-resume-room");
@@ -126,6 +128,7 @@ const clockIncrementInput = document.querySelector("#clock-increment-input");
 const unlimitedTimeToggle = document.querySelector("#unlimited-time-toggle");
 const randomEventsToggle = document.querySelector("#random-events-toggle");
 const adminModeToggle = document.querySelector("#admin-mode-toggle");
+const itemOptions = document.querySelector("#item-options");
 const adminTools = document.querySelector("#admin-tools");
 const adminItemList = document.querySelector("#admin-item-list");
 const adminHelp = document.querySelector("#admin-help");
@@ -168,6 +171,33 @@ const EVENT_ITEM_DEFINITIONS = {
   gangstaShield: { nameKey: "item.gangstaShield", icon: "/ui/assets/items/gangsta-shield.svg" },
   pointDestroy: { nameKey: "item.pointDestroy", icon: "/ui/assets/items/point-destroy.svg" }
 };
+
+function renderItemOptions(container, disabledItems = []) {
+  container.replaceChildren();
+  for (const type of EVENT_ITEMS) {
+    const definition = EVENT_ITEM_DEFINITIONS[type];
+    const label = document.createElement("label");
+    label.className = "item-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.itemType = type;
+    input.checked = !disabledItems.includes(type);
+    const icon = document.createElement("img");
+    icon.src = definition.icon;
+    icon.alt = "";
+    icon.setAttribute("aria-hidden", "true");
+    const name = document.createElement("span");
+    name.textContent = t(definition.nameKey);
+    label.append(input, icon, name);
+    container.append(label);
+  }
+}
+
+function disabledItemsFrom(container) {
+  return [...container.querySelectorAll("input[data-item-type]")]
+    .filter((input) => !input.checked)
+    .map((input) => input.dataset.itemType);
+}
 const freeStartToggle = document.querySelector("#free-start-toggle");
 const piecesMaxHint = document.querySelector("#pieces-max-hint");
 const toggleHint = document.querySelector("#free-start-hint");
@@ -424,6 +454,7 @@ function renderInventories() {
   adminItemList.replaceChildren();
   if (hasAdminItemPermission) {
     for (const type of EVENT_ITEMS) {
+      if (!isItemEnabled(state, type)) continue;
       const definition = EVENT_ITEM_DEFINITIONS[type];
       const itemId = "admin:" + type;
       const button = document.createElement("button");
@@ -1153,6 +1184,7 @@ function syncOnlineRoomSettings() {
   onlineUnlimitedTimeToggle.checked = settings.unlimitedTime;
   onlineRandomEventsToggle.checked = settings.randomEvents;
   onlineFreeStartToggle.checked = settings.freeStartingPositions;
+  renderItemOptions(onlineItemOptions, settings.disabledItems);
   onlineClockMinutesInput.disabled = settings.unlimitedTime;
   onlineClockIncrementInput.disabled = settings.unlimitedTime;
   const validDimensions = [Number(onlineBoardWidthInput.value), Number(onlineBoardHeightInput.value)]
@@ -1191,7 +1223,8 @@ function collectOnlineRoomSettings() {
     unlimitedTime,
     randomEvents: onlineRandomEventsToggle.checked,
     animationsEnabled: settings.animationsEnabled,
-    freeStartingPositions: onlineFreeStartToggle.checked
+    freeStartingPositions: onlineFreeStartToggle.checked,
+    disabledItems: disabledItemsFrom(onlineItemOptions)
   };
 }
 
@@ -1200,7 +1233,9 @@ function showOnlineRoom(message) {
   onlineSide = message.side;
   onlineRoomCodeValue.textContent = message.roomCode;
   onlineRoomStatus.textContent = t(message.status === "active" ? "online.joined" : "online.waiting");
-  onlinePlayerSide.textContent = t("online.yourSide", { side: message.side });
+  onlinePlayerSide.textContent = message.side
+    ? t("online.yourSide", { side: message.side })
+    : t("online.sidePending");
   onlineRoomEntry.hidden = true;
   onlineRoomLobby.hidden = false;
   onlineErrorElement.hidden = true;
@@ -2077,6 +2112,7 @@ function openSettings() {
   animationsToggle.checked = settings.animationsEnabled;
   adminModeToggle.checked = settings.adminMode;
   freeStartToggle.checked = settings.freeStartingPositions;
+  renderItemOptions(itemOptions, settings.disabledItems);
   syncTimeLimitSettings();
   toggleHint.textContent = t(freeStartToggle.checked ? "start.hidden" : "start.corners");
   updatePiecesLimit();
@@ -2149,7 +2185,8 @@ function applySettings(event) {
     randomEvents,
     animationsEnabled,
     freeStartingPositions: freeStartToggle.checked,
-    adminMode
+    adminMode,
+    disabledItems: disabledItemsFrom(itemOptions)
   };
   document.documentElement.dataset.gameAnimations = animationsEnabled ? "on" : "off";
   settingsModal.close();
@@ -2326,6 +2363,12 @@ applyTranslations();
 languageSelect.addEventListener("change", () => setLanguage(languageSelect.value));
 document.addEventListener("languagechange", () => {
   applyTranslations();
+  for (const container of [itemOptions, onlineItemOptions]) {
+    for (const input of container.querySelectorAll("input[data-item-type]")) {
+      const name = input.parentElement.querySelector("span");
+      if (name) name.textContent = t(EVENT_ITEM_DEFINITIONS[input.dataset.itemType].nameKey);
+    }
+  }
   languageSelect.value = getLanguage();
   if (menuNoticeTranslation) {
     menuNotice.textContent = t(menuNoticeTranslation.key, menuNoticeTranslation.params);

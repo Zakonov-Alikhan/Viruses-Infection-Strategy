@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
-  DEFAULT_SETTINGS, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState,
+  DEFAULT_SETTINGS, EVENT_ITEMS, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState,
   getSelectedAbility, isValidAreaTarget, isValidDebrisTarget, isValidPointDestroyTarget,
   isValidShieldTarget
 } from "../ui/game.js";
@@ -32,7 +32,7 @@ function normalizeCode(code) {
 
 const ROOM_SETTING_FIELDS = new Set([
   "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds",
-  "unlimitedTime", "randomEvents", "animationsEnabled", "freeStartingPositions"
+  "unlimitedTime", "randomEvents", "animationsEnabled", "freeStartingPositions", "disabledItems"
 ]);
 
 function normalizeRoomSettings(input, defaults) {
@@ -40,6 +40,9 @@ function normalizeRoomSettings(input, defaults) {
   if (!input || typeof input !== "object" || Array.isArray(input)
     || Object.keys(input).some((key) => !ROOM_SETTING_FIELDS.has(key))) return null;
   const settings = { ...defaults, ...input, adminMode: false };
+  if (input.disabledItems !== undefined
+    && (!Array.isArray(input.disabledItems) || input.disabledItems.some((type) => !EVENT_ITEMS.includes(type)))) return null;
+  settings.disabledItems = [...new Set(input.disabledItems ?? defaults.disabledItems ?? [])];
   if (settings.unlimitedTime) {
     if (!Number.isInteger(settings.clockMinutes) || settings.clockMinutes < 1 || settings.clockMinutes > 60) {
       settings.clockMinutes = DEFAULT_SETTINGS.clockMinutes;
@@ -72,6 +75,7 @@ export class RoomManager {
     playerTokenFactory = makePlayerToken,
     eventIdFactory = randomUUID,
     random = Math.random,
+    sideRandom = () => randomBytes(1)[0] / 256,
     scheduleTimeout = setTimeout,
     cancelTimeout = clearTimeout
   } = {}) {
@@ -85,6 +89,7 @@ export class RoomManager {
     this.playerTokenFactory = playerTokenFactory;
     this.eventIdFactory = eventIdFactory;
     this.random = random;
+    this.sideRandom = sideRandom;
     this.scheduleTimeout = scheduleTimeout;
     this.cancelTimeout = cancelTimeout;
     this.rooms = new Map();
@@ -135,7 +140,8 @@ export class RoomManager {
     return {
       ok: true,
       roomCode: code,
-      side: "X",
+      side: null,
+      seatKey: "X",
       playerToken: token,
       status: room.status,
       version: room.version,
@@ -152,17 +158,27 @@ export class RoomManager {
 
     const token = this.playerTokenFactory();
     const joinedAt = this.now();
-    room.seats.O = this.#newSeat(token, joinedAt);
+    const creatorSeat = room.seats.X;
+    const joiningSeat = this.#newSeat(token, joinedAt);
+    const creatorSide = this.sideRandom() < 0.5 ? "X" : "O";
+    const joiningSide = creatorSide === "X" ? "O" : "X";
+    room.seats = creatorSide === "X"
+      ? { X: creatorSeat, O: joiningSeat }
+      : { X: joiningSeat, O: creatorSeat };
+    for (const side of SIDES) {
+      if (room.seats[side].connection) room.seats[side].connection.side = side;
+    }
     room.status = "active";
     room.lastActivityAt = joinedAt;
     return {
       ok: true,
       roomCode: code,
-      side: "O",
+      side: joiningSide,
+      seatKey: joiningSide,
       playerToken: token,
       status: room.status,
       version: room.version,
-      state: getPlayerView(room.state, "O"),
+      state: getPlayerView(room.state, joiningSide),
       clock: this.#clockSnapshot(room)
     };
   }
@@ -175,7 +191,7 @@ export class RoomManager {
     if (seat.connection) return failure("seat-already-connected");
     if (typeof send !== "function") return failure("invalid-connection");
 
-    const connection = { send, lastSentVersion: -1 };
+    const connection = { side, send, lastSentVersion: -1 };
     seat.connection = connection;
     seat.disconnectedAt = null;
     room.lastActivityAt = this.now();
@@ -205,7 +221,8 @@ export class RoomManager {
     return {
       ok: true,
       roomCode: code,
-      side,
+      side: room.status === "waiting" ? null : side,
+      seatKey: side,
       status: room.status,
       version: room.version,
       state: getPlayerView(room.state, side),
@@ -260,7 +277,7 @@ export class RoomManager {
     return {
       ok: true,
       roomCode: room.code,
-      side,
+      side: room.status === "waiting" && !room.seats.O ? null : side,
       status: room.status,
       version: room.version,
       state: getPlayerView(room.state, side),
@@ -411,6 +428,7 @@ export class RoomManager {
       const envelope = {
         type,
         roomCode: room.code,
+        side,
         version: room.version,
         state: getPlayerView(room.state, side),
         clock: this.#clockSnapshot(room)

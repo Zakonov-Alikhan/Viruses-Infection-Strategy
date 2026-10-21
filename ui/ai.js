@@ -3,6 +3,7 @@ import {
   canCompleteTurn,
   getLegalMoves,
   getSelectedAbility,
+  isItemEnabled,
   isValidAreaTarget,
   isValidPointDestroyTarget,
   playMove,
@@ -10,7 +11,7 @@ import {
   useAntiBomb,
   useBomb,
   usePointDestroy
-} from "./game.js?v=20261021-rulesfix1";
+} from "./game.js?v=items-settings1";
 
 export const AI_DIFFICULTIES = Object.freeze(["easy", "medium", "hard"]);
 export const AI_SEARCH_LIMITS = Object.freeze({
@@ -72,6 +73,7 @@ function listPlacementActions(state) {
   }));
 
   for (const item of state.inventory?.[state.currentPlayer] || []) {
+    if (!isItemEnabled(state, item.type)) continue;
     if (item.type !== "freePlacement") continue;
     const abilityState = selectAbility(state, item.id);
     if (abilityState.selectedAbility !== item.id) continue;
@@ -147,7 +149,7 @@ function listComputerActions(state) {
   const placements = listPlacementActions(state);
   const availableItems = selected
     ? ATTACK_TYPES.has(selected.type) ? [selected] : []
-    : state.inventory?.[state.currentPlayer] || [];
+    : (state.inventory?.[state.currentPlayer] || []).filter((item) => isItemEnabled(state, item.type));
   return [...placements, ...listAttackActions(state, availableItems)];
 }
 
@@ -183,7 +185,9 @@ function itemValue(item) {
 }
 
 function inventoryScore(state, player) {
-  return (state.inventory?.[player] || []).reduce((sum, item) => sum + itemValue(item), 0);
+  return (state.inventory?.[player] || [])
+    .filter((item) => isItemEnabled(state, item.type))
+    .reduce((sum, item) => sum + itemValue(item), 0);
 }
 
 function protectionScore(state, player) {

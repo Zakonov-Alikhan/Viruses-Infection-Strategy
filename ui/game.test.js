@@ -4,11 +4,13 @@ import { applyComputerAction, chooseComputerAction } from "./ai.js";
 import {
   BLOCKED_CELL,
   DEFAULT_SETTINGS,
+  EVENT_ITEMS,
   canCompleteTurn,
   chooseAbilityTarget,
   createGameState,
   getLegalMoves,
   isLegalMove,
+  isItemEnabled,
   isValidDebrisTarget,
   playMove,
   selectAbility,
@@ -88,6 +90,58 @@ test("local, computer, and server command paths apply the same legal placement t
   assert.deepEqual(serverResult.state, localNext);
   assert.equal(state.board[action.row][action.col], "");
   assert.equal(state.currentPlayer, "X");
+});
+
+test("disabled items are omitted from random spawns and cannot be collected or activated", () => {
+  const disabledItems = EVENT_ITEMS.filter((type) => type !== "shield");
+  const state = makePlayingState({ randomEvents: true, disabledItems });
+  assert.equal(state.eventItems.length, 1);
+  assert.equal(state.eventItems[0].type, "shield");
+  assert.equal(isItemEnabled(state, "bomb"), false);
+  assert.equal(isItemEnabled(state, "shield"), true);
+
+  const withDisabledDrop = {
+    ...state,
+    eventItems: [{ id: 900, type: "bomb", row: 0, col: 1 }],
+    inventory: { X: [], O: [] }
+  };
+  const afterPickup = playMove(withDisabledDrop, 0, 1, () => 1);
+  assert.deepEqual(afterPickup.inventory.X, []);
+  assert.deepEqual(afterPickup.eventItems, []);
+
+  const owned = { ...state, inventory: { X: [{ id: 901, type: "bomb" }], O: [] } };
+  assert.equal(selectAbility(owned, 901), owned);
+  const rejected = processGameCommand(owned, "X", { type: "select-ability", itemId: 901 });
+  assert.equal(rejected.ok, false);
+  assert.deepEqual(rejected.state, owned);
+
+  const adminState = createGameState({
+    ...DEFAULT_SETTINGS, width: 10, height: 10, piecesPerTurn: 1,
+    randomEvents: false, freeStartingPositions: false, adminMode: true,
+    disabledItems: ["bomb"]
+  }, () => 0);
+  const adminRejected = processGameCommand(adminState, "X", {
+    type: "select-ability", itemId: "admin:bomb"
+  });
+  assert.equal(adminRejected.ok, false);
+  assert.deepEqual(adminRejected.state, adminState);
+
+  const botState = {
+    ...owned,
+    board: owned.board.map((row) => row.slice()),
+    inventory: { X: [{ id: 902, type: "bomb" }], O: [] }
+  };
+  botState.board[4][4] = "O";
+  const botAction = chooseComputerAction(botState, "medium");
+  assert.equal(botAction.type, "place");
+});
+
+test("disabling every item prevents event drops without disrupting normal play", () => {
+  const state = makePlayingState({ randomEvents: true, disabledItems: [...EVENT_ITEMS] });
+  assert.deepEqual(state.eventItems, []);
+  const next = playMove(state, 0, 1, () => 0);
+  assert.equal(next.board[0][1], "X");
+  assert.deepEqual(next.inventory.X, []);
 });
 
 test("debris rejects both players' occupied cells in core, local admin, and server command paths", () => {

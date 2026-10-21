@@ -84,6 +84,7 @@
             <label class="toggle-row" for="online-unlimited-time"><span class="toggle-copy"><strong data-i18n="settings.unlimited">Без ограничения по времени</strong></span><input class="switch-input" id="online-unlimited-time" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
             <label class="toggle-row" for="online-random-events"><span class="toggle-copy"><strong data-i18n="settings.random">Случайные события на карте</strong></span><input class="switch-input" id="online-random-events" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
             <label class="toggle-row" for="online-free-start"><span class="toggle-copy"><strong data-i18n="settings.freeStart">Свободное расположение в начале партии</strong></span><input class="switch-input" id="online-free-start" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span></span></span></label>
+            <fieldset class="item-options"><legend data-i18n="settings.itemsTitle">Предметы в партии</legend><p class="settings-summary" data-i18n="settings.itemsHelp">Отключённые предметы не появляются и не могут быть использованы.</p><div id="online-item-options" class="item-options-grid"></div></fieldset>
           </div>
         </details>
         <button id="online-create-room" class="button button-primary online-create-button" type="button" data-i18n="online.create">Создать комнату</button>
@@ -295,6 +296,7 @@
           <input id="random-events-toggle" class="switch-input" type="checkbox" role="switch" checked>
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>
+        <fieldset class="item-options"><legend data-i18n="settings.itemsTitle">Предметы в партии</legend><p class="settings-summary" data-i18n="settings.itemsHelp">Отключённые предметы не появляются и не могут быть использованы.</p><div id="item-options" class="item-options-grid"></div></fieldset>
         <label class="toggle-row" for="animations-toggle">
           <span class="toggle-copy"><strong data-i18n="settings.animations">Игровые анимации</strong><small data-i18n="settings.animationsHelp">Лёгкий вирусный эффект при постановке фигур; отключите, чтобы снизить нагрузку</small></span>
           <input id="animations-toggle" class="switch-input" type="checkbox" role="switch" checked>
@@ -385,6 +387,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=rulesfix1"></script>
+  <script type="module" src="/ui/script.js?v=items-settings1"></script>
 </body>
 </html>

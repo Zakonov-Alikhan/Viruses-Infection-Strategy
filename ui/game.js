@@ -10,7 +10,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   randomEvents: true,
   animationsEnabled: true,
   freeStartingPositions: true,
-  adminMode: false
+  adminMode: false,
+  disabledItems: Object.freeze([])
 });
 export const PLAYER_ROLES = Object.freeze({ PLAYER: "player", ADMIN: "admin" });
 export const PLAYER_PERMISSIONS = Object.freeze({ USE_OWN_ITEMS: "items:use-owned", USE_ANY_ITEM: "items:use-any" });
@@ -134,6 +135,8 @@ function appendMessage(current, addition) {
 function spawnEventItem(state, random, guaranteed = false) {
   if (!state.settings.randomEvents || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD) return state;
   if (!guaranteed && random() >= EVENT_SPAWN_CHANCE) return state;
+  const enabledItems = EVENT_ITEMS.filter((type) => isItemEnabled(state, type));
+  if (enabledItems.length === 0) return state;
 
   const occupiedByEvent = new Set(state.eventItems.map((item) => item.row + "," + item.col));
   const available = [];
@@ -147,7 +150,7 @@ function spawnEventItem(state, random, guaranteed = false) {
   if (available.length === 0) return state;
 
   const location = available[Math.min(available.length - 1, Math.floor(random() * available.length))];
-  const type = EVENT_ITEMS[Math.min(EVENT_ITEMS.length - 1, Math.floor(random() * EVENT_ITEMS.length))];
+  const type = enabledItems[Math.min(enabledItems.length - 1, Math.floor(random() * enabledItems.length))];
   const eventItem = { id: state.nextEventItemId, type, ...location };
   return {
     ...state,
@@ -175,13 +178,19 @@ export function hasPermission(state, player, permission) {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }
 
+export function isItemEnabled(state, type) {
+  const disabledItems = state?.settings?.disabledItems;
+  return EVENT_ITEMS.includes(type)
+    && !(Array.isArray(disabledItems) && disabledItems.includes(type));
+}
+
 function getAbility(state, player, itemId) {
   const owned = state.inventory[player].find((item) => item.id === itemId);
-  if (owned) return owned;
+  if (owned) return isItemEnabled(state, owned.type) ? owned : null;
   if (typeof itemId !== "string" || !itemId.startsWith("admin:")
     || !hasPermission(state, player, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return null;
   const type = itemId.slice("admin:".length);
-  return EVENT_ITEMS.includes(type) ? { id: itemId, type, adminGranted: true } : null;
+  return isItemEnabled(state, type) ? { id: itemId, type, adminGranted: true } : null;
 }
 
 export function getSelectedAbility(state) {
@@ -276,7 +285,10 @@ function placeInOppositeCorners(settings, random) {
 }
 
 export function createGameState(settings = DEFAULT_SETTINGS, random = Math.random) {
-  const appliedSettings = { ...settings };
+  const disabledItems = Array.isArray(settings.disabledItems)
+    ? [...new Set(settings.disabledItems.filter((type) => EVENT_ITEMS.includes(type)))]
+    : [];
+  const appliedSettings = { ...DEFAULT_SETTINGS, ...settings, disabledItems };
   const state = {
     board: emptyBoard(appliedSettings.width, appliedSettings.height),
     settings: appliedSettings,
@@ -620,7 +632,8 @@ export function playMove(state, row, col, random = Math.random) {
   const piecesLeft = state.piecesLeft - 1;
   const lastDestroyed = resolveContact(row, col, player, board, state.protections);
   const eventIndex = state.eventItems.findIndex((item) => item.row === row && item.col === col);
-  const collectedItem = eventIndex >= 0 ? state.eventItems[eventIndex] : null;
+  const candidateItem = eventIndex >= 0 ? state.eventItems[eventIndex] : null;
+  const collectedItem = candidateItem && isItemEnabled(state, candidateItem.type) ? candidateItem : null;
   let next = {
     ...state,
     board,

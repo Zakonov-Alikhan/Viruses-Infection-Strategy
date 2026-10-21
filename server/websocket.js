@@ -172,13 +172,12 @@ export function createMultiplayerServer({
         if (!createLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
         const created = roomManager.createRoom(message.settings);
         if (!created.ok) return sendError(socket, created.error.code, message.requestId);
-        const attached = roomManager.attachConnection(created.roomCode, created.side, (outgoing) => {
+        const attached = roomManager.attachConnection(created.roomCode, created.seatKey, (outgoing) => {
           safeJsonSend(socket, outgoing, attached.connection);
         });
         if (!attached.ok) return sendError(socket, attached.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: created.roomCode,
-          side: created.side,
           connection: attached.connection
         });
         safeJsonSend(socket, {
@@ -203,13 +202,12 @@ export function createMultiplayerServer({
         if (!joinLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
         const joined = roomManager.joinRoom(message.code);
         if (!joined.ok) return sendError(socket, joined.error.code, message.requestId);
-        const attached = roomManager.attachConnection(joined.roomCode, joined.side, (outgoing) => {
+        const attached = roomManager.attachConnection(joined.roomCode, joined.seatKey, (outgoing) => {
           safeJsonSend(socket, outgoing, attached.connection);
         });
         if (!attached.ok) return sendError(socket, attached.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: joined.roomCode,
-          side: joined.side,
           connection: attached.connection
         });
         safeJsonSend(socket, {
@@ -239,7 +237,6 @@ export function createMultiplayerServer({
         if (!resumed.ok) return sendError(socket, resumed.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: resumed.roomCode,
-          side: resumed.side,
           connection: resumed.connection
         });
         safeJsonSend(socket, {
@@ -261,7 +258,7 @@ export function createMultiplayerServer({
           return sendError(socket, "invalid-message", message.requestId);
         }
         if (!context) return sendError(socket, "not-in-room", message.requestId);
-        roomManager.submitCommand(context.roomCode, context.side, message.command).then((result) => {
+        roomManager.submitCommand(context.roomCode, context.connection.side, message.command).then((result) => {
           if (!result.ok && socket.readyState === WebSocket.OPEN) {
             safeJsonSend(socket, {
               type: "command-error",
@@ -282,7 +279,7 @@ export function createMultiplayerServer({
           return sendError(socket, "invalid-coordinate");
         }
         if (!clearing && !aimLimiter.allow(clientAddress)) return;
-        const result = roomManager.updateAim(context.roomCode, context.side,
+        const result = roomManager.updateAim(context.roomCode, context.connection.side,
           clearing ? null : { row: message.row, col: message.col });
         if (!result.ok) sendError(socket, result.error.code);
         return;
@@ -293,7 +290,7 @@ export function createMultiplayerServer({
 
     socket.on("close", () => {
       const context = contexts.get(socket);
-      if (context) roomManager.detachConnection(context.roomCode, context.side, context.connection);
+      if (context) roomManager.detachConnection(context.roomCode, context.connection.side, context.connection);
     });
   });
 
