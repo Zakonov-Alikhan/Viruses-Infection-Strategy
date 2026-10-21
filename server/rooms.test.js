@@ -225,6 +225,31 @@ test("routes commands with the assigned side and sends per-player allow-listed v
   assert.equal(wrongSide.version, 1);
 });
 
+test("room broadcasts one server-resolved random artifact reward to both clients", async () => {
+  const manager = makeManager({ random: () => 0 });
+  const room = manager.createRoom();
+  manager.joinRoom(room.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(room.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(room.roomCode, "O", (message) => received.O.push(message));
+  await startGame(manager, room.roomCode, received);
+
+  const internal = manager.rooms.get(room.roomCode);
+  internal.state = {
+    ...internal.state,
+    eventItems: [{ id: 702, type: "randomArtifact", row: 0, col: 1 }]
+  };
+  const result = await manager.submitCommand(room.roomCode, "X", {
+    type: "place", row: 0, col: 1
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(received.X.at(-1).state.inventory.X, [{ id: 702, type: "bomb" }]);
+  assert.deepEqual(received.O.at(-1).state.inventory.X, [{ id: 702, type: "bomb" }]);
+  assert.equal(received.X.at(-1).version, received.O.at(-1).version);
+  assert.equal(internal.state.eventItems.length, 0);
+});
+
 test("serializes consecutive commands and publishes monotonically increasing versions", async () => {
   const manager = makeManager();
   const room = manager.createRoom();

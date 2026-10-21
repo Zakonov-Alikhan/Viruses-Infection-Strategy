@@ -138,6 +138,100 @@ test("disabled items are omitted from random spawns and cannot be collected or a
   assert.equal(botAction.type, "place");
 });
 
+test("random artifact gives only an enabled existing item and never returns itself", () => {
+  const enabled = new Set(["bomb", "antiBomb", "randomArtifact"]);
+  const state = {
+    ...makePlayingState({ disabledItems: EVENT_ITEMS.filter((type) => !enabled.has(type)) }),
+    eventItems: [{ id: 71, type: "randomArtifact", row: 0, col: 1 }]
+  };
+  const before = structuredClone(state);
+  const next = playMove(state, 0, 1, () => 0.999);
+
+  assert.deepEqual(next.inventory.X, [{ id: 71, type: "antiBomb", row: 0, col: 1 }]);
+  assert.equal(EVENT_ITEMS.includes(next.inventory.X[0].type), true);
+  assert.notEqual(next.inventory.X[0].type, "randomArtifact");
+  assert.deepEqual(next.message.at(-1), {
+    key: "message.collected", params: { player: "X", type: "antiBomb" }
+  });
+  assert.deepEqual(state, before);
+});
+
+test("random artifact spawns only when it has a possible result", () => {
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    width: 10,
+    height: 10,
+    piecesPerTurn: 1,
+    randomEvents: true,
+    freeStartingPositions: false,
+    adminMode: true
+  };
+  const canResolve = createGameState({
+    ...settings,
+    disabledItems: EVENT_ITEMS.filter((type) => !["bomb", "randomArtifact"].includes(type))
+  }, () => 0.999);
+  assert.equal(canResolve.eventItems.length, 1);
+  assert.equal(canResolve.eventItems[0].type, "randomArtifact");
+
+  const noResult = createGameState({
+    ...settings,
+    disabledItems: EVENT_ITEMS.filter((type) => type !== "randomArtifact")
+  }, () => 0.999);
+  assert.deepEqual(noResult.eventItems, []);
+  assert.equal(placeEditorObject(noResult, "X", {
+    kind: "item", itemType: "randomArtifact", row: 0, col: 1
+  }), noResult);
+});
+
+test("random artifact respects full-inventory replacement and preserves its unique item id", () => {
+  const enabled = new Set(["bomb", "antiBomb", "debris", "shield", "randomArtifact"]);
+  const base = makePlayingState({ disabledItems: EVENT_ITEMS.filter((type) => !enabled.has(type)) });
+  const state = {
+    ...base,
+    eventItems: [{ id: 81, type: "randomArtifact", row: 0, col: 1 }],
+    inventory: {
+      X: [{ id: 11, type: "bomb" }, { id: 12, type: "antiBomb" }, { id: 13, type: "debris" }],
+      O: []
+    }
+  };
+  const next = playMove(state, 0, 1, () => 0.999);
+
+  assert.deepEqual(next.inventory.X, [
+    { id: 12, type: "antiBomb" },
+    { id: 13, type: "debris" },
+    { id: 81, type: "shield", row: 0, col: 1 }
+  ]);
+  assert.equal(next.inventory.X.length, 3);
+  assert.equal(state.inventory.X[0].id, 11);
+});
+
+test("random artifact resolving to extra turn uses the existing queued-turn transition", () => {
+  const enabled = new Set(["extraTurn", "randomArtifact"]);
+  const base = makePlayingState({ disabledItems: EVENT_ITEMS.filter((type) => !enabled.has(type)) });
+  const state = {
+    ...base,
+    eventItems: [{ id: 91, type: "randomArtifact", row: 0, col: 1 }]
+  };
+  const next = playMove(state, 0, 1, () => 0.5);
+
+  assert.equal(next.currentPlayer, "X");
+  assert.equal(next.piecesLeft, 1);
+  assert.deepEqual(next.pendingExtraTurns.X, []);
+  assert.deepEqual(next.inventory.X, []);
+  assert.equal(state.currentPlayer, "X");
+  assert.deepEqual(state.eventItems, [{ id: 91, type: "randomArtifact", row: 0, col: 1 }]);
+});
+
+test("random artifact is a collectible object, not an activatable ability", () => {
+  const state = makePlayingState({ adminMode: true });
+  const selected = selectAbility(state, "admin:randomArtifact");
+  assert.equal(selected, state);
+  assert.equal(selectAbility({
+    ...state,
+    inventory: { X: [{ id: 92, type: "randomArtifact" }], O: [] }
+  }, 92).selectedAbility, null);
+});
+
 test("disabling every item prevents event drops without disrupting normal play", () => {
   const state = makePlayingState({ randomEvents: true, disabledItems: [...EVENT_ITEMS] });
   assert.deepEqual(state.eventItems, []);

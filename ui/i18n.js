@@ -1,5 +1,5 @@
-import ruLocale from "./locale-ru.js?v=restart-consensus1";
-import enLocale from "./locale-en.js?v=restart-consensus1";
+import ruLocale from "./locale-ru.js?v=random-artifact1";
+import enLocale from "./locale-en.js?v=random-artifact1";
 
 const dictionaries = Object.freeze({ ru: ruLocale, en: enLocale });
 const supportedLanguages = Object.keys(dictionaries);

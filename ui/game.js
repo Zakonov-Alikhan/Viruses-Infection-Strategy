@@ -27,8 +27,9 @@ const DIRECTIONS = [
 ];
 const ORTHOGONAL = new Set(["-1,0", "1,0", "0,-1", "0,1"]);
 export const EVENT_ITEMS = Object.freeze([
-  "bomb", "freePlacement", "extraTurn", "antiBomb", "pointDestroy", "debris", "shield", "gangstaShield"
+  "bomb", "freePlacement", "extraTurn", "antiBomb", "pointDestroy", "debris", "shield", "gangstaShield", "randomArtifact"
 ]);
+const RANDOM_ARTIFACT = "randomArtifact";
 const EVENT_SPAWN_CHANCE = 0.3;
 const MAX_EVENT_ITEMS_ON_BOARD = 3;
 const MAX_INVENTORY_ITEMS = 3;
@@ -132,10 +133,16 @@ function appendMessage(current, addition) {
   return [...(Array.isArray(current) ? current : current ? [current] : []), addition];
 }
 
+function randomArtifactCandidates(state) {
+  return EVENT_ITEMS.filter((type) => type !== RANDOM_ARTIFACT && isItemEnabled(state, type));
+}
+
 function spawnEventItem(state, random, guaranteed = false) {
   if (!state.settings.randomEvents || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD) return state;
   if (!guaranteed && random() >= EVENT_SPAWN_CHANCE) return state;
-  const enabledItems = EVENT_ITEMS.filter((type) => isItemEnabled(state, type));
+  const hasRandomArtifactResult = randomArtifactCandidates(state).length > 0;
+  const enabledItems = EVENT_ITEMS.filter((type) => isItemEnabled(state, type)
+    && (type !== RANDOM_ARTIFACT || hasRandomArtifactResult));
   if (enabledItems.length === 0) return state;
 
   const occupiedByEvent = new Set(state.eventItems.map((item) => item.row + "," + item.col));
@@ -201,6 +208,7 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
   if (object.kind === "item") {
     if (Object.keys(object).some((key) => !["kind", "itemType", "row", "col"].includes(key))
       || !isItemEnabled(state, object.itemType) || itemAtTarget || protectionAtTarget
+      || (object.itemType === RANDOM_ARTIFACT && randomArtifactCandidates(state).length === 0)
       || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD
       || !Number.isSafeInteger(state.nextEventItemId) || state.nextEventItemId < 0) return state;
     const usedIds = new Set(state.eventItems.map((item) => item.id));
@@ -232,11 +240,11 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
 
 function getAbility(state, player, itemId) {
   const owned = state.inventory[player].find((item) => item.id === itemId);
-  if (owned) return isItemEnabled(state, owned.type) ? owned : null;
+  if (owned) return owned.type !== RANDOM_ARTIFACT && isItemEnabled(state, owned.type) ? owned : null;
   if (typeof itemId !== "string" || !itemId.startsWith("admin:")
     || !hasPermission(state, player, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return null;
   const type = itemId.slice("admin:".length);
-  return isItemEnabled(state, type) ? { id: itemId, type, adminGranted: true } : null;
+  return type !== RANDOM_ARTIFACT && isItemEnabled(state, type) ? { id: itemId, type, adminGranted: true } : null;
 }
 
 export function getSelectedAbility(state) {
@@ -685,7 +693,7 @@ export function playMove(state, row, col, random = Math.random) {
   const lastDestroyed = resolveContact(row, col, player, board, state.protections);
   const eventIndex = state.eventItems.findIndex((item) => item.row === row && item.col === col);
   const candidateItem = eventIndex >= 0 ? state.eventItems[eventIndex] : null;
-  const collectedItem = candidateItem && isItemEnabled(state, candidateItem.type) ? candidateItem : null;
+  let collectedItem = candidateItem && isItemEnabled(state, candidateItem.type) ? candidateItem : null;
   let next = {
     ...state,
     board,
@@ -698,6 +706,18 @@ export function playMove(state, row, col, random = Math.random) {
     lastDestroyed,
     message: lastDestroyed.length > 0 ? message("message.destroyed", { count: lastDestroyed.length }) : []
   };
+
+  if (collectedItem) {
+    if (collectedItem.type === RANDOM_ARTIFACT) {
+      const candidates = randomArtifactCandidates(next);
+      if (candidates.length > 0) {
+        const resultIndex = Math.min(candidates.length - 1, Math.floor(random() * candidates.length));
+        collectedItem = { ...collectedItem, type: candidates[resultIndex] };
+      } else {
+        collectedItem = null;
+      }
+    }
+  }
 
   if (collectedItem) {
     const acquired = acquireEventItem(next, player, collectedItem);

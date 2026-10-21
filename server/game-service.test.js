@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_SETTINGS,
+  EVENT_ITEMS,
   EMPTY_CELL,
   createGameState
 } from "../ui/game.js";
@@ -51,6 +52,40 @@ test("accepts a legal placement through the game engine", () => {
   assert.equal(result.state.board[0][8], "X");
   assert.equal(result.state.currentPlayer, "O");
   assert.equal(state.board[0][8], EMPTY_CELL);
+});
+
+test("server resolves a random artifact once and publishes the same valid reward to both player views", () => {
+  const enabled = new Set(["bomb", "randomArtifact"]);
+  const base = playingState({ disabledItems: EVENT_ITEMS.filter((type) => !enabled.has(type)) });
+  const state = {
+    ...base,
+    eventItems: [{ id: 701, type: "randomArtifact", row: 0, col: 8 }]
+  };
+  const before = structuredClone(state);
+  const command = { type: "place", row: 0, col: 8 };
+  const accepted = processGameCommand(state, "X", command, { random: () => 0.9 });
+
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.state.inventory.X, [{ id: 701, type: "bomb", row: 0, col: 8 }]);
+  assert.equal(accepted.state.eventItems.length, 0);
+  assert.deepEqual(getPlayerView(accepted.state, "X").inventory.X, [{ id: 701, type: "bomb" }]);
+  assert.deepEqual(getPlayerView(accepted.state, "O").inventory.X, [{ id: 701, type: "bomb" }]);
+  assert.deepEqual(state, before);
+
+  const duplicate = processGameCommand(accepted.state, "X", command, { random: () => 0.9 });
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.state, accepted.state);
+  assert.deepEqual(accepted.state.inventory.X, [{ id: 701, type: "bomb", row: 0, col: 8 }]);
+});
+
+test("server does not allow a player or admin tool to activate the collectible random artifact directly", () => {
+  const state = playingState({ adminMode: true });
+  const result = processGameCommand(state, "X", {
+    type: "select-ability", itemId: "admin:randomArtifact"
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "invalid-action");
+  assert.equal(result.state, state);
 });
 
 test("rejects commands from the wrong side without changing the source state", () => {

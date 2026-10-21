@@ -27,9 +27,9 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=board-editor1";
-import { chooseComputerAction, applyComputerAction } from "./ai.js?v=items-settings1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=restart-consensus1";
+} from "./game.js?v=random-artifact1";
+import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=random-artifact1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -194,7 +194,8 @@ const EVENT_ITEM_DEFINITIONS = {
   debris: { nameKey: "item.debris", icon: "/ui/assets/items/debris.svg" },
   shield: { nameKey: "item.shield", icon: "/ui/assets/items/shield.svg" },
   gangstaShield: { nameKey: "item.gangstaShield", icon: "/ui/assets/items/gangsta-shield.svg" },
-  pointDestroy: { nameKey: "item.pointDestroy", icon: "/ui/assets/items/point-destroy.svg" }
+  pointDestroy: { nameKey: "item.pointDestroy", icon: "/ui/assets/items/point-destroy.svg" },
+  randomArtifact: { nameKey: "item.randomArtifact", icon: "/ui/assets/items/random-artifact.svg" }
 };
 
 function renderItemOptions(container, disabledItems = []) {
@@ -491,7 +492,7 @@ function renderInventories() {
   adminItemList.hidden = onlineMode;
   if (hasAdminItemPermission) {
     for (const type of EVENT_ITEMS) {
-      if (!isItemEnabled(state, type)) continue;
+      if (type === "randomArtifact" || !isItemEnabled(state, type)) continue;
       const definition = EVENT_ITEM_DEFINITIONS[type];
       const itemId = "admin:" + type;
       const button = document.createElement("button");
