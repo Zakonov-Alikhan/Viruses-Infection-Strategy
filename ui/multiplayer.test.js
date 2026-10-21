@@ -158,6 +158,80 @@ test("client handles reconnect snapshots and resets version for a new room", asy
   storageX.removeItem("viruses.online-room");
 });
 
+test("creator can reopen the waiting room in the same tab without trying to claim its connected seat", async (t) => {
+  const { x } = await makeFixture(t);
+  const created = await x.createRoom();
+  const resumed = await x.resumeSavedRoom();
+  assert.equal(resumed.type, "room-resumed");
+  assert.equal(resumed.roomCode, created.roomCode);
+  assert.equal(resumed.side, "X");
+  assert.equal(resumed.status, "waiting");
+  assert.equal(x.connected, true);
+});
+
+test("room recovery token migrates from tab storage to persistent browser storage", () => {
+  const priorLocal = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const priorSession = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const local = new MemoryStorage();
+  const session = new MemoryStorage();
+  session.setItem("viruses.online-room", JSON.stringify({
+    roomCode: "ROOM1234", side: "X", playerToken: "legacy-private-token-12345678901234567890"
+  }));
+  try {
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: local });
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: session });
+    const client = new MultiplayerClient({ WebSocketImpl: BrowserLikeWebSocket });
+    assert.equal(client.savedSession.roomCode, "ROOM1234");
+    assert.equal(local.getItem("viruses.online-room") !== null, true);
+    assert.equal(session.getItem("viruses.online-room"), null);
+  } finally {
+    if (priorLocal) Object.defineProperty(globalThis, "localStorage", priorLocal);
+    else delete globalThis.localStorage;
+    if (priorSession) Object.defineProperty(globalThis, "sessionStorage", priorSession);
+    else delete globalThis.sessionStorage;
+  }
+});
+
+test("online clients receive validated opponent aim and confirmed attack visuals", async (t) => {
+  const { x, o, roomManager } = await makeFixture(t);
+  const xEvents = eventLog(x);
+  const oEvents = eventLog(o);
+  const created = await x.createRoom();
+  await o.joinRoom(created.roomCode);
+  await xEvents.waitFor((event) => event.type === "room-ready");
+  const xSetup = xEvents.waitFor((event) => event.type === "state" && event.state.phase === "setup-o");
+  x.sendCommand({ type: "choose-start", row: 0, col: 0 });
+  await xSetup;
+  const playing = oEvents.waitFor((event) => event.type === "state" && event.state.phase === "playing");
+  o.sendCommand({ type: "choose-start", row: 9, col: 9 });
+  await playing;
+
+  const internal = roomManager.rooms.get(created.roomCode);
+  internal.state = {
+    ...internal.state,
+    inventory: { X: [{ id: 701, type: "bomb" }], O: [] },
+    selectedAbility: null
+  };
+  const selection = xEvents.waitFor((event) => event.type === "state" && event.state.selectedAbility === 701);
+  x.sendCommand({ type: "select-ability", itemId: 701 });
+  await selection;
+  assert.equal(x.sendAim(2, 2), true);
+  const aim = await oEvents.waitFor((event) => event.type === "aim" && event.target?.row === 2);
+  assert.equal(aim.side, "X");
+  assert.equal(aim.target.abilityType, "bomb");
+
+  const xVisual = xEvents.waitFor((event) => event.type === "visual-event");
+  const oVisual = oEvents.waitFor((event) => event.type === "visual-event");
+  x.sendCommand({ type: "ability-target", itemId: 701, row: 2, col: 2 });
+  const [xEvent, oEvent] = await Promise.all([xVisual, oVisual]);
+  assert.equal(xEvent.eventId, oEvent.eventId);
+  assert.equal(xEvent.abilityType, "bomb");
+  assert.equal(xEvent.row, 2);
+  assert.equal(oEvent.roomCode, created.roomCode);
+  const clear = await oEvents.waitFor((event) => event.type === "aim" && event.target === null);
+  assert.equal(clear.roomCode, created.roomCode);
+});
+
 test("WebSocket address defaults are local-only and secure on HTTPS origins", () => {
   assert.equal(MULTIPLAYER_CONFIG.localWebSocketUrl, "ws://127.0.0.1:3001/ws");
   assert.equal(resolveMultiplayerUrl({ location: { hostname: "localhost" } }), MULTIPLAYER_CONFIG.localWebSocketUrl);

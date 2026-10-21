@@ -1,5 +1,9 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { DEFAULT_SETTINGS, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState } from "../ui/game.js";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  DEFAULT_SETTINGS, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState,
+  getSelectedAbility, isValidAreaTarget, isValidDebrisTarget, isValidPointDestroyTarget,
+  isValidShieldTarget
+} from "../ui/game.js";
 import { getPlayerView, processGameCommand } from "./game-service.js";
 
 const SIDES = ["X", "O"];
@@ -66,6 +70,7 @@ export class RoomManager {
     now = Date.now,
     roomCodeFactory = makeRoomCode,
     playerTokenFactory = makePlayerToken,
+    eventIdFactory = randomUUID,
     random = Math.random,
     scheduleTimeout = setTimeout,
     cancelTimeout = clearTimeout
@@ -78,6 +83,7 @@ export class RoomManager {
     this.now = now;
     this.roomCodeFactory = roomCodeFactory;
     this.playerTokenFactory = playerTokenFactory;
+    this.eventIdFactory = eventIdFactory;
     this.random = random;
     this.scheduleTimeout = scheduleTimeout;
     this.cancelTimeout = cancelTimeout;
@@ -122,6 +128,7 @@ export class RoomManager {
         X: this.#newSeat(token, createdAt),
         O: null
       },
+      aims: { X: null, O: null },
       queue: Promise.resolve()
     };
     this.rooms.set(code, room);
@@ -214,7 +221,36 @@ export class RoomManager {
     seat.connection = null;
     seat.disconnectedAt = this.now();
     room.lastActivityAt = seat.disconnectedAt;
+    this.#clearAim(room, side);
     return true;
+  }
+
+  updateAim(rawCode, side, target) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return failure("room-not-found");
+    if (!room.seats[side]?.connection) return failure("player-disconnected");
+    if (target === null) {
+      this.#setAim(room, side, null);
+      return { ok: true };
+    }
+    if (room.status !== "active" || room.state.phase !== "playing") return failure("wrong-phase");
+    if (room.state.currentPlayer !== side) return failure("not-your-turn");
+    const ability = getSelectedAbility(room.state);
+    if (!ability) return failure("ability-not-selected");
+    const { row, col } = target;
+    if (!Number.isInteger(row) || !Number.isInteger(col)) return failure("invalid-coordinate");
+    const valid = ability.type === "bomb" || ability.type === "antiBomb"
+      ? isValidAreaTarget(room.state, row, col)
+      : ability.type === "pointDestroy"
+        ? isValidPointDestroyTarget(room.state, row, col)
+        : ability.type === "debris"
+          ? isValidDebrisTarget(room.state, row, col)
+          : ability.type === "shield" || ability.type === "gangstaShield"
+            ? isValidShieldTarget(room.state, row, col)
+            : false;
+    if (!valid) return failure("invalid-target");
+    this.#setAim(room, side, { row, col, abilityType: ability.type });
+    return { ok: true };
   }
 
   getSnapshot(rawCode, side) {
@@ -259,11 +295,25 @@ export class RoomManager {
       if (!result.ok) return { ...result, version: room.version };
 
       const previousState = room.state;
+      const previousAbility = command.type === "ability-target" ? getSelectedAbility(previousState) : null;
       room.state = result.state;
       this.#updateClockAfterCommand(room, previousState, room.state, now);
       room.version += 1;
       room.lastActivityAt = this.now();
+      this.#clearAllAims(room);
       this.#broadcastSnapshots(room, "state");
+      if (previousAbility && ["bomb", "antiBomb", "pointDestroy"].includes(previousAbility.type)
+        && room.state.board !== previousState.board && room.state.lastDestroyed.length > 0) {
+        const visualEvent = {
+          type: "visual-event",
+          eventId: this.eventIdFactory(),
+          roomCode: room.code,
+          abilityType: previousAbility.type,
+          row: command.row,
+          col: command.col
+        };
+        this.#broadcastEphemeral(room, visualEvent);
+      }
       return { ok: true, version: room.version };
     });
     room.queue = operation.then(() => undefined, () => undefined);
@@ -318,6 +368,40 @@ export class RoomManager {
 
   #newSeat(token, disconnectedAt) {
     return { tokenHash: hashToken(token), connection: null, disconnectedAt };
+  }
+
+  #setAim(room, side, target) {
+    const previous = room.aims[side];
+    if (JSON.stringify(previous) === JSON.stringify(target)) return;
+    room.aims[side] = target;
+    const opponent = side === "X" ? "O" : "X";
+    const connection = room.seats[opponent]?.connection;
+    if (!connection) return;
+    try {
+      connection.send({ type: "aim", roomCode: room.code, side, target });
+    } catch {
+      this.detachConnection(room.code, opponent, connection);
+    }
+  }
+
+  #clearAim(room, side) {
+    if (room.aims[side] !== null) this.#setAim(room, side, null);
+  }
+
+  #clearAllAims(room) {
+    for (const side of SIDES) this.#clearAim(room, side);
+  }
+
+  #broadcastEphemeral(room, message) {
+    for (const side of SIDES) {
+      const connection = room.seats[side]?.connection;
+      if (!connection) continue;
+      try {
+        connection.send(message);
+      } catch {
+        this.detachConnection(room.code, side, connection);
+      }
+    }
   }
 
   #broadcastSnapshots(room, type) {
@@ -413,6 +497,7 @@ export class RoomManager {
     this.#stopClock(room);
     room.version += 1;
     room.lastActivityAt = now;
+    this.#clearAllAims(room);
     this.#broadcastSnapshots(room, "state");
     return true;
   }

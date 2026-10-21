@@ -62,7 +62,7 @@ h2 { margin-bottom: 10px; font-size: 21px; letter-spacing: -.035em; }
 .board-row { display: grid; grid-template-columns: 21px minmax(0, 1fr); align-items: stretch; gap: 5px; width: 100%; }
 .axis-side { display: grid; grid-template-rows: repeat(var(--board-height, 15), minmax(0, 1fr)); gap: 2px; width: 21px; margin: 4px 0; color: #829796; text-align: center; font-size: 9px; font-weight: 700; }
 .axis-side span { display: grid; place-items: center; }
-.game-board { display: grid; grid-template-columns: repeat(var(--board-width, 15), minmax(0, 1fr)); grid-template-rows: repeat(var(--board-height, 15), minmax(0, 1fr)); width: 100%; min-width: 0; aspect-ratio: var(--board-width, 15) / var(--board-height, 15); gap: 2px; margin: 0; padding: 3px; border: 1px solid #435856; border-radius: 9px; background: #243438; }
+.game-board { position: relative; display: grid; grid-template-columns: repeat(var(--board-width, 15), minmax(0, 1fr)); grid-template-rows: repeat(var(--board-height, 15), minmax(0, 1fr)); width: 100%; min-width: 0; aspect-ratio: var(--board-width, 15) / var(--board-height, 15); gap: 2px; margin: 0; padding: 3px; border: 1px solid #435856; border-radius: 9px; background: #243438; }
 .cell { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; padding: 0; overflow: hidden; border: 1px solid rgba(176, 205, 190, .1); border-radius: 3px; color: var(--text); background: #1a292c; cursor: pointer; font-size: var(--cell-font-size, clamp(8px, 1.25vw, 16px)); font-weight: 850; transition: background .12s ease, border-color .12s ease, transform .12s ease; }
 .cell:not(:disabled):hover { z-index: 1; border-color: #a5ca9c; background: #2b4140; transform: scale(1.08); }
 .game-board.is-aiming-area .cell:not(:disabled) { cursor: crosshair; }
@@ -509,6 +509,10 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .bomb-aim-overlay[hidden] { display: none; }
 .game-board.is-aiming-area .cell:disabled { pointer-events: none; }
 .area-effect { position: absolute; z-index: 7; overflow: hidden; pointer-events: none; }
+.remote-aim-overlay { position: absolute; z-index: 6; border: 2px solid var(--remote-aim-color); border-radius: 5px; background: color-mix(in srgb, var(--remote-aim-color) 12%, transparent); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), 0 0 9px color-mix(in srgb, var(--remote-aim-color) 38%, transparent); pointer-events: none; }
+.remote-aim-overlay[hidden] { display: none; }
+.remote-aim-x { --remote-aim-color: var(--player-x-accent); }
+.remote-aim-o { --remote-aim-color: var(--player-o-accent); }
 .area-effect[hidden] { display: none; }
 .area-effect-bomb::before { position: absolute; top: 50%; left: 50%; width: 72%; height: 72%; border: 4px solid #ff493f; border-radius: 50%; background: radial-gradient(circle, rgba(255,66,43,.74), rgba(255,48,35,.24) 48%, transparent 72%); box-shadow: 0 0 22px 5px rgba(255,54,40,.88), inset 0 0 14px rgba(255,102,65,.72); content: ""; opacity: 0; transform: translate(-50%,-50%) scale(.03); animation: bomb-single-wave .19s cubic-bezier(.12,.78,.23,1) var(--effect-delay, 0ms) both; }
 .area-effect-antiBomb::before { position: absolute; inset: 0; border: 2px solid rgba(228,178,113,.92); border-radius: 5px; background: linear-gradient(145deg, #be8752, #795438 48%, #4c392d); box-shadow: inset 0 0 18px rgba(35,25,18,.38), 0 3px 10px rgba(0,0,0,.48); clip-path: inset(50%); content: ""; animation: antibomb-square-fill .28s cubic-bezier(.16,.8,.24,1) var(--effect-delay, 0ms) both; }

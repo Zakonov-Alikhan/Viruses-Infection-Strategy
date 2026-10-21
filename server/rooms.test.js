@@ -251,6 +251,23 @@ test("supports reconnection only with the seat token and within the grace period
   assert.equal(manager.resumeRoom(created.roomCode, created.playerToken, () => {}).error.code, "reconnect-expired");
 });
 
+test("the room creator can reclaim X after disconnecting even after O joins, using only the private seat token", () => {
+  let now = 1_000;
+  const manager = makeManager({ now: () => now, reconnectGraceMs: 5_000 });
+  const created = manager.createRoom();
+  const x = manager.attachConnection(created.roomCode, "X", () => {});
+  const invited = manager.joinRoom(created.roomCode);
+  manager.attachConnection(created.roomCode, "O", () => {});
+  manager.detachConnection(created.roomCode, "X", x.connection);
+  now += 1_000;
+
+  assert.equal(manager.joinRoom(created.roomCode).error.code, "room-full");
+  const resumed = manager.resumeRoom(created.roomCode, created.playerToken, () => {});
+  assert.equal(resumed.ok, true);
+  assert.equal(resumed.side, "X");
+  assert.equal(resumed.roomCode, invited.roomCode);
+});
+
 test("cleans up waiting rooms and disconnect-expired matches with a close notification", () => {
   let now = 0;
   const manager = makeManager({
@@ -415,4 +432,82 @@ test("resignation stops the running clock and prevents a later timeout", async (
   const snapshot = manager.getSnapshot(room.roomCode, "X");
   assert.equal(snapshot.state.finishReason.key, "message.resigned");
   assert.equal(snapshot.version, version);
+});
+
+test("confirmed attacks broadcast a unique visual event to both players, but rejected attacks do not", async () => {
+  let eventNumber = 0;
+  const manager = makeManager({ eventIdFactory: () => `visual-${++eventNumber}` });
+  const room = manager.createRoom();
+  manager.joinRoom(room.roomCode);
+  const messages = { X: [], O: [] };
+  manager.attachConnection(room.roomCode, "X", (message) => messages.X.push(message));
+  manager.attachConnection(room.roomCode, "O", (message) => messages.O.push(message));
+  await startGame(manager, room.roomCode, messages);
+  const internal = manager.rooms.get(room.roomCode);
+  internal.state = {
+    ...internal.state,
+    inventory: { X: [{ id: 501, type: "bomb" }], O: [] },
+    selectedAbility: null
+  };
+  const selection = await manager.submitCommand(room.roomCode, "X", { type: "select-ability", itemId: 501 });
+  assert.equal(selection.ok, true);
+  assert.equal((await manager.submitCommand(room.roomCode, "X", {
+    type: "ability-target", itemId: 501, row: 20, col: 20
+  })).ok, false);
+  assert.equal(messages.X.filter(({ type }) => type === "visual-event").length, 0);
+
+  const applied = await manager.submitCommand(room.roomCode, "X", {
+    type: "ability-target", itemId: 501, row: 2, col: 2
+  });
+  assert.equal(applied.ok, true);
+  const xEvent = messages.X.find(({ type }) => type === "visual-event");
+  const oEvent = messages.O.find(({ type }) => type === "visual-event");
+  assert.deepEqual(xEvent, oEvent);
+  assert.deepEqual({ ...xEvent, eventId: undefined, roomCode: undefined }, {
+    type: "visual-event", eventId: undefined, roomCode: undefined,
+    abilityType: "bomb", row: 2, col: 2
+  });
+  assert.equal(xEvent.eventId, "visual-1");
+});
+
+test("aim updates use core target validation, do not change game state, and clear on actions or disconnect", async () => {
+  const manager = makeManager();
+  const created = manager.createRoom();
+  manager.joinRoom(created.roomCode);
+  const received = { X: [], O: [] };
+  const x = manager.attachConnection(created.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(created.roomCode, "O", (message) => received.O.push(message));
+  await startGame(manager, created.roomCode, received);
+  const internal = manager.rooms.get(created.roomCode);
+  internal.state = {
+    ...internal.state,
+    inventory: { X: [{ id: "bomb-aim", type: "bomb" }], O: [] },
+    selectedAbility: null
+  };
+  assert.equal(manager.updateAim(created.roomCode, "X", { row: 2, col: 2 }).error.code, "ability-not-selected");
+  assert.equal((await manager.submitCommand(created.roomCode, "X", {
+    type: "select-ability", itemId: "bomb-aim"
+  })).ok, true);
+  const before = manager.getSnapshot(created.roomCode, "X");
+  assert.equal(manager.updateAim(created.roomCode, "X", { row: 2, col: 2 }).ok, true);
+  assert.equal(received.O.at(-1).type, "aim");
+  assert.deepEqual(received.O.at(-1).target, { row: 2, col: 2, abilityType: "bomb" });
+  assert.deepEqual(manager.getSnapshot(created.roomCode, "X"), before);
+  assert.equal(manager.updateAim(created.roomCode, "X", { row: 9, col: 9 }).error.code, "invalid-target");
+
+  assert.equal((await manager.submitCommand(created.roomCode, "X", {
+    type: "ability-target", itemId: "bomb-aim", row: 2, col: 2
+  })).ok, true);
+  assert.equal(received.O.filter(({ type }) => type === "aim").at(-1).target, null);
+  internal.state = {
+    ...internal.state,
+    inventory: { X: [{ id: "bomb-aim-2", type: "bomb" }], O: [] },
+    selectedAbility: null
+  };
+  assert.equal((await manager.submitCommand(created.roomCode, "X", {
+    type: "select-ability", itemId: "bomb-aim-2"
+  })).ok, true);
+  assert.equal(manager.updateAim(created.roomCode, "X", { row: 2, col: 2 }).ok, true);
+  manager.detachConnection(created.roomCode, "X", x.connection);
+  assert.equal(received.O.filter(({ type }) => type === "aim").at(-1).target, null);
 });

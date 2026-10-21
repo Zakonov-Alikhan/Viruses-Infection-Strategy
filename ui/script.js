@@ -154,6 +154,10 @@ const areaEffectOverlay = document.createElement("div");
 areaEffectOverlay.className = "area-effect";
 areaEffectOverlay.hidden = true;
 areaEffectOverlay.setAttribute("aria-hidden", "true");
+const remoteAimOverlay = document.createElement("div");
+remoteAimOverlay.className = "remote-aim-overlay";
+remoteAimOverlay.hidden = true;
+remoteAimOverlay.setAttribute("aria-hidden", "true");
 const EVENT_ITEM_DEFINITIONS = {
   bomb: { nameKey: "item.bomb", icon: "/ui/assets/items/bomb.svg" },
   freePlacement: { nameKey: "item.freePlacement", icon: "/ui/assets/items/free-placement.svg" },
@@ -179,6 +183,9 @@ let newlyPlacedCells = new Map();
 let newlySpawnedItems = new Map();
 let activeAreaEffect = null;
 let bombAimCell = null;
+let remoteAim = null;
+let lastSentAim = null;
+let lastSentAimAt = 0;
 let clockRemaining = { X: settings.clockMinutes * 60_000, O: settings.clockMinutes * 60_000 };
 let clockInterval = null;
 let clockLastTick = null;
@@ -1104,6 +1111,8 @@ function clearOnlinePresentation() {
 
 function leaveOnlineSession({ showMenu = false } = {}) {
   clearOnlinePresentation();
+  remoteAim = null;
+  lastSentAim = null;
   multiplayerClient.leave();
   if (resultModal.open) resultModal.close();
   if (onlineRoomModal.open) onlineRoomModal.close();
@@ -1195,6 +1204,7 @@ function showOnlineRoom(message) {
   onlineRoomEntry.hidden = true;
   onlineRoomLobby.hidden = false;
   onlineErrorElement.hidden = true;
+  if (!onlineRoomModal.open) onlineRoomModal.showModal();
 }
 
 function enterOnlineGame(message) {
@@ -1229,6 +1239,7 @@ function enterOnlineGame(message) {
     newlyPlacedCells.clear();
     newlySpawnedItems.clear();
     activeAreaEffect = null;
+    remoteAim = null;
     clockRemaining = { X: 0, O: 0 };
     render();
     startClock();
@@ -1243,8 +1254,42 @@ function handleMultiplayerEvent(event) {
     showOnlineRoom(event);
     return;
   }
-  if (event.type === "room-ready" || event.type === "room-resumed" || event.type === "reconnected") {
+  if (event.type === "room-ready") {
     enterOnlineGame(event.room || event);
+    return;
+  }
+  if (event.type === "room-resumed" || event.type === "reconnected") {
+    const room = event.room || event;
+    if (room.status === "waiting") {
+      onlineRoomCode = room.roomCode;
+      onlineSide = room.side;
+      onlineConnected = true;
+      showOnlineRoom(room);
+    } else enterOnlineGame(room);
+    return;
+  }
+  if (event.type === "aim" && onlineMode && event.roomCode === onlineRoomCode) {
+    remoteAim = event.target ? { ...event.target, side: event.side } : null;
+    render();
+    return;
+  }
+  if (event.type === "visual-event" && onlineMode && event.roomCode === onlineRoomCode) {
+    if (state?.settings.animationsEnabled && ["bomb", "antiBomb", "pointDestroy"].includes(event.abilityType)) {
+      activeAreaEffect = {
+        type: event.abilityType,
+        row: event.row,
+        col: event.col,
+        startedAt: performance.now(),
+        eventId: event.eventId
+      };
+      if (event.abilityType === "bomb" || event.abilityType === "pointDestroy") {
+        const shell = document.querySelector(".app-shell");
+        shell.classList.remove("bomb-screen-shake");
+        void shell.offsetWidth;
+        shell.classList.add("bomb-screen-shake");
+      }
+      render();
+    }
     return;
   }
   if (event.type === "state" && onlineMode && event.roomCode === onlineRoomCode) {
@@ -1253,6 +1298,7 @@ function handleMultiplayerEvent(event) {
     onlineStatusError = null;
     onlineClockSnapshot = event.clock || null;
     onlineClockReceivedAt = performance.now();
+    lastSentAim = null;
     updateState(event.state, { serverUpdate: true });
     return;
   }
@@ -1271,6 +1317,8 @@ function handleMultiplayerEvent(event) {
   }
   if (event.type === "reconnect-failed" || event.type === "room-closed") {
     onlineConnected = false;
+    remoteAim = null;
+    lastSentAim = null;
     onlineCommandPending = false;
     onlineStatusError = event.code || event.reason;
     onlineGameStatus.textContent = onlineErrorMessage(onlineStatusError);
@@ -1535,13 +1583,14 @@ function updateState(nextState, { serverUpdate = false } = {}) {
       }
     }
   }
-  let bombStarted = false;
   if (previousState.phase === "playing" && previousState.settings.animationsEnabled) {
     const previousItems = new Set(previousState.eventItems.map((item) => item.id));
     for (const item of nextState.eventItems) {
       if (!previousItems.has(item.id)) newlySpawnedItems.set(item.id, animationStartedAt);
     }
-
+  }
+  let bombStarted = false;
+  if (!onlineMode && previousState.phase === "playing" && previousState.settings.animationsEnabled) {
     const usedAbility = getSelectedAbility(previousState);
     if ((usedAbility?.type === "bomb" || usedAbility?.type === "antiBomb")
       && nextState.board !== previousState.board && nextState.lastDestroyed.length === 4) {
@@ -1777,6 +1826,24 @@ function render() {
   bombAimOverlay.hidden = true;
   boardElement.appendChild(bombAimOverlay);
   updateBombAim();
+  remoteAimOverlay.hidden = true;
+  remoteAimOverlay.className = "remote-aim-overlay";
+  if (onlineMode && remoteAim && remoteAim.side !== onlineSide) {
+    const firstCell = boardElement.querySelector('.cell[data-row="' + remoteAim.row + '"][data-col="' + remoteAim.col + '"]');
+    const isArea = remoteAim.abilityType === "bomb" || remoteAim.abilityType === "antiBomb";
+    const lastCell = isArea
+      ? boardElement.querySelector('.cell[data-row="' + (remoteAim.row + 1) + '"][data-col="' + (remoteAim.col + 1) + '"]')
+      : firstCell;
+    if (firstCell && lastCell) {
+      remoteAimOverlay.classList.add("remote-aim-" + remoteAim.side.toLowerCase());
+      remoteAimOverlay.style.left = firstCell.offsetLeft + "px";
+      remoteAimOverlay.style.top = firstCell.offsetTop + "px";
+      remoteAimOverlay.style.width = (lastCell.offsetLeft + lastCell.offsetWidth - firstCell.offsetLeft) + "px";
+      remoteAimOverlay.style.height = (lastCell.offsetTop + lastCell.offsetHeight - firstCell.offsetTop) + "px";
+      remoteAimOverlay.hidden = false;
+    }
+  }
+  boardElement.appendChild(remoteAimOverlay);
 
   turnRule.textContent = t("game.turnCount", { count: state.settings.piecesPerTurn, pieces: pieceForm(state.settings.piecesPerTurn) });
   privacyNote.lastChild.textContent = " " + t(state.settings.freeStartingPositions ? "privacy.hidden" : "privacy.corners");
@@ -1902,8 +1969,35 @@ boardElement.addEventListener("pointermove", (event) => {
   }
   bombAimCell = cell ? { row: Number(cell.dataset.row), col: Number(cell.dataset.col) } : null;
   updateBombAim();
+  if (onlineMode && onlineConnected && state?.phase === "playing" && state.currentPlayer === onlineSide) {
+    const selected = getSelectedAbility(state);
+    const aimCell = bombAimCell;
+    const key = selected && aimCell && isValidAimTarget(selected, aimCell.row, aimCell.col)
+      ? `${selected.type}:${aimCell.row}:${aimCell.col}`
+      : null;
+    const timestamp = performance.now();
+    if (key !== lastSentAim && (key === null || timestamp - lastSentAimAt >= 55)) {
+      if (key === null) multiplayerClient.clearAim();
+      else multiplayerClient.sendAim(aimCell.row, aimCell.col);
+      lastSentAim = key;
+      lastSentAimAt = timestamp;
+    }
+  }
 });
-boardElement.addEventListener("pointerleave", () => { bombAimCell = null; bombAimOverlay.hidden = true; });
+boardElement.addEventListener("pointerleave", () => {
+  bombAimCell = null;
+  bombAimOverlay.hidden = true;
+  if (onlineMode && lastSentAim !== null) multiplayerClient.clearAim();
+  lastSentAim = null;
+});
+
+function isValidAimTarget(ability, row, col) {
+  if (ability.type === "bomb" || ability.type === "antiBomb") return isValidAreaTarget(state, row, col);
+  if (ability.type === "pointDestroy") return isValidPointDestroyTarget(state, row, col);
+  if (ability.type === "debris") return isValidDebrisTarget(state, row, col);
+  if (ability.type === "shield" || ability.type === "gangstaShield") return isValidShieldTarget(state, row, col);
+  return false;
+}
 
 function clearFieldError(input, errorElement) {
   input.removeAttribute("aria-invalid");
@@ -2097,9 +2191,6 @@ settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
 onlineGameButton.addEventListener("click", () => openOnlineRoom());
 onlineRoomCloseButton.addEventListener("click", () => onlineRoomModal.close());
-onlineRoomModal.addEventListener("close", () => {
-  if (!onlineMode && multiplayerClient.savedSession) leaveOnlineSession();
-});
 onlineCreateRoomButton.addEventListener("click", async () => {
   const roomSettings = collectOnlineRoomSettings();
   if (!roomSettings) return;

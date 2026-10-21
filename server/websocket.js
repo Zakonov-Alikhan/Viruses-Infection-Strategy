@@ -11,6 +11,7 @@ const VERSIONED_MESSAGE_TYPES = new Set([
 ]);
 const DEFAULT_ROOM_CREATE_LIMIT = Object.freeze({ max: 5, windowMs: 10 * 60_000 });
 const DEFAULT_ROOM_JOIN_LIMIT = Object.freeze({ max: 30, windowMs: 60_000 });
+const DEFAULT_AIM_UPDATE_LIMIT = Object.freeze({ max: 30, windowMs: 1_000 });
 
 class FixedWindowRateLimiter {
   constructor({ max, windowMs, now, maxKeys = 10_000 }) {
@@ -98,6 +99,7 @@ export function createMultiplayerServer({
   trustProxy = false,
   roomCreationRateLimit = DEFAULT_ROOM_CREATE_LIMIT,
   roomJoinRateLimit = DEFAULT_ROOM_JOIN_LIMIT,
+  aimUpdateRateLimit = DEFAULT_AIM_UPDATE_LIMIT,
   now = Date.now
 } = {}) {
   const httpServer = createServer((request, response) => {
@@ -117,6 +119,7 @@ export function createMultiplayerServer({
   const contexts = new WeakMap();
   const createLimiter = new FixedWindowRateLimiter({ ...roomCreationRateLimit, now });
   const joinLimiter = new FixedWindowRateLimiter({ ...roomJoinRateLimit, now });
+  const aimLimiter = new FixedWindowRateLimiter({ ...aimUpdateRateLimit, now });
   let cleanupTimer = null;
   let closing = false;
 
@@ -268,6 +271,20 @@ export function createMultiplayerServer({
             });
           }
         }).catch(() => sendError(socket, "command-failed", message.requestId));
+        return;
+      }
+
+      if (message.type === "aim") {
+        if (!exactKeys(message, ["type", "row", "col"])) return sendError(socket, "invalid-message");
+        if (!context) return sendError(socket, "not-in-room");
+        const clearing = message.row === null && message.col === null;
+        if (!clearing && (!Number.isInteger(message.row) || !Number.isInteger(message.col))) {
+          return sendError(socket, "invalid-coordinate");
+        }
+        if (!clearing && !aimLimiter.allow(clientAddress)) return;
+        const result = roomManager.updateAim(context.roomCode, context.side,
+          clearing ? null : { row: message.row, col: message.col });
+        if (!result.ok) sendError(socket, result.error.code);
         return;
       }
 

@@ -428,7 +428,7 @@ function useAreaAbility(state, itemId, row, col, type) {
     inventory,
     eventItems: clearEventItemsAt(state, cleared),
     protections: removeProtectionsAt(state, cleared),
-    selectedAbility: null,
+    selectedAbility: item.adminGranted ? itemId : null,
     abilityTargets: [],
     lastDestroyed: cleared,
     message: message(isBomb ? "message.bomb" : "message.antiBomb")
@@ -469,7 +469,7 @@ export function usePointDestroy(state, itemId, row, col) {
     inventory,
     eventItems: clearEventItemsAt(state, cleared),
     protections: removeProtectionsAt(state, cleared),
-    selectedAbility: null,
+    selectedAbility: item.adminGranted ? itemId : null,
     abilityTargets: [],
     lastDestroyed: cleared,
     message: message("message.pointDestroy")
@@ -530,7 +530,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
       inventory,
       eventItems: clearEventItemsAt(state, abilityTargets),
       protections: removeProtectionsAt(state, abilityTargets),
-      selectedAbility: null,
+      selectedAbility: item.adminGranted ? itemId : null,
       abilityTargets: [],
       lastDestroyed: abilityTargets,
       message: message("message.debris")
@@ -554,7 +554,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
     ...state,
     inventory,
     protections,
-    selectedAbility: null,
+    selectedAbility: item.adminGranted ? itemId : null,
     abilityTargets: [],
     message: message(item.type === "gangstaShield" ? "message.gangstaShield" : "message.shield")
   };
@@ -627,7 +627,9 @@ export function playMove(state, row, col, random = Math.random) {
     inventory,
     eventItems: state.eventItems.filter((_, index) => index !== eventIndex),
     piecesLeft,
-    selectedAbility: selectedItem && selectedItem.type === "freePlacement" ? null : state.selectedAbility,
+    selectedAbility: selectedItem?.type === "freePlacement" && !selectedItem.adminGranted
+      ? null
+      : state.selectedAbility,
     lastDestroyed,
     message: lastDestroyed.length > 0 ? message("message.destroyed", { count: lastDestroyed.length }) : []
   };

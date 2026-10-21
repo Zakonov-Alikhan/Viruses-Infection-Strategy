@@ -11,7 +11,8 @@ import {
   isLegalMove,
   isValidDebrisTarget,
   playMove,
-  selectAbility
+  selectAbility,
+  useBomb
 } from "./game.js";
 import { processGameCommand } from "../server/game-service.js";
 
@@ -215,4 +216,19 @@ test("free placement consumes one regular piece and queued extra turns remain in
   assert.equal(extraTurnPiece.piecesLeft, 1);
   const completedExtraTurn = playMove(extraTurnPiece, 0, 3, () => 1);
   assert.equal(completedExtraTurn.currentPlayer, "O");
+});
+
+test("admin-selected attack items stay selected and can be used repeatedly without mutating old state", () => {
+  const base = makePlayingState({ adminMode: true });
+  const selected = selectAbility(base, "admin:bomb");
+  const firstUse = useBomb(selected, "admin:bomb", 2, 2);
+  assert.equal(firstUse.selectedAbility, "admin:bomb");
+  assert.deepEqual(firstUse.inventory, selected.inventory);
+  assert.equal(selected.board[2][2], "");
+  assert.equal(firstUse.board[2][2], "");
+
+  const secondUse = useBomb(firstUse, "admin:bomb", 4, 4);
+  assert.equal(secondUse.selectedAbility, "admin:bomb");
+  assert.equal(secondUse.board[4][4], "");
+  assert.equal(selected.board[4][4], "");
 });
