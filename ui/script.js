@@ -2095,7 +2095,7 @@ freeStartToggle.addEventListener("change", () => {
 });
 settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
-onlineGameButton.addEventListener("click", openOnlineRoom);
+onlineGameButton.addEventListener("click", () => openOnlineRoom());
 onlineRoomCloseButton.addEventListener("click", () => onlineRoomModal.close());
 onlineRoomModal.addEventListener("close", () => {
   if (!onlineMode && multiplayerClient.savedSession) leaveOnlineSession();
