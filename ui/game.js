@@ -616,7 +616,8 @@ export function playMove(state, row, col, random = Math.random) {
 
   const board = copyBoard(state.board);
   board[row][col] = player;
-  const piecesLeft = isFreePlacement ? state.piecesLeft : state.piecesLeft - 1;
+  // Free placement changes where this turn's piece may be placed, not how many pieces the turn contains.
+  const piecesLeft = state.piecesLeft - 1;
   const lastDestroyed = resolveContact(row, col, player, board, state.protections);
   const eventIndex = state.eventItems.findIndex((item) => item.row === row && item.col === col);
   const collectedItem = eventIndex >= 0 ? state.eventItems[eventIndex] : null;

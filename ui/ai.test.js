@@ -124,7 +124,7 @@ test("free placement permits remote cells even when an empty target has a shield
   assert.deepEqual(action, { type: "place", row: 5, col: 5, abilityId: freeId });
   const afterFreePlacement = applyPlacement(selected, action);
   assert.equal(afterFreePlacement.board[5][5], "X");
-  assert.equal(afterFreePlacement.piecesLeft, selected.piecesLeft);
+  assert.equal(afterFreePlacement.piecesLeft, selected.piecesLeft - 1);
 
   const shieldedState = {
     ...selected,

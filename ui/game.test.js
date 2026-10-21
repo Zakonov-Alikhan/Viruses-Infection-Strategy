@@ -169,8 +169,8 @@ test("a shield on an empty cell does not reserve it and still protects the piece
   assert.ok(adjacentAttack.protections.some(({ row, col }) => row === 0 && col === 1));
 });
 
-test("free placement does not create a full extra turn and leaves queued extra-turn items independent", () => {
-  const base = makePlayingState({ piecesPerTurn: 1 });
+test("free placement consumes one regular piece and queued extra turns remain independent", () => {
+  const base = makePlayingState({ piecesPerTurn: 2 });
   const extraTurnId = "extra-turn-1";
   const state = {
     ...base,
@@ -208,8 +208,11 @@ test("free placement does not create a full extra turn and leaves queued extra-t
 
   const normalPiece = playMove(localNext, 0, 1, () => 1);
   assert.equal(normalPiece.currentPlayer, "X");
-  assert.equal(normalPiece.piecesLeft, 1);
+  assert.equal(normalPiece.piecesLeft, 2);
   assert.deepEqual(normalPiece.pendingExtraTurns.X, []);
-  const completedExtraTurn = playMove(normalPiece, 0, 2, () => 1);
+  const extraTurnPiece = playMove(normalPiece, 0, 2, () => 1);
+  assert.equal(extraTurnPiece.currentPlayer, "X");
+  assert.equal(extraTurnPiece.piecesLeft, 1);
+  const completedExtraTurn = playMove(extraTurnPiece, 0, 3, () => 1);
   assert.equal(completedExtraTurn.currentPlayer, "O");
 });
