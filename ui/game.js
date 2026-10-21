@@ -27,7 +27,7 @@ const DIRECTIONS = [
 ];
 const ORTHOGONAL = new Set(["-1,0", "1,0", "0,-1", "0,1"]);
 export const EVENT_ITEMS = Object.freeze([
-  "bomb", "freePlacement", "extraTurn", "antiBomb", "pointDestroy", "debris", "shield", "gangstaShield", "randomArtifact"
+  "bomb", "freePlacement", "extraTurn", "antiBomb", "pointDestroy", "debris", "shield", "gangstaShield", "randomArtifact", "exchange"
 ]);
 const RANDOM_ARTIFACT = "randomArtifact";
 const EVENT_SPAWN_CHANCE = 0.3;
@@ -413,6 +413,31 @@ export function selectAbility(state, itemId) {
   if (state.phase !== "playing") return state;
   const item = getAbility(state, state.currentPlayer, itemId);
   if (!item) return state;
+  if (item.type === "exchange") {
+    const currentInventory = state.inventory?.[state.currentPlayer];
+    const opponent = state.currentPlayer === "X" ? "O" : "X";
+    const opponentInventory = state.inventory?.[opponent];
+    if (!Array.isArray(currentInventory) || !Array.isArray(opponentInventory)
+      || currentInventory.length > MAX_INVENTORY_ITEMS || opponentInventory.length > MAX_INVENTORY_ITEMS
+      || [...currentInventory, ...opponentInventory].some((ownedItem) =>
+        !ownedItem || ownedItem.type === RANDOM_ARTIFACT || !isItemEnabled(state, ownedItem.type))) return state;
+
+    const inventory = copyInventory(state.inventory);
+    if (!item.adminGranted) removeInventoryItem(inventory, state.currentPlayer, itemId);
+    [inventory[state.currentPlayer], inventory[opponent]] = [inventory[opponent], inventory[state.currentPlayer]];
+
+    const pendingExtraTurns = pendingExtraTurnQueues(state);
+    [pendingExtraTurns[state.currentPlayer], pendingExtraTurns[opponent]] = [
+      pendingExtraTurns[opponent], pendingExtraTurns[state.currentPlayer]
+    ];
+    return withPendingExtraTurnQueues({
+      ...state,
+      inventory,
+      selectedAbility: null,
+      abilityTargets: [],
+      message: message("message.exchange")
+    }, pendingExtraTurns);
+  }
   if (item.type === "extraTurn") {
     if (!item.adminGranted) return state;
     return {

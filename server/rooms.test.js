@@ -547,6 +547,49 @@ test("confirmed attacks broadcast a unique visual event to both players, but rej
   assert.equal(xEvent.eventId, "visual-1");
 });
 
+test("a confirmed exchange synchronizes both inventories and broadcasts one shared visual event", async () => {
+  let eventNumber = 0;
+  const manager = makeManager({ eventIdFactory: () => `exchange-${++eventNumber}` });
+  const created = manager.createRoom();
+  manager.joinRoom(created.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(created.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(created.roomCode, "O", (message) => received.O.push(message));
+  await startGame(manager, created.roomCode, received);
+  const room = manager.rooms.get(created.roomCode);
+  room.state = {
+    ...room.state,
+    inventory: {
+      X: [{ id: "online-exchange", type: "exchange" }, { id: "x-bomb", type: "bomb" }],
+      O: [{ id: "o-shield", type: "shield" }]
+    }
+  };
+
+  const result = await manager.submitCommand(created.roomCode, "X", {
+    type: "select-ability", itemId: "online-exchange"
+  });
+  assert.equal(result.ok, true);
+  const xSnapshot = received.X.filter(({ type }) => type === "state").at(-1);
+  const oSnapshot = received.O.filter(({ type }) => type === "state").at(-1);
+  assert.deepEqual(xSnapshot.state.inventory, {
+    X: [{ id: "o-shield", type: "shield" }], O: [{ id: "x-bomb", type: "bomb" }]
+  });
+  assert.deepEqual(oSnapshot.state.inventory, xSnapshot.state.inventory);
+
+  const xEvent = received.X.find(({ type, abilityType }) => type === "visual-event" && abilityType === "exchange");
+  const oEvent = received.O.find(({ type, abilityType }) => type === "visual-event" && abilityType === "exchange");
+  assert.deepEqual(xEvent, oEvent);
+  assert.equal(xEvent.eventId, "exchange-1");
+  assert.equal(xEvent.row, undefined);
+  assert.equal(xEvent.col, undefined);
+
+  const invalid = await manager.submitCommand(created.roomCode, "X", {
+    type: "select-ability", itemId: "online-exchange"
+  });
+  assert.equal(invalid.ok, false);
+  assert.equal(received.X.filter(({ type, abilityType }) => type === "visual-event" && abilityType === "exchange").length, 1);
+});
+
 test("aim updates use core target validation, do not change game state, and clear on actions or disconnect", async () => {
   const manager = makeManager();
   const created = manager.createRoom();

@@ -485,6 +485,10 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .clock-player-name { display: inline-flex; align-items: center; gap: 8px; color: #c4d0cb; font-size: 12px; font-weight: 700; }
 .clock-player-name i { width: 8px; height: 8px; border-radius: 50%; background: #61716d; }
 .inventory-slots { display: flex; gap: 4px; }
+.inventory-slots.inventory-exchange-animation { animation: inventory-exchange .52s cubic-bezier(.2,.75,.25,1) both; }
+#inventory-x { --exchange-direction: 1; }
+#inventory-o { --exchange-direction: -1; }
+@keyframes inventory-exchange { 0% { transform: translateX(0) scale(1); filter: brightness(1); } 35% { transform: translateX(calc(var(--exchange-direction) * 10px)) scale(.94); filter: brightness(1.55); } 68% { transform: translateX(calc(var(--exchange-direction) * -3px)) scale(1.04); filter: brightness(1.25); } 100% { transform: translateX(0) scale(1); filter: brightness(1); } }
 .inventory-slot { display: grid; width: 24px; height: 24px; place-items: center; padding: 2px; border: 1px solid rgba(191, 225, 209, .18); border-radius: 5px; background: rgba(28, 42, 45, .75); cursor: pointer; }
 .inventory-slot:disabled { cursor: default; }
 .inventory-slot:not(:disabled):hover, .inventory-slot.is-selected { border-color: var(--lime); background: rgba(198, 243, 107, .14); }

@@ -138,6 +138,115 @@ test("disabled items are omitted from random spawns and cannot be collected or a
   assert.equal(botAction.type, "place");
 });
 
+test("exchange swaps the post-consumption inventories atomically and carries queued extra turns with their items", () => {
+  const base = makePlayingState();
+  const state = {
+    ...base,
+    inventory: {
+      X: [
+        { id: "exchange-1", type: "exchange" },
+        { id: "x-bomb", type: "bomb" },
+        { id: "x-extra", type: "extraTurn" }
+      ],
+      O: [
+        { id: "o-shield", type: "shield" },
+        { id: "o-extra", type: "extraTurn" }
+      ]
+    },
+    pendingExtraTurns: { X: ["x-extra"], O: ["o-extra"] },
+    pendingExtraTurn: "x-extra"
+  };
+  const originalInventory = structuredClone(state.inventory);
+  const next = selectAbility(state, "exchange-1");
+
+  assert.deepEqual(next.inventory.X, originalInventory.O);
+  assert.deepEqual(next.inventory.O, [originalInventory.X[1], originalInventory.X[2]]);
+  assert.deepEqual(next.pendingExtraTurns, { X: ["o-extra"], O: ["x-extra"] });
+  assert.equal(next.pendingExtraTurn, "o-extra");
+  assert.equal(next.selectedAbility, null);
+  assert.deepEqual(next.abilityTargets, []);
+  assert.equal(next.message.key, "message.exchange");
+  assert.deepEqual(state.inventory, originalInventory);
+  assert.deepEqual(state.pendingExtraTurns, { X: ["x-extra"], O: ["o-extra"] });
+});
+
+test("exchange works with an empty opponent inventory and cannot be reused after consumption", () => {
+  const base = makePlayingState();
+  const state = {
+    ...base,
+    inventory: { X: [{ id: 801, type: "exchange" }, { id: 802, type: "bomb" }], O: [] }
+  };
+  const used = processGameCommand(state, "X", { type: "select-ability", itemId: 801 });
+
+  assert.equal(used.ok, true);
+  assert.deepEqual(used.state.inventory, { X: [], O: [{ id: 802, type: "bomb" }] });
+  const repeated = processGameCommand(used.state, "X", { type: "select-ability", itemId: 801 });
+  assert.equal(repeated.ok, false);
+  assert.deepEqual(repeated.state, used.state);
+  assert.deepEqual(state.inventory, { X: [{ id: 801, type: "exchange" }, { id: 802, type: "bomb" }], O: [] });
+});
+
+test("exchange keeps both inventories within capacity when both were full", () => {
+  const base = makePlayingState();
+  const state = {
+    ...base,
+    inventory: {
+      X: [
+        { id: "exchange-full", type: "exchange" },
+        { id: "x-bomb", type: "bomb" },
+        { id: "x-shield", type: "shield" }
+      ],
+      O: [
+        { id: "o-debris", type: "debris" },
+        { id: "o-free", type: "freePlacement" },
+        { id: "o-point", type: "pointDestroy" }
+      ]
+    }
+  };
+  const next = selectAbility(state, "exchange-full");
+  assert.equal(next.inventory.X.length, 3);
+  assert.equal(next.inventory.O.length, 2);
+  assert.ok(next.inventory.X.every((item) => EVENT_ITEMS.includes(item.type)));
+  assert.ok(next.inventory.O.every((item) => EVENT_ITEMS.includes(item.type)));
+});
+
+test("exchange rejects disabled or malformed inventory contents without partial changes", () => {
+  const base = makePlayingState({ disabledItems: ["exchange"] });
+  const disabled = {
+    ...base,
+    inventory: { X: [{ id: "disabled-exchange", type: "exchange" }], O: [] }
+  };
+  const disabledResult = processGameCommand(disabled, "X", {
+    type: "select-ability", itemId: "disabled-exchange"
+  });
+  assert.equal(disabledResult.ok, false);
+  assert.deepEqual(disabledResult.state, disabled);
+
+  const malformed = {
+    ...makePlayingState(),
+    inventory: {
+      X: [{ id: "exchange-2", type: "exchange" }],
+      O: [{ id: "bad-random", type: "randomArtifact" }]
+    }
+  };
+  const malformedResult = selectAbility(malformed, "exchange-2");
+  assert.equal(malformedResult, malformed);
+
+  const overCapacity = {
+    ...makePlayingState(),
+    inventory: {
+      X: [
+        { id: "exchange-3", type: "exchange" },
+        { id: "x-1", type: "bomb" },
+        { id: "x-2", type: "shield" },
+        { id: "x-3", type: "debris" }
+      ],
+      O: []
+    }
+  };
+  assert.equal(selectAbility(overCapacity, "exchange-3"), overCapacity);
+});
+
 test("random artifact gives only an enabled existing item and never returns itself", () => {
   const enabled = new Set(["bomb", "antiBomb", "randomArtifact"]);
   const state = {

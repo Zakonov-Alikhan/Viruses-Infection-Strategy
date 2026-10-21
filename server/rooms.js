@@ -388,6 +388,8 @@ export class RoomManager {
 
       const previousState = room.state;
       const previousAbility = command.type === "ability-target" ? getSelectedAbility(previousState) : null;
+      const selectedExchange = command.type === "select-ability"
+        && previousState.inventory?.[side]?.some((item) => item.id === command.itemId && item.type === "exchange");
       room.state = result.state;
       this.#updateClockAfterCommand(room, previousState, room.state, now);
       room.version += 1;
@@ -408,6 +410,14 @@ export class RoomManager {
           col: command.col
         };
         this.#broadcastEphemeral(room, visualEvent);
+      }
+      if (selectedExchange && room.state.inventory !== previousState.inventory) {
+        this.#broadcastEphemeral(room, {
+          type: "visual-event",
+          eventId: this.eventIdFactory(),
+          roomCode: room.code,
+          abilityType: "exchange"
+        });
       }
       return { ok: true, version: room.version };
     });

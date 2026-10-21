@@ -195,7 +195,8 @@ const EVENT_ITEM_DEFINITIONS = {
   shield: { nameKey: "item.shield", icon: "/ui/assets/items/shield.svg" },
   gangstaShield: { nameKey: "item.gangstaShield", icon: "/ui/assets/items/gangsta-shield.svg" },
   pointDestroy: { nameKey: "item.pointDestroy", icon: "/ui/assets/items/point-destroy.svg" },
-  randomArtifact: { nameKey: "item.randomArtifact", icon: "/ui/assets/items/random-artifact.svg" }
+  randomArtifact: { nameKey: "item.randomArtifact", icon: "/ui/assets/items/random-artifact.svg" },
+  exchange: { nameKey: "item.exchange", icon: "/ui/assets/items/exchange.svg" }
 };
 
 function renderItemOptions(container, disabledItems = []) {
@@ -1406,6 +1407,10 @@ function handleMultiplayerEvent(event) {
     return;
   }
   if (event.type === "visual-event" && onlineMode && event.roomCode === onlineRoomCode) {
+    if (event.abilityType === "exchange") {
+      if (state?.settings.animationsEnabled) playInventoryExchangeAnimation();
+      return;
+    }
     if (state?.settings.animationsEnabled && ["bomb", "antiBomb", "pointDestroy"].includes(event.abilityType)) {
       activeAreaEffect = {
         type: event.abilityType,
@@ -1800,6 +1805,9 @@ function updateState(nextState, { serverUpdate = false } = {}) {
     && (nextState.currentPlayer !== previousState.currentPlayer || (nextState.phase === "finished" && nextState.piecesLeft === 0));
   if (!onlineMode && completedTurn && !settings.unlimitedTime) clockRemaining[previousState.currentPlayer] += settings.incrementSeconds * 1000;
   const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
+  const inventoryExchangeConfirmed = !onlineMode
+    && nextState.message?.key === "message.exchange"
+    && previousState.inventory !== nextState.inventory;
   const animationStartedAt = performance.now();
   newlyPlacedCells.clear();
   newlySpawnedItems.clear();
@@ -1854,8 +1862,21 @@ function updateState(nextState, { serverUpdate = false } = {}) {
   else stopClock();
   if (state.phase === "finished") invalidateComputerAction();
   render();
+  if (inventoryExchangeConfirmed && state.settings.animationsEnabled) playInventoryExchangeAnimation();
   if (gameJustEnded) showResult();
   else if (!onlineMode) scheduleComputerAction();
+}
+
+function playInventoryExchangeAnimation() {
+  for (const player of ["X", "O"]) {
+    const slots = inventoryElements[player];
+    slots.classList.remove("inventory-exchange-animation");
+    void slots.offsetWidth;
+    slots.classList.add("inventory-exchange-animation");
+  }
+  window.setTimeout(() => {
+    for (const player of ["X", "O"]) inventoryElements[player].classList.remove("inventory-exchange-animation");
+  }, 560);
 }
 
 function placeBoardEditorObject(row, col) {

@@ -183,6 +183,40 @@ test("applies a selected bomb through core ability transitions", () => {
   assert.deepEqual(state.inventory.X, [{ id: "bomb-1", type: "bomb" }]);
 });
 
+test("server applies exchange only for the active owner and rejects client-supplied inventories", () => {
+  const base = playingState();
+  const state = {
+    ...base,
+    inventory: {
+      X: [{ id: "exchange-server", type: "exchange" }, { id: "x-item", type: "bomb" }],
+      O: [{ id: "o-item", type: "shield" }]
+    }
+  };
+  const before = structuredClone(state);
+  const wrongSide = processGameCommand(state, "O", {
+    type: "select-ability", itemId: "exchange-server"
+  });
+  assert.equal(wrongSide.ok, false);
+  assert.equal(wrongSide.error.code, "not-your-turn");
+
+  const forged = processGameCommand(state, "X", {
+    type: "select-ability", itemId: "exchange-server", inventory: { X: [], O: [] }
+  });
+  assert.equal(forged.ok, false);
+  assert.equal(forged.error.code, "invalid-command");
+  assert.deepEqual(forged.state, state);
+
+  const accepted = processGameCommand(state, "X", {
+    type: "select-ability", itemId: "exchange-server"
+  });
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.state.inventory, {
+    X: [{ id: "o-item", type: "shield" }], O: [{ id: "x-item", type: "bomb" }]
+  });
+  assert.deepEqual(getPlayerView(accepted.state, "X").inventory, getPlayerView(accepted.state, "O").inventory);
+  assert.deepEqual(state, before);
+});
+
 test("accepts numeric event-item IDs from the game engine through the server command API", () => {
   const base = playingState();
   const board = base.board.map((row) => row.slice());
