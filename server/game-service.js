@@ -30,6 +30,7 @@ const PUBLIC_SETTING_FIELDS = Object.freeze([
   "incrementSeconds",
   "unlimitedTime",
   "randomEvents",
+  "itemSpawnMode",
   "wormholesEnabled",
   "animationsEnabled",
   "freeStartingPositions",

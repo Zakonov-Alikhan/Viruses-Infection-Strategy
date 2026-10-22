@@ -80,6 +80,8 @@ const onlineClockMinutesInput = document.querySelector("#online-clock-minutes");
 const onlineClockIncrementInput = document.querySelector("#online-clock-increment");
 const onlineUnlimitedTimeToggle = document.querySelector("#online-unlimited-time");
 const onlineRandomEventsToggle = document.querySelector("#online-random-events");
+const onlineItemSpawnMode = document.querySelector("#online-item-spawn-mode");
+const onlineItemSpawnModeHelp = document.querySelector("#online-item-spawn-mode-help");
 const onlineWormholesToggle = document.querySelector("#online-wormholes");
 const onlineFreeStartToggle = document.querySelector("#online-free-start");
 const onlineItemOptions = document.querySelector("#online-item-options");
@@ -157,6 +159,8 @@ const clockMinutesInput = document.querySelector("#clock-minutes-input");
 const clockIncrementInput = document.querySelector("#clock-increment-input");
 const unlimitedTimeToggle = document.querySelector("#unlimited-time-toggle");
 const randomEventsToggle = document.querySelector("#random-events-toggle");
+const itemSpawnModeSelect = document.querySelector("#item-spawn-mode");
+const itemSpawnModeHelp = document.querySelector("#item-spawn-mode-help");
 const wormholesToggle = document.querySelector("#wormholes-toggle");
 const adminModeToggle = document.querySelector("#admin-mode-toggle");
 const itemOptions = document.querySelector("#item-options");
@@ -251,6 +255,10 @@ function renderItemOptions(container, disabledItems = []) {
     label.append(input, icon, name, categoryBadge);
     container.append(label);
   }
+}
+
+function updateSpawnModeHelp(select, element) {
+  if (select && element) element.textContent = t(`settings.spawnMode.${select.value}.help`);
 }
 
 function decorateRuleItemCards() {
@@ -1392,6 +1400,8 @@ function syncOnlineRoomSettings() {
   onlineClockIncrementInput.value = String(settings.incrementSeconds);
   onlineUnlimitedTimeToggle.checked = settings.unlimitedTime;
   onlineRandomEventsToggle.checked = settings.randomEvents;
+  onlineItemSpawnMode.value = settings.itemSpawnMode;
+  updateSpawnModeHelp(onlineItemSpawnMode, onlineItemSpawnModeHelp);
   onlineWormholesToggle.checked = settings.wormholesEnabled;
   onlineFreeStartToggle.checked = settings.freeStartingPositions;
   renderItemOptions(onlineItemOptions, settings.disabledItems);
@@ -1432,6 +1442,7 @@ function collectOnlineRoomSettings() {
     incrementSeconds,
     unlimitedTime,
     randomEvents: onlineRandomEventsToggle.checked,
+    itemSpawnMode: onlineItemSpawnMode.value,
     wormholesEnabled: onlineWormholesToggle.checked,
     animationsEnabled: settings.animationsEnabled,
     freeStartingPositions: onlineFreeStartToggle.checked,
@@ -1634,6 +1645,7 @@ function handleMultiplayerEvent(event) {
           : t("clock.summary", { minutes: offeredSettings.clockMinutes ?? "?", seconds: offeredSettings.incrementSeconds ?? "?" }),
         disabled: disabledNames.length ? disabledNames.join(", ") : t("settings.itemsNoneDisabled"),
         events: t(offeredSettings.randomEvents ? "settings.randomEnabled" : "settings.randomDisabled"),
+        spawnMode: t(`settings.spawnMode.${offeredSettings.itemSpawnMode || "standard"}`),
         wormholes: t(offeredSettings.wormholesEnabled ? "settings.wormholesEnabled" : "settings.randomDisabled")
       });
     restartProposalModal.showModal();
@@ -2782,6 +2794,8 @@ function openSettings() {
   clockIncrementInput.value = String(settings.incrementSeconds);
   unlimitedTimeToggle.checked = settings.unlimitedTime;
   randomEventsToggle.checked = settings.randomEvents;
+  itemSpawnModeSelect.value = settings.itemSpawnMode;
+  updateSpawnModeHelp(itemSpawnModeSelect, itemSpawnModeHelp);
   wormholesToggle.checked = settings.wormholesEnabled;
   animationsToggle.checked = settings.animationsEnabled;
   adminModeToggle.checked = settings.adminMode;
@@ -2857,6 +2871,7 @@ function applySettings(event) {
     incrementSeconds,
     unlimitedTime,
     randomEvents,
+    itemSpawnMode: itemSpawnModeSelect.value,
     wormholesEnabled: wormholesToggle.checked,
     animationsEnabled,
     freeStartingPositions: freeStartToggle.checked,
@@ -3009,6 +3024,8 @@ clockIncrementInput.addEventListener("input", () => {
 freeStartToggle.addEventListener("change", () => {
   toggleHint.textContent = t(freeStartToggle.checked ? "start.hidden" : "start.corners");
 });
+itemSpawnModeSelect.addEventListener("change", () => updateSpawnModeHelp(itemSpawnModeSelect, itemSpawnModeHelp));
+onlineItemSpawnMode.addEventListener("change", () => updateSpawnModeHelp(onlineItemSpawnMode, onlineItemSpawnModeHelp));
 settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
 onlineGameButton.addEventListener("click", () => openOnlineRoom());
@@ -3185,6 +3202,8 @@ decorateRuleItemCards();
 languageSelect.addEventListener("change", () => setLanguage(languageSelect.value));
 document.addEventListener("languagechange", () => {
   applyTranslations();
+  updateSpawnModeHelp(itemSpawnModeSelect, itemSpawnModeHelp);
+  updateSpawnModeHelp(onlineItemSpawnMode, onlineItemSpawnModeHelp);
   decorateRuleItemCards();
   for (const container of [itemOptions, onlineItemOptions]) {
     for (const input of container.querySelectorAll("input[data-item-type]")) {

@@ -178,6 +178,7 @@ test("applies validated per-room settings to game state and clock, and rejects i
     incrementSeconds: 4,
     unlimitedTime: false,
     randomEvents: false,
+    itemSpawnMode: "cascade",
     wormholesEnabled: false,
     animationsEnabled: false,
     freeStartingPositions: false,
@@ -200,10 +201,12 @@ test("applies validated per-room settings to game state and clock, and rejects i
   const unknownSetting = manager.createRoom({ ...customSettings, adminMode: true });
   const unknownItem = manager.createRoom({ ...customSettings, disabledItems: ["not-an-item"] });
   const invalidWormholeSetting = manager.createRoom({ ...customSettings, wormholesEnabled: "false" });
+  const invalidSpawnMode = manager.createRoom({ ...customSettings, itemSpawnMode: "unknown" });
   assert.deepEqual(invalidPieces.error, { code: "invalid-settings" });
   assert.deepEqual(unknownSetting.error, { code: "invalid-settings" });
   assert.deepEqual(unknownItem.error, { code: "invalid-settings" });
   assert.deepEqual(invalidWormholeSetting.error, { code: "invalid-settings" });
+  assert.deepEqual(invalidSpawnMode.error, { code: "invalid-settings" });
   assert.equal(manager.roomCount, roomCount);
 });
 

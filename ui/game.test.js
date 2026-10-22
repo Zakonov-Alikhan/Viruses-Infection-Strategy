@@ -7,6 +7,8 @@ import {
   DEFAULT_SETTINGS,
   EVENT_ITEMS,
   EMPTY_CELL,
+  getItemSpawnProbability,
+  getItemSpawnTarget,
   canCompleteTurn,
   chooseAbilityTarget,
   createGameState,
@@ -505,6 +507,106 @@ function roundBoundaryState(overrides = {}) {
     wormholePair: null
   };
 }
+
+function finishOPlayerTurn(state, random) {
+  state = {
+    ...state,
+    settings: { ...state.settings, wormholesEnabled: false },
+    currentPlayer: "O",
+    piecesLeft: 1
+  };
+  state.board[9][9] = "O";
+  return playMove(state, 9, 8, random);
+}
+
+test("standard item spawning makes exactly one 30% check per completed turn", () => {
+  const state = roundBoundaryState({ itemSpawnMode: "standard" });
+  let calls = 0;
+  const spawned = finishOPlayerTurn(state, () => [0.29, 0.1, 0.2][calls++] ?? 0);
+  assert.equal(spawned.eventItems.length, 1);
+  assert.equal(calls, 3); // one probability check, one cell choice, one item choice
+
+  const failed = finishOPlayerTurn(state, () => 0.3);
+  assert.equal(failed.eventItems.length, 0);
+});
+
+test("adaptive and hybrid item targets and probabilities clamp on small, typical and large maps", () => {
+  assert.equal(getItemSpawnTarget({ width: 10, height: 10 }, "adaptive"), 4);
+  assert.equal(getItemSpawnTarget({ width: 30, height: 30 }, "adaptive"), 8);
+  assert.equal(getItemSpawnTarget({ width: 50, height: 50 }, "adaptive"), 13);
+  assert.equal(getItemSpawnTarget({ width: 10, height: 10 }, "hybrid"), 3);
+  assert.equal(getItemSpawnTarget({ width: 30, height: 30 }, "hybrid"), 5);
+  assert.equal(getItemSpawnTarget({ width: 50, height: 50 }, "hybrid"), 8);
+  assert.equal(getItemSpawnTarget({ width: 50, height: 50, area: 10_000 }, "hybrid"), 8);
+  assert.equal(getItemSpawnProbability({ width: 10, height: 10, itemSpawnMode: "adaptive" }, 100), 0.05);
+  assert.equal(getItemSpawnProbability({ width: 50, height: 50, itemSpawnMode: "adaptive" }, 0), 0.5);
+  assert.equal(getItemSpawnProbability({ width: 50, height: 50, itemSpawnMode: "hybrid" }, 0), 0.5);
+  assert.equal(getItemSpawnProbability({ width: 10, height: 10, itemSpawnMode: "hybrid" }, 100), 0.05);
+});
+
+test("adaptive and hybrid modes use the current item count and spawn at most one per turn", () => {
+  for (const [mode, expectedChance] of [["adaptive", 0.4], ["hybrid", 0.42]]) {
+    const state = roundBoundaryState({ itemSpawnMode: mode });
+    const probability = getItemSpawnProbability(state.settings, 0);
+    assert.equal(probability, expectedChance);
+    let calls = 0;
+    const spawned = finishOPlayerTurn(state, () => [probability - 0.001, 0, 0, 0][calls++] ?? 0);
+    assert.equal(spawned.eventItems.length, 1);
+    assert.equal(calls, 3);
+  }
+});
+
+test("cascade uses the current base chance to increasing powers and stops at first failure", () => {
+  const state = roundBoundaryState({ itemSpawnMode: "cascade" });
+  const values = [0.1, 0.1, 0.1, 0.13, 0.2, 0.2, 0.05];
+  let calls = 0;
+  const spawned = finishOPlayerTurn(state, () => values[calls++] ?? 1);
+  assert.equal(spawned.eventItems.length, 2);
+  assert.equal(calls, 7); // probabilities a, updated a², updated a³ (failure), with two placements
+});
+
+test("large cascade mode starts two independent cascades; standard remains backward-compatible by default", () => {
+  assert.equal(DEFAULT_SETTINGS.itemSpawnMode, "standard");
+  const state = {
+    ...roundBoundaryState({ itemSpawnMode: "cascade" }),
+    settings: { ...roundBoundaryState().settings, width: 30, height: 30, itemSpawnMode: "cascade" }
+  };
+  // The first cascade fails; the second starts again at its first-power probability.
+  let calls = 0;
+  const spawned = finishOPlayerTurn(state, () => {
+    calls += 1;
+    return calls === 2 ? 0.3 : 1;
+  });
+  assert.equal(spawned.eventItems.length, 1);
+  assert.equal(calls, 5); // the second cascade uses a¹ (0.3 succeeds), then checks a²
+});
+
+test("the second large-board cascade recalculates its base chance after the first cascade spawn", () => {
+  const state = {
+    ...roundBoundaryState({ itemSpawnMode: "cascade" }),
+    settings: { ...roundBoundaryState().settings, width: 30, height: 30, itemSpawnMode: "cascade" }
+  };
+  const values = [0.1, 0, 0, 1, 0.49];
+  let calls = 0;
+  const spawned = finishOPlayerTurn(state, () => values[calls++] ?? 1);
+  assert.equal(spawned.eventItems.length, 1);
+  assert.equal(calls, 5); // at n=1, updated a=0.475; the second cascade's a¹ check fails at 0.49
+});
+
+test("cascade stops safely when the existing three-item field limit is reached or no free cell exists", () => {
+  const fullItems = [0, 1, 2].map((col, id) => ({ id, type: "bomb", row: 0, col }));
+  const atCapacity = { ...roundBoundaryState({ itemSpawnMode: "cascade" }), eventItems: fullItems };
+  let calls = 0;
+  const capacityResult = finishOPlayerTurn(atCapacity, () => { calls += 1; return 0; });
+  assert.equal(capacityResult.eventItems.length, 3);
+  assert.equal(calls, 0);
+
+  const noSpace = { ...roundBoundaryState({ itemSpawnMode: "cascade" }), board: Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL)) };
+  noSpace.board[9][9] = "O";
+  noSpace.board[9][8] = EMPTY_CELL;
+  const noSpaceResult = finishOPlayerTurn(noSpace, () => 0);
+  assert.equal(noSpaceResult.eventItems.length, 0);
+});
 
 test("wormhole pair spawns on free cells with a shared lifetime in the board-size range", () => {
   let state = roundBoundaryState();

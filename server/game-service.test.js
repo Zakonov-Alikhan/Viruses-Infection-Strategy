@@ -355,6 +355,7 @@ test("player view is allow-listed and strips server-only fields and role metadat
   assert.equal("nextEventItemId" in view, false);
   assert.equal("adminMode" in view.settings, false);
   assert.equal(view.settings.wormholesEnabled, true);
+  assert.equal(view.settings.itemSpawnMode, "standard");
   assert.deepEqual(view.inventory.X, [{ id: "item-1", type: "bomb" }]);
   view.message.params.nested.private = false;
   assert.equal(state.message.params.nested.private, true);

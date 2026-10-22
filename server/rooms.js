@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
-  DEFAULT_SETTINGS, EVENT_ITEMS, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState,
+  DEFAULT_SETTINGS, EVENT_ITEMS, ITEM_SPAWN_MODES, MAX_BOARD_DIMENSION, MIN_BOARD_DIMENSION, createGameState,
   getSelectedAbility, isValidAreaTarget, isValidDebrisTarget, isValidPointDestroyTarget,
   isValidShieldTarget
 } from "../ui/game.js";
@@ -34,7 +34,7 @@ function normalizeCode(code) {
 
 const ROOM_SETTING_FIELDS = new Set([
   "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds",
-  "unlimitedTime", "randomEvents", "wormholesEnabled", "animationsEnabled", "freeStartingPositions", "disabledItems"
+  "unlimitedTime", "randomEvents", "itemSpawnMode", "wormholesEnabled", "animationsEnabled", "freeStartingPositions", "disabledItems"
 ]);
 
 function normalizeRoomSettings(input, defaults) {
@@ -62,6 +62,7 @@ function normalizeRoomSettings(input, defaults) {
     || !Number.isInteger(settings.incrementSeconds) || settings.incrementSeconds < 0 || settings.incrementSeconds > 60
     || !["unlimitedTime", "randomEvents", "wormholesEnabled", "animationsEnabled", "freeStartingPositions"]
       .every((key) => typeof settings[key] === "boolean")) return null;
+  if (!ITEM_SPAWN_MODES.includes(settings.itemSpawnMode)) return null;
   return settings;
 }
 

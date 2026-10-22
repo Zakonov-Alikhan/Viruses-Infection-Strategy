@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   incrementSeconds: 0,
   unlimitedTime: false,
   randomEvents: true,
+  itemSpawnMode: "standard",
   wormholesEnabled: true,
   animationsEnabled: true,
   freeStartingPositions: true,
@@ -30,6 +31,7 @@ const ORTHOGONAL = new Set(["-1,0", "1,0", "0,-1", "0,1"]);
 export const EVENT_ITEMS = Object.freeze([
   "bomb", "freePlacement", "extraTurn", "antiBomb", "pointDestroy", "debris", "shield", "gangstaShield", "randomArtifact", "exchange"
 ]);
+export const ITEM_SPAWN_MODES = Object.freeze(["standard", "cascade", "adaptive", "hybrid"]);
 const RANDOM_ARTIFACT = "randomArtifact";
 const EVENT_SPAWN_CHANCE = 0.3;
 const MAX_EVENT_ITEMS_ON_BOARD = 3;
@@ -211,24 +213,26 @@ function randomArtifactCandidates(state) {
   return EVENT_ITEMS.filter((type) => type !== RANDOM_ARTIFACT && isItemEnabled(state, type));
 }
 
-function spawnEventItem(state, random, guaranteed = false) {
-  if (!state.settings.randomEvents || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD) return state;
-  if (!guaranteed && random() >= EVENT_SPAWN_CHANCE) return state;
-  const hasRandomArtifactResult = randomArtifactCandidates(state).length > 0;
-  const enabledItems = EVENT_ITEMS.filter((type) => isItemEnabled(state, type)
-    && (type !== RANDOM_ARTIFACT || hasRandomArtifactResult));
-  if (enabledItems.length === 0) return state;
-
+function availableEventItemCells(state) {
+  if (!state.settings.randomEvents || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD) return [];
   const occupiedByEvent = new Set(state.eventItems.map((item) => item.row + "," + item.col));
   const available = [];
   for (let row = 0; row < state.board.length; row += 1) {
     for (let col = 0; col < state.board[row].length; col += 1) {
       if (state.board[row][col] === EMPTY_CELL && !occupiedByEvent.has(row + "," + col)
-        && !isWormholeCell(state, row, col)) {
-        available.push({ row, col });
-      }
+        && !isWormholeCell(state, row, col)) available.push({ row, col });
     }
   }
+  return available;
+}
+
+function spawnOneEventItem(state, random) {
+  const hasRandomArtifactResult = randomArtifactCandidates(state).length > 0;
+  const enabledItems = EVENT_ITEMS.filter((type) => isItemEnabled(state, type)
+    && (type !== RANDOM_ARTIFACT || hasRandomArtifactResult));
+  if (enabledItems.length === 0) return state;
+
+  const available = availableEventItemCells(state);
   if (available.length === 0) return state;
 
   const location = available[Math.min(available.length - 1, Math.floor(random() * available.length))];
@@ -243,7 +247,47 @@ function spawnEventItem(state, random, guaranteed = false) {
 }
 
 function maybeSpawnEventItem(state, random) {
-  return state.phase === "playing" ? spawnEventItem(state, random) : state;
+  if (state.phase !== "playing" || !state.settings.randomEvents) return state;
+
+  const mode = state.settings.itemSpawnMode;
+  if (mode === "cascade") {
+    let next = state;
+    const cascades = next.settings.width * next.settings.height >= 30 * 30 ? 2 : 1;
+    for (let cascade = 0; cascade < cascades; cascade += 1) {
+      for (let attempt = 1; ; attempt += 1) {
+        if (availableEventItemCells(next).length === 0) break;
+        const chance = getItemSpawnProbability(next.settings, next.eventItems.length);
+        if (random() >= chance ** attempt) break;
+        const spawned = spawnOneEventItem(next, random);
+        if (spawned === next) break;
+        next = spawned;
+      }
+    }
+    return next;
+  }
+
+  const chance = getItemSpawnProbability(state.settings, state.eventItems.length);
+  return random() < chance ? spawnOneEventItem(state, random) : state;
+}
+
+export function getItemSpawnTarget(settings, mode = settings?.itemSpawnMode) {
+  const area = Math.max(0, Number(settings?.width) * Number(settings?.height));
+  if (mode === "adaptive") return Math.max(4, Math.min(20, Math.round(0.25 * Math.sqrt(area))));
+  if (mode === "hybrid") return Math.min(16, Math.max(3, Math.round(0.15 * Math.sqrt(area))));
+  return null;
+}
+
+export function getItemSpawnProbability(settings, itemCount = 0) {
+  const mode = ITEM_SPAWN_MODES.includes(settings?.itemSpawnMode) ? settings.itemSpawnMode : "standard";
+  if (mode === "adaptive" || mode === "cascade") {
+    const target = getItemSpawnTarget(settings, "adaptive");
+    return Math.max(0.05, Math.min(0.5, 0.3 + 0.025 * (target - itemCount)));
+  }
+  if (mode === "hybrid") {
+    const target = getItemSpawnTarget(settings, mode);
+    return Math.max(0.05, Math.min(0.5, 0.3 + 0.04 * (target - itemCount)));
+  }
+  return EVENT_SPAWN_CHANCE;
 }
 
 function copyInventory(inventory) {
@@ -399,7 +443,7 @@ function beginPlay(state, board, message, random) {
     lastDestroyed: [],
     message
   };
-  return spawnEventItem(playingState, random, true);
+  return spawnOneEventItem(playingState, random);
 }
 
 function placeInOppositeCorners(settings, random) {
@@ -418,7 +462,12 @@ export function createGameState(settings = DEFAULT_SETTINGS, random = Math.rando
   const disabledItems = Array.isArray(settings.disabledItems)
     ? [...new Set(settings.disabledItems.filter((type) => EVENT_ITEMS.includes(type)))]
     : [];
-  const appliedSettings = { ...DEFAULT_SETTINGS, ...settings, disabledItems };
+  const appliedSettings = {
+    ...DEFAULT_SETTINGS,
+    ...settings,
+    itemSpawnMode: ITEM_SPAWN_MODES.includes(settings.itemSpawnMode) ? settings.itemSpawnMode : "standard",
+    disabledItems
+  };
   const state = {
     board: emptyBoard(appliedSettings.width, appliedSettings.height),
     settings: appliedSettings,
