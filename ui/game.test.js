@@ -6,6 +6,7 @@ import {
   cancelAbilitySelection,
   DEFAULT_SETTINGS,
   EVENT_ITEMS,
+  EMPTY_CELL,
   canCompleteTurn,
   chooseAbilityTarget,
   createGameState,
@@ -579,6 +580,56 @@ test("both players can continue a chain through the paired portal, but not place
   const oState = { ...xState, board: oBoard, currentPlayer: "O" };
   assert.equal(isLegalMove(oState, 2, 1), true);
   assert.equal(canCompleteTurn(oState, "O", 1), true);
+});
+
+test("wormhole routing is symmetric across both endpoint colors and all eight neighbor directions", () => {
+  const base = makePlayingState({ piecesPerTurn: 2 });
+  const offsets = [
+    [-1, 0], [1, 0], [0, -1], [0, 1],
+    [-1, -1], [-1, 1], [1, -1], [1, 1]
+  ];
+  const pair = { id: 12, endpoints: { orange: { row: 3, col: 3 }, blue: { row: 6, col: 6 } }, roundsRemaining: 3 };
+
+  for (const player of ["X", "O"]) {
+    for (const entryColor of ["orange", "blue"]) {
+      const exitColor = entryColor === "orange" ? "blue" : "orange";
+      for (const [entryRowOffset, entryColOffset] of offsets) {
+        for (const [exitRowOffset, exitColOffset] of offsets) {
+          const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+          const entry = pair.endpoints[entryColor];
+          const exit = pair.endpoints[exitColor];
+          const source = { row: entry.row + entryRowOffset, col: entry.col + entryColOffset };
+          const target = { row: exit.row + exitRowOffset, col: exit.col + exitColOffset };
+          board[source.row][source.col] = player;
+          board[target.row][target.col] = EMPTY_CELL;
+          const state = { ...base, board, currentPlayer: player, piecesLeft: 2, wormholePair: pair };
+
+          assert.equal(isLegalMove(state, target.row, target.col), true,
+            `${player} should connect ${entryColor}→${exitColor} from ${JSON.stringify(source)} to ${JSON.stringify(target)}`);
+          assert.ok(getLegalMoves(state).some(({ row, col }) => row === target.row && col === target.col));
+        }
+      }
+    }
+  }
+});
+
+test("after placing through a wormhole, the same player's chain can route back through its pair", () => {
+  const base = makePlayingState({ piecesPerTurn: 2 });
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[2][2] = "X";
+  board[9][9] = "O";
+  board[6][7] = EMPTY_CELL;
+  board[4][3] = EMPTY_CELL;
+  const pair = { id: 13, endpoints: { orange: { row: 3, col: 3 }, blue: { row: 6, col: 6 } }, roundsRemaining: 3 };
+  const before = { ...base, board, currentPlayer: "X", piecesLeft: 2, wormholePair: pair };
+
+  assert.equal(isLegalMove(before, 6, 7), true);
+  const after = playMove(before, 6, 7, () => 1);
+  assert.equal(after.currentPlayer, "X");
+  assert.equal(after.piecesLeft, 1);
+  assert.equal(isLegalMove(after, 4, 3), true);
+  assert.ok(getLegalMoves(after).some(({ row, col }) => row === 4 && col === 3));
+  assert.equal(before.board[6][7], EMPTY_CELL);
 });
 
 test("wormholes do not cause contact destruction, and overlapping debris or shields are rejected", () => {

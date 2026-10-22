@@ -215,6 +215,47 @@ test("client handles reconnect snapshots and resets version for a new room", asy
   storageX.removeItem("viruses.online-room");
 });
 
+test("client derives wormhole hints from the newest snapshot and ignores same-version or older snapshots", async (t) => {
+  const { server, x } = await makeFixture(t);
+  const events = eventLog(x);
+  const created = await x.createRoom();
+  const rawServerSocket = [...server.webSocketServer.clients][0];
+  const board = Array.from({ length: 10 }, () => Array(10).fill("#"));
+  board[2][1] = "X";
+  board[9][9] = "O";
+  board[7][8] = "";
+  const state = {
+    ...created.state,
+    phase: "playing",
+    board,
+    currentPlayer: "X",
+    piecesLeft: 1,
+    wormholePair: {
+      id: 41,
+      endpoints: { orange: { row: 2, col: 2 }, blue: { row: 7, col: 7 } },
+      roundsRemaining: 3
+    }
+  };
+  const envelope = {
+    type: "state", roomCode: created.roomCode, side: "X", version: 1,
+    state, clock: { enabled: false, remainingMs: { X: null, O: null }, activePlayer: null }
+  };
+  rawServerSocket.send(JSON.stringify(envelope));
+  const accepted = await events.waitFor((event) => event.type === "state" && event.version === 1);
+  assert.deepEqual(getLegalMoves(accepted.state), [{ row: 7, col: 8 }]);
+
+  const sameVersionState = structuredClone(state);
+  sameVersionState.board[7][8] = "#";
+  rawServerSocket.send(JSON.stringify({ ...envelope, state: sameVersionState }));
+  rawServerSocket.send(JSON.stringify({ ...envelope, version: 0, state: sameVersionState }));
+  rawServerSocket.send(JSON.stringify({ ...envelope, roomCode: "OTHERROOM", version: 99, state: sameVersionState }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(x.lastVersion, 1);
+  assert.deepEqual(x.lastRoomSnapshot.state.board, state.board);
+  assert.equal(events.events.filter((event) => event.type === "state").length, 1);
+});
+
 test("creator can reopen the waiting room in the same tab without trying to claim its connected seat", async (t) => {
   const { x } = await makeFixture(t);
   const created = await x.createRoom();

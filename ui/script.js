@@ -11,10 +11,10 @@ import {
   createGameState,
   finishIfNoLegalMoves,
   flagFall,
+  getLegalMoves,
   getSelectedAbility,
   isItemEnabled,
   hasPermission,
-  isLegalMove,
   isValidAreaTarget,
   isValidDebrisTarget,
   isValidPointDestroyTarget,
@@ -27,7 +27,7 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=game-history1";
+} from "./game.js?v=wormhole-routing1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
 import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=wormhole-settings1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
@@ -2299,6 +2299,7 @@ function renderGamePosition(state) {
   settingsButton.disabled = Boolean(onlineMode
     && (state?.phase === "finished" || !onlineConnected || onlineCommandPending)) || historyViewId !== null;
   const animationNow = performance.now();
+  const legalMoveKeys = new Set(getLegalMoves(state).map(({ row, col }) => row + "," + col));
   for (const [key, startedAt] of newlyPlacedCells) {
     if (animationNow - startedAt >= 720) newlyPlacedCells.delete(key);
   }
@@ -2446,7 +2447,7 @@ function renderGamePosition(state) {
             }));
         } else if (trainingSession?.piecePlaced && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "shield") {
           cell.disabled = true;
-        } else if (isLegalMove(state, row, col)) {
+        } else if (legalMoveKeys.has(row + "," + col)) {
           cell.disabled = false;
           markLegalCell(cell, state.currentPlayer);
           cell.addEventListener("click", () => handleTrainingMove(row, col));
@@ -2455,7 +2456,7 @@ function renderGamePosition(state) {
         }
       } else if (state.phase === "playing" && trainingSession?.piecePlaced && TRAINING_LESSONS[trainingSession.lessonIndex].objective === "shield") {
         cell.disabled = true;
-      } else if (state.phase === "playing" && isLegalMove(state, row, col)) {
+      } else if (state.phase === "playing" && legalMoveKeys.has(row + "," + col)) {
         cell.disabled = false;
         markLegalCell(cell, state.currentPlayer);
         cell.addEventListener("click", () => handleTrainingMove(row, col));

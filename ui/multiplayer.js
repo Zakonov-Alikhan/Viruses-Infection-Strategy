@@ -85,6 +85,7 @@ export class MultiplayerClient {
     this.intentionalClose = false;
     this.requestNumber = 0;
     this.lastVersion = -1;
+    this.lastVersionRoomCode = null;
     this.lastRoomSnapshot = null;
     this.seenVisualEventIds = new Set();
   }
@@ -228,7 +229,10 @@ export class MultiplayerClient {
     this.socket = null;
     this.connectPromise = null;
     if (socket && socket.readyState < this.WebSocketImpl.CLOSING) socket.close(1000, "leave-room");
-    if (!preserveSession) this.lastVersion = -1;
+    if (!preserveSession) {
+      this.lastVersion = -1;
+      this.lastVersionRoomCode = null;
+    }
     this.#emit({ type: "disconnected", manual: true });
   }
 
@@ -268,7 +272,24 @@ export class MultiplayerClient {
     }
     if (!message || typeof message !== "object" || typeof message.type !== "string") return;
     if (Number.isSafeInteger(message.version) && VERSIONED_TYPES.has(message.type)) {
-      if (message.version < this.lastVersion) return;
+      const beginsRoomSession = message.type === "room-created" || message.type === "room-joined";
+      if (beginsRoomSession) {
+        if (this.lastVersionRoomCode !== message.roomCode) {
+          this.lastVersion = -1;
+          this.lastRoomSnapshot = null;
+          this.seenVisualEventIds.clear();
+        }
+        this.lastVersionRoomCode = message.roomCode;
+      } else if (this.lastVersionRoomCode && message.roomCode !== this.lastVersionRoomCode) {
+        return;
+      } else if (!this.lastVersionRoomCode) {
+        if (this.savedSession?.roomCode !== message.roomCode) return;
+        this.lastVersionRoomCode = message.roomCode;
+      }
+
+      const mayRepeatVersion = message.type === "room-ready" || message.type === "room-resumed";
+      if (message.version < this.lastVersion
+        || (!mayRepeatVersion && message.version === this.lastVersion)) return;
       this.lastVersion = message.version;
       if (typeof message.roomCode === "string" && message.state && message.clock) {
         this.lastRoomSnapshot = message;
@@ -366,12 +387,6 @@ export class MultiplayerClient {
       || typeof message.playerToken !== "string"
       || (message.side !== null && !["X", "O"].includes(message.side))) return;
     try {
-      const previous = safeParseSession(this.storage);
-      if (previous && previous.roomCode !== message.roomCode) {
-        this.lastVersion = -1;
-        this.lastRoomSnapshot = null;
-        this.seenVisualEventIds.clear();
-      }
       this.storage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
         roomCode: message.roomCode,
         playerToken: message.playerToken,

@@ -4,7 +4,8 @@ import {
   DEFAULT_SETTINGS,
   EVENT_ITEMS,
   EMPTY_CELL,
-  createGameState
+  createGameState,
+  getLegalMoves
 } from "../ui/game.js";
 import { getPlayerView, processGameCommand } from "./game-service.js";
 
@@ -371,6 +372,31 @@ test("player view hides an incomplete ability selection from the opponent", () =
 
   assert.equal(opponentView.selectedAbility, null);
   assert.deepEqual(opponentView.abilityTargets, []);
+});
+
+test("player projections preserve every core-generated move across both wormhole endpoints", () => {
+  const state = playingState();
+  const board = Array.from({ length: 10 }, () => Array(10).fill("#"));
+  board[2][1] = "X";
+  board[9][9] = "O";
+  board[7][8] = EMPTY_CELL;
+  const configured = {
+    ...state,
+    board,
+    currentPlayer: "X",
+    piecesLeft: 1,
+    wormholePair: {
+      id: 31,
+      endpoints: { orange: { row: 2, col: 2 }, blue: { row: 7, col: 7 } },
+      roundsRemaining: 4
+    }
+  };
+  const expected = getLegalMoves(configured);
+  const view = getPlayerView(configured, "X");
+
+  assert.ok(expected.some(({ row, col }) => row === 7 && col === 8));
+  assert.deepEqual(getLegalMoves(view), expected);
+  assert.deepEqual(view.wormholePair, configured.wormholePair);
 });
 
 test("player view does not retain setup choices after the initial positions are revealed", () => {
