@@ -640,13 +640,18 @@ test("the second large-board cascade recalculates its base chance after the firs
   assert.equal(calls, 5); // at n=1, updated a=0.475; the second cascade's a¹ check fails at 0.49
 });
 
-test("cascade stops safely when the existing three-item field limit is reached or no free cell exists", () => {
+test("all spawn modes continue spawning above three items, while cascade stops when no free cells remain", () => {
   const fullItems = [0, 1, 2].map((col, id) => ({ id, type: "bomb", row: 0, col }));
-  const atCapacity = { ...roundBoundaryState({ itemSpawnMode: "cascade" }), eventItems: fullItems };
-  let calls = 0;
-  const capacityResult = finishOPlayerTurn(atCapacity, () => { calls += 1; return 0; });
-  assert.equal(capacityResult.eventItems.length, 3);
-  assert.equal(calls, 0);
+  for (const mode of ["standard", "adaptive", "hybrid", "cascade"]) {
+    const state = { ...roundBoundaryState({ itemSpawnMode: mode }), eventItems: fullItems };
+    let calls = 0;
+    const spawned = finishOPlayerTurn(state, () => {
+      calls += 1;
+      return mode === "cascade" && calls > 3 ? 1 : 0;
+    });
+    assert.equal(spawned.eventItems.length, 4, `${mode} must spawn when three items are already on the board`);
+    assert.ok(calls > 0);
+  }
 
   const noSpace = { ...roundBoundaryState({ itemSpawnMode: "cascade" }), board: Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL)) };
   noSpace.board[9][9] = "O";

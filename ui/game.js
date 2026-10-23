@@ -34,7 +34,7 @@ export const EVENT_ITEMS = Object.freeze([
 export const ITEM_SPAWN_MODES = Object.freeze(["standard", "cascade", "adaptive", "hybrid"]);
 const RANDOM_ARTIFACT = "randomArtifact";
 const EVENT_SPAWN_CHANCE = 0.3;
-const MAX_EVENT_ITEMS_ON_BOARD = 3;
+const MAX_EDITOR_ITEMS_ON_BOARD = 3;
 const MAX_INVENTORY_ITEMS = 3;
 
 function emptyBoard(width, height) {
@@ -214,7 +214,7 @@ function randomArtifactCandidates(state) {
 }
 
 function availableEventItemCells(state) {
-  if (!state.settings.randomEvents || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD) return [];
+  if (!state.settings.randomEvents) return [];
   const occupiedByEvent = new Set(state.eventItems.map((item) => item.row + "," + item.col));
   const available = [];
   for (let row = 0; row < state.board.length; row += 1) {
@@ -328,7 +328,7 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
     if (Object.keys(object).some((key) => !["kind", "itemType", "row", "col"].includes(key))
       || !isItemEnabled(state, object.itemType) || itemAtTarget || protectionAtTarget
       || (object.itemType === RANDOM_ARTIFACT && randomArtifactCandidates(state).length === 0)
-      || state.eventItems.length >= MAX_EVENT_ITEMS_ON_BOARD
+      || state.eventItems.length >= MAX_EDITOR_ITEMS_ON_BOARD
       || !Number.isSafeInteger(state.nextEventItemId) || state.nextEventItemId < 0) return state;
     const usedIds = new Set(state.eventItems.map((item) => item.id));
     let itemId = state.nextEventItemId;
