@@ -519,14 +519,12 @@ export function isLegalMove(state, row, col) {
   if (neighbors(row, col, state.board).some(({ row: nextRow, col: nextCol }) => state.board[nextRow][nextCol] === state.currentPlayer)) return true;
   const pair = state.wormholePair;
   if (!pair) return false;
-  return Object.entries(pair.endpoints).some(([color, endpoint]) => {
-    const paired = pair.endpoints[color === "orange" ? "blue" : "orange"];
-    const connectedToEntry = neighbors(endpoint.row, endpoint.col, state.board)
-      .some(({ row: ownRow, col: ownCol }) => state.board[ownRow][ownCol] === state.currentPlayer);
-    const adjacentToExit = neighbors(paired.row, paired.col, state.board)
-      .some(({ row: targetRow, col: targetCol }) => targetRow === row && targetCol === col);
-    return connectedToEntry && adjacentToExit;
-  });
+  const connectedToPair = Object.values(pair.endpoints).some((endpoint) =>
+    neighbors(endpoint.row, endpoint.col, state.board)
+      .some(({ row: ownRow, col: ownCol }) => state.board[ownRow][ownCol] === state.currentPlayer));
+  return connectedToPair && Object.values(pair.endpoints).some((endpoint) =>
+    neighbors(endpoint.row, endpoint.col, state.board)
+      .some(({ row: targetRow, col: targetCol }) => targetRow === row && targetCol === col));
 }
 
 export function getLegalMoves(state) {

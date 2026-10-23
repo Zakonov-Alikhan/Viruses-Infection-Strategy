@@ -684,6 +684,24 @@ test("both players can continue a chain through the paired portal, but not place
   assert.equal(canCompleteTurn(oState, "O", 1), true);
 });
 
+test("touching either wormhole activates legal cells around both endpoints", () => {
+  const base = makePlayingState();
+  const pair = { id: 41, endpoints: { orange: { row: 3, col: 3 }, blue: { row: 6, col: 6 } }, roundsRemaining: 3 };
+  for (const entryColor of ["orange", "blue"]) {
+    const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+    const entry = pair.endpoints[entryColor];
+    board[entry.row - 1][entry.col - 1] = "X"; // diagonal contact
+    const targets = Object.values(pair.endpoints).map(({ row, col }) => ({ row: row + 1, col }));
+    for (const target of targets) board[target.row][target.col] = EMPTY_CELL;
+    const state = { ...base, board, currentPlayer: "X", piecesLeft: 1, wormholePair: pair };
+    for (const target of targets) {
+      assert.equal(isLegalMove(state, target.row, target.col), true,
+        `${entryColor} contact should activate a move beside each endpoint`);
+      assert.ok(getLegalMoves(state).some(({ row, col }) => row === target.row && col === target.col));
+    }
+  }
+});
+
 test("wormhole routing is symmetric across both endpoint colors and all eight neighbor directions", () => {
   const base = makePlayingState({ piecesPerTurn: 2 });
   const offsets = [
