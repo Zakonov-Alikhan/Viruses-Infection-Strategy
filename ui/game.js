@@ -538,8 +538,38 @@ export function getLegalMoves(state) {
   return moves;
 }
 
+const RESCUE_ITEM_TYPES = new Set(["bomb", "freePlacement", "pointDestroy", "exchange"]);
+
+export function canContinueAfterPlacement(state, player = state?.currentPlayer) {
+  if (!state?.board?.length || state.phase !== "playing" || (player !== "X" && player !== "O")) return false;
+  const ordinaryState = { ...state, currentPlayer: player, selectedAbility: null, abilityTargets: [] };
+  if (getLegalMoves(ordinaryState).length > 0) return true;
+
+  const owned = (state.inventory?.[player] || [])
+    .filter((item) => item && RESCUE_ITEM_TYPES.has(item.type) && isItemEnabled(state, item.type));
+  const has = (type, inventory = owned) => inventory.some((item) => item.type === type);
+  if (has("bomb") || has("pointDestroy")) return true;
+
+  if (has("freePlacement")) {
+    for (let row = 0; row < state.board.length; row += 1) {
+      for (let col = 0; col < state.board[row].length; col += 1) {
+        if (state.board[row][col] !== EMPTY_CELL || isWormholeCell(state, row, col)) continue;
+        return true;
+      }
+    }
+  }
+
+  if (has("exchange")) {
+    const opponent = player === "X" ? "O" : "X";
+    const opponentItems = (state.inventory?.[opponent] || [])
+      .filter((item) => item && RESCUE_ITEM_TYPES.has(item.type) && isItemEnabled(state, item.type));
+    return opponentItems.length > 0;
+  }
+  return false;
+}
+
 export function finishIfNoLegalMoves(state) {
-  if (!state || state.phase !== "playing" || getLegalMoves(state).length > 0) return state;
+  if (!state || state.phase !== "playing" || canContinueAfterPlacement(state)) return state;
   const winner = state.currentPlayer === "X" ? "O" : "X";
   return finish(state, winner, message("message.cannotFinish", {
     player: state.currentPlayer,
@@ -680,7 +710,7 @@ function useAreaAbility(state, itemId, row, col, type) {
     message: message(isBomb ? "message.bomb" : "message.antiBomb")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.wormholePair)) {
+  if (!canContinueAfterPlacement(next, state.currentPlayer)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -722,7 +752,7 @@ export function usePointDestroy(state, itemId, row, col) {
     message: message("message.pointDestroy")
   };
 
-  if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.wormholePair)) {
+  if (!canContinueAfterPlacement(next, state.currentPlayer)) {
     const winner = state.currentPlayer === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinishAbility", { player: state.currentPlayer }));
   }
@@ -784,7 +814,7 @@ export function chooseAbilityTarget(state, itemId, row, col) {
       lastDestroyed: abilityTargets,
       message: message("message.debris")
     };
-    if (!hasEnoughConnectedCells(state.currentPlayer, state.piecesLeft, board, next.wormholePair)) {
+    if (!canContinueAfterPlacement(next, state.currentPlayer)) {
       const winner = state.currentPlayer === "X" ? "O" : "X";
       return finish(next, winner, message("message.cannotFinishDebris", { player: state.currentPlayer }));
     }
@@ -905,7 +935,7 @@ export function playMove(state, row, col, random = Math.random) {
     next.message = appendMessage(next.message, message("message.freePlacementUsed"));
   }
 
-  if (piecesLeft > 0 && !hasEnoughConnectedCells(player, piecesLeft, board, next.wormholePair)) {
+  if (piecesLeft > 0 && !canContinueAfterPlacement(next, player)) {
     const winner = player === "X" ? "O" : "X";
     return finish(next, winner, message("message.cannotFinish", { player, count: state.settings.piecesPerTurn }));
   }
@@ -924,7 +954,7 @@ export function playMove(state, row, col, random = Math.random) {
       };
       next = withPendingExtraTurnQueues(next, pendingExtraTurns);
       next = startTurn(next, player, state.settings.piecesPerTurn);
-      if (!hasEnoughConnectedCells(player, state.settings.piecesPerTurn, board, next.wormholePair)) {
+      if (!canContinueAfterPlacement(next, player)) {
         const winner = player === "X" ? "O" : "X";
         return finish(next, winner, message("message.extraCannotFinish", { player }));
       }
@@ -936,7 +966,7 @@ export function playMove(state, row, col, random = Math.random) {
     const completedRound = player === "O";
     const pairExpired = completedRound && Boolean(next.wormholePair && next.wormholePair.roundsRemaining <= 1);
     if (completedRound) next = advanceRound(next);
-    if (!hasEnoughConnectedCells(nextPlayer, state.settings.piecesPerTurn, board, next.wormholePair)) {
+    if (!canContinueAfterPlacement(next, nextPlayer)) {
       return finish(next, player, message("message.opponentCannotFinish", { count: state.settings.piecesPerTurn }));
     }
     if (completedRound && !pairExpired) next = maybeSpawnWormholePair(next, random);

@@ -10,6 +10,7 @@ import {
   getItemSpawnProbability,
   getItemSpawnTarget,
   canCompleteTurn,
+  canContinueAfterPlacement,
   chooseAbilityTarget,
   createGameState,
   getLegalMoves,
@@ -36,6 +37,52 @@ function makePlayingState(overrides = {}) {
     ...overrides
   }, () => 0);
 }
+
+test("defeat check accepts normal moves and the four explicitly rescuing inventory exceptions", () => {
+  const base = makePlayingState();
+  assert.equal(canContinueAfterPlacement(base), true);
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[0][0] = "X";
+  board[9][9] = "O";
+  const stranded = { ...base, board, currentPlayer: "X", piecesLeft: 1, selectedAbility: null };
+  assert.equal(canContinueAfterPlacement(stranded), false);
+  for (const type of ["bomb", "pointDestroy"]) {
+    const state = { ...stranded, inventory: { X: [{ id: type, type }], O: [] } };
+    assert.equal(canContinueAfterPlacement(state), true, `${type} should prevent defeat`);
+  }
+  const oneEmpty = board.map((row) => row.slice());
+  oneEmpty[5][5] = EMPTY_CELL;
+  const freeState = { ...stranded, board: oneEmpty, inventory: { X: [{ id: "free", type: "freePlacement" }], O: [] } };
+  assert.equal(canContinueAfterPlacement(freeState), true);
+  assert.equal(canContinueAfterPlacement({ ...stranded, inventory: { X: [{ id: "free", type: "freePlacement" }], O: [] } }), false);
+});
+
+test("exchange only rescues a stranded player when opponent holds an exception item", () => {
+  const base = makePlayingState();
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[0][0] = "X";
+  board[9][9] = "O";
+  const state = { ...base, board, currentPlayer: "X", piecesLeft: 1,
+    inventory: { X: [{ id: "exchange", type: "exchange" }], O: [{ id: "opponent-bomb", type: "bomb" }] } };
+  assert.equal(canContinueAfterPlacement(state), true);
+  assert.equal(canContinueAfterPlacement({ ...state, inventory: { ...state.inventory, O: [{ id: "ordinary", type: "shield" }] } }), false);
+});
+
+test("collecting exchange after placement is applied before checking whether the player is stranded", () => {
+  const base = makePlayingState({ piecesPerTurn: 2 });
+  const board = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
+  board[4][4] = "X";
+  board[4][5] = EMPTY_CELL;
+  board[9][9] = "O";
+  const state = { ...base, board, piecesLeft: 2,
+    inventory: { X: [], O: [{ id: "opponent-bomb", type: "bomb" }] },
+    eventItems: [{ id: 77, type: "exchange", row: 4, col: 5 }] };
+  const next = playMove(state, 4, 5, () => 1);
+  assert.equal(next.phase, "playing");
+  assert.equal(next.currentPlayer, "X");
+  assert.equal(next.piecesLeft, 1);
+  assert.equal(next.inventory.X[0].type, "exchange");
+});
 
 test("stacked extra-turn items are consumed in order before control passes to the opponent", () => {
   let state = createGameState({
