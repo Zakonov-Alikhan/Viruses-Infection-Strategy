@@ -110,6 +110,41 @@ test("creates private rooms without exposing a final side until the second playe
   assert.equal(manager.roomCount, 1);
 });
 
+test("rated room binds distinct account identities and reports only the server winner", async () => {
+  const results = [];
+  const manager = new RoomManager({
+    onMatchFinished: async (result) => { results.push(result); return { recorded: true, delta: 16 }; },
+    settings: { ...DEFAULT_SETTINGS, freeStartingPositions: false, randomEvents: false },
+    random: () => 0.75,
+    sideRandom: () => 0.25,
+    roomCodeFactory: () => "RATEDROOM",
+    playerTokenFactory: (() => { let n = 0; return () => `rated-test-token-${String(++n).padStart(32, "0")}`; })()
+  });
+  const created = manager.createRoom(undefined, { accountId: "account-a" });
+  const sameAccount = manager.joinRoom(created.roomCode, { accountId: "account-a" });
+  assert.equal(sameAccount.error.code, "same-account");
+  const joined = manager.joinRoom(created.roomCode, {
+    accountId: "account-b",
+    ratingsByAccount: { "account-a": 1300, "account-b": 1200 }
+  });
+  assert.equal(joined.ok, true);
+  const notifications = [];
+  manager.attachConnection(created.roomCode, "X", (message) => notifications.push(message));
+  manager.attachConnection(created.roomCode, "O", (message) => notifications.push(message));
+  const loserSide = manager.rooms.get(created.roomCode).state.currentPlayer;
+  const finished = await manager.submitCommand(created.roomCode, loserSide, { type: "resign" });
+  assert.equal(finished.ok, true);
+  await manager.rooms.get(created.roomCode).ratingPromise;
+  assert.equal(results.length, 1);
+  assert.equal(results[0].winnerId, manager.rooms.get(created.roomCode).seats[loserSide === "X" ? "O" : "X"].accountId);
+  assert.deepEqual(results[0].ratingsAtStart, { "account-a": 1300, "account-b": 1200 });
+  assert.equal(notifications.filter(({ type }) => type === "rating-updated").length, 2);
+  assert.equal(manager.resumeRoom(created.roomCode, created.playerToken, () => {}, { accountId: "account-c" }).error.code, "account-mismatch");
+  manager.sweepExpiredRooms();
+  assert.equal(results.length, 1);
+  manager.stopAllClocks();
+});
+
 test("room history contains only confirmed commands and is shared with each player's view", async () => {
   const manager = makeManager();
   const room = manager.createRoom();

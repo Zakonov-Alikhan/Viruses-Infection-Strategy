@@ -29,11 +29,12 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-routing1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=wormhole-settings1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-system1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
+import { AccountsClient } from "./accounts.js?v=account-system1";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
@@ -109,10 +110,27 @@ const menuSettingsDoneButton = document.querySelector("#menu-settings-done");
 const menuAnimationsToggle = document.querySelector("#menu-animations-toggle");
 const menuNotice = document.querySelector("#menu-notice");
 const accountActionButton = document.querySelector("#account-action");
+const accountModal = document.querySelector("#account-modal");
+const accountModalClose = document.querySelector("#account-modal-close");
+const accountLoginForm = document.querySelector("#account-login-form");
+const accountRegisterForm = document.querySelector("#account-register-form");
+const accountAuthForms = document.querySelector("#account-auth-forms");
+const accountProfile = document.querySelector("#account-profile");
+const accountStatus = document.querySelector("#account-status");
+const accountHeaderName = document.querySelector("#account-header-name");
+const accountHeaderDetail = document.querySelector("#account-header-detail");
+const leaderboardList = document.querySelector("#leaderboard-list");
+const leaderboardStatus = document.querySelector("#leaderboard-status");
+const accountsClient = new AccountsClient();
+let currentAccount = null;
 const menuCanvas = document.querySelector("#menu-ambient");
 const menuCanvasContext = menuCanvas.getContext("2d");
 const menuDuelCanvas = document.querySelector("#menu-duel");
 const menuDuelContext = menuDuelCanvas.getContext("2d");
+const demoCard = document.querySelector(".demo-card");
+const demoBoard = document.querySelector(".demo-training-frames");
+const demoFrames = [...document.querySelectorAll(".demo-training-frame")];
+const demoSceneButtons = [...document.querySelectorAll(".demo-progress-segment[data-demo-index]")];
 const sideTitle = document.querySelector("#side-title");
 const sideDescription = document.querySelector("#side-description");
 const pageTitle = document.querySelector("#page-title");
@@ -1520,6 +1538,10 @@ function enterOnlineGame(message) {
 }
 
 function handleMultiplayerEvent(event) {
+  if (event.type === "rating-updated" && onlineMode && event.roomCode === onlineRoomCode) {
+    void refreshAccount();
+    return;
+  }
   if (event.type === "admin-authenticated" && onlineMode && event.roomCode === onlineRoomCode) {
     onlineAdminAuthenticated = true;
     return;
@@ -3120,7 +3142,105 @@ returnMenuButton.addEventListener("click", returnToMainMenu);
 menuSettingsButton.addEventListener("click", openMenuSettings);
 menuSettingsCloseButton.addEventListener("click", () => menuSettingsModal.close());
 menuSettingsDoneButton.addEventListener("click", saveMenuSettings);
-accountActionButton.addEventListener("click", () => showMenuNotice("menu.profileSoon"));
+function accountErrorMessage(error) {
+  const code = error instanceof Error ? error.message : "network";
+  const key = `account.error.${code}`;
+  return t(key) === key ? t("account.error.network") : t(key);
+}
+
+function renderAccount(account) {
+  currentAccount = account ?? null;
+  accountAuthForms.hidden = Boolean(currentAccount);
+  accountProfile.hidden = !currentAccount;
+  if (currentAccount) {
+    accountHeaderName.textContent = currentAccount.username;
+    accountHeaderDetail.textContent = t("account.headerRating", { rating: currentAccount.rating });
+    document.querySelector("#account-profile-name").textContent = currentAccount.username;
+    document.querySelector("#account-profile-rating").textContent = currentAccount.rating;
+    document.querySelector("#account-profile-wins").textContent = currentAccount.wins;
+    document.querySelector("#account-profile-losses").textContent = currentAccount.losses;
+    accountStatus.textContent = t("account.signedIn", { username: currentAccount.username });
+  } else {
+    accountHeaderName.textContent = t("account.guestHeader");
+    accountHeaderDetail.textContent = t("account.guestDetail");
+    accountStatus.textContent = t("account.signedOut");
+  }
+}
+
+async function refreshAccount() {
+  try {
+    renderAccount((await accountsClient.me()).account);
+  } catch (error) {
+    renderAccount(null);
+    accountStatus.textContent = accountErrorMessage(error);
+  }
+}
+
+async function refreshLeaderboard() {
+  leaderboardStatus.textContent = "";
+  leaderboardList.replaceChildren();
+  try {
+    const { entries } = await accountsClient.leaderboard();
+    if (!entries.length) {
+      leaderboardStatus.textContent = t("account.emptyLeaderboard");
+      return;
+    }
+    for (const entry of entries) {
+      const row = document.createElement("li");
+      const name = document.createElement("span");
+      const score = document.createElement("span");
+      name.textContent = `${entry.rank}. ${entry.username} · ${t("account.wins")}: ${entry.wins} · ${t("account.losses")}: ${entry.losses}`;
+      score.textContent = String(entry.rating);
+      row.append(name, score);
+      leaderboardList.append(row);
+    }
+  } catch (error) {
+    leaderboardStatus.textContent = accountErrorMessage(error);
+  }
+}
+
+async function submitAccountForm(event, method) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const submit = form.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  try {
+    const result = await accountsClient[method](data.get("username"), data.get("password"));
+    renderAccount(result.account);
+    form.reset();
+    if (method === "register") accountStatus.textContent = `${t("account.registered")} ${accountStatus.textContent}`;
+    await refreshLeaderboard();
+  } catch (error) {
+    accountStatus.textContent = accountErrorMessage(error);
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+accountActionButton.addEventListener("click", () => {
+  accountModal.showModal();
+  void refreshAccount();
+  void refreshLeaderboard();
+});
+accountModalClose.addEventListener("click", () => accountModal.close());
+accountModal.addEventListener("click", (event) => {
+  if (event.target === accountModal) accountModal.close();
+});
+accountLoginForm.addEventListener("submit", (event) => void submitAccountForm(event, "login"));
+accountRegisterForm.addEventListener("submit", (event) => void submitAccountForm(event, "register"));
+document.querySelector("#account-logout").addEventListener("click", async () => {
+  try {
+    await accountsClient.logout();
+    renderAccount(null);
+    accountStatus.textContent = t("account.loggedOut");
+  } catch (error) {
+    accountStatus.textContent = accountErrorMessage(error);
+  }
+});
+document.querySelector("#account-leaderboard-refresh").addEventListener("click", () => void refreshLeaderboard());
+document.addEventListener("languagechange", () => renderAccount(currentAccount));
+void refreshAccount();
 document.querySelectorAll("[data-mode]").forEach((button) => {
   button.addEventListener("click", () => showMenuNotice("menu.missing", { feature: t("menu." + button.dataset.mode) }));
 });
@@ -3196,12 +3316,173 @@ for (const player of ["X", "O"]) {
     }
   });
 }
+function createDemoLessonState(lessonIndex) {
+  const lesson = TRAINING_LESSONS[lessonIndex];
+  const piecesPerTurn = lesson.objective === "shield" ? 2 : 1;
+  const lessonSettings = {
+    ...DEFAULT_SETTINGS,
+    width: TRAINING_BOARD_SIZE,
+    height: TRAINING_BOARD_SIZE,
+    piecesPerTurn,
+    unlimitedTime: true,
+    randomEvents: false,
+    freeStartingPositions: false,
+    adminMode: false
+  };
+  let lessonState = {
+    ...createGameState(lessonSettings),
+    board: createTrainingBoard(lessonIndex),
+    phase: "playing",
+    currentPlayer: "X",
+    piecesLeft: piecesPerTurn,
+    inventory: { X: lesson.item ? [{ id: "demo-item", type: lesson.item }] : [], O: [] },
+    nextEventItemId: 1,
+    eventItems: [],
+    selectedAbility: null,
+    abilityTargets: [],
+    protections: [],
+    lastDestroyed: [],
+    pendingExtraTurn: null,
+    message: []
+  };
+
+  if (lesson.objective === "reaction") {
+    const [target] = lesson.targets;
+    lessonState = playMove(lessonState, target.row, target.col);
+  } else if (lesson.objective === "shield") {
+    lessonState = selectAbility(lessonState, "demo-item");
+    for (const target of lesson.targets) {
+      lessonState = chooseAbilityTarget(lessonState, "demo-item", target.row, target.col);
+    }
+  } else if (lesson.objective === "bomb") {
+    lessonState = selectAbility(lessonState, "demo-item");
+  }
+
+  return lessonState;
+}
+
+function renderDemoTrainingFrames() {
+  demoFrames.forEach((frame, lessonIndex) => {
+    const lessonState = createDemoLessonState(lessonIndex);
+    const legalMoves = new Set(getLegalMoves(lessonState).map(({ row, col }) => row + "," + col));
+    const targets = new Set(TRAINING_LESSONS[lessonIndex].targets.map(({ row, col }) => row + "," + col));
+    const cells = document.createDocumentFragment();
+
+    for (let row = 0; row < TRAINING_BOARD_SIZE; row += 1) {
+      for (let col = 0; col < TRAINING_BOARD_SIZE; col += 1) {
+        const value = lessonState.board[row][col];
+        const cell = document.createElement("span");
+        cell.className = "cell";
+        cell.dataset.row = String(row);
+        cell.dataset.col = String(col);
+        cell.setAttribute("aria-hidden", "true");
+        if (value === "X" || value === "O") {
+          cell.classList.add("piece", value === "X" ? "piece-x" : "piece-o");
+          const glyph = document.createElement("span");
+          glyph.className = "piece-glyph";
+          glyph.textContent = value;
+          cell.appendChild(glyph);
+        } else if (value === BLOCKED_CELL) {
+          cell.textContent = "×";
+          cell.classList.add("blocked");
+        } else if (legalMoves.has(row + "," + col) && targets.has(row + "," + col)) {
+          cell.classList.add("legal", "training-target");
+          cell.dataset.player = lessonState.currentPlayer;
+        }
+
+        const protection = lessonState.protections.find((shield) => shield.row === row && shield.col === col);
+        if (protection) {
+          cell.classList.add("protected-piece");
+          if (protection.permanent) cell.classList.add("protected-permanent");
+          const icon = document.createElement("img");
+          icon.className = "shield-marker";
+          icon.src = protection.permanent ? EVENT_ITEM_DEFINITIONS.gangstaShield.icon : EVENT_ITEM_DEFINITIONS.shield.icon;
+          icon.alt = "";
+          icon.setAttribute("aria-hidden", "true");
+          cell.appendChild(icon);
+        }
+        cells.appendChild(cell);
+      }
+    }
+
+    frame.replaceChildren(cells);
+    if (TRAINING_LESSONS[lessonIndex].objective === "bomb") {
+      const [target] = TRAINING_LESSONS[lessonIndex].targets;
+      if (isValidAreaTarget(lessonState, target.row, target.col)) {
+        const aim = document.createElement("div");
+        aim.className = "bomb-aim-overlay demo-bomb-aim";
+        aim.setAttribute("aria-hidden", "true");
+        frame.appendChild(aim);
+      }
+    }
+  });
+}
+
+function updateDemoSceneLabels() {
+  demoSceneButtons.forEach((button) => {
+    button.setAttribute("aria-label", t("demo.sceneLabel", { scene: t(button.dataset.demoSceneLabel) }));
+  });
+}
+
+function selectDemoScene(index) {
+  if (!demoCard || demoSceneButtons.length === 0) return;
+  const sceneIndex = (index + demoSceneButtons.length) % demoSceneButtons.length;
+  demoCard.dataset.demoManual = "true";
+  demoCard.dataset.demoCurrent = String(sceneIndex);
+  demoSceneButtons.forEach((button, buttonIndex) => {
+    if (buttonIndex === sceneIndex) button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+  });
+  updateDemoBombAim(sceneIndex);
+}
+
+function updateDemoBombAim(sceneIndex = Number(demoCard?.dataset.demoCurrent ?? 0)) {
+  if (sceneIndex !== 3) return;
+  const frame = demoFrames[sceneIndex];
+  const [target] = TRAINING_LESSONS[sceneIndex].targets;
+  const firstCell = frame?.querySelector(`.cell[data-row="${target.row}"][data-col="${target.col}"]`);
+  const bottomRightCell = frame?.querySelector(`.cell[data-row="${target.row + 1}"][data-col="${target.col + 1}"]`);
+  const aim = frame?.querySelector(".demo-bomb-aim");
+  if (!firstCell || !bottomRightCell || !aim) return;
+  aim.style.left = `${firstCell.offsetLeft}px`;
+  aim.style.top = `${firstCell.offsetTop}px`;
+  aim.style.width = `${bottomRightCell.offsetLeft + bottomRightCell.offsetWidth - firstCell.offsetLeft}px`;
+  aim.style.height = `${bottomRightCell.offsetTop + bottomRightCell.offsetHeight - firstCell.offsetTop}px`;
+}
+
+renderDemoTrainingFrames();
+updateDemoSceneLabels();
+window.addEventListener("resize", () => updateDemoBombAim());
+demoSceneButtons.forEach((button) => {
+  button.addEventListener("click", () => selectDemoScene(Number(button.dataset.demoIndex)));
+});
+demoCard?.querySelector("[data-demo-previous]")?.addEventListener("click", () => {
+  selectDemoScene(Number(demoCard.dataset.demoCurrent ?? 0) - 1);
+});
+demoCard?.querySelector("[data-demo-next]")?.addEventListener("click", () => {
+  selectDemoScene(Number(demoCard.dataset.demoCurrent ?? 0) + 1);
+});
+
+let demoSwipeStartX = null;
+demoBoard?.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "touch") demoSwipeStartX = event.clientX;
+});
+demoBoard?.addEventListener("pointerup", (event) => {
+  if (demoSwipeStartX === null) return;
+  const deltaX = event.clientX - demoSwipeStartX;
+  demoSwipeStartX = null;
+  if (Math.abs(deltaX) < 36) return;
+  selectDemoScene(Number(demoCard?.dataset.demoCurrent ?? 0) + (deltaX < 0 ? 1 : -1));
+});
+demoBoard?.addEventListener("pointercancel", () => { demoSwipeStartX = null; });
+
 languageSelect.value = getLanguage();
 applyTranslations();
 decorateRuleItemCards();
 languageSelect.addEventListener("change", () => setLanguage(languageSelect.value));
 document.addEventListener("languagechange", () => {
   applyTranslations();
+  updateDemoSceneLabels();
   updateSpawnModeHelp(itemSpawnModeSelect, itemSpawnModeHelp);
   updateSpawnModeHelp(onlineItemSpawnMode, onlineItemSpawnModeHelp);
   decorateRuleItemCards();

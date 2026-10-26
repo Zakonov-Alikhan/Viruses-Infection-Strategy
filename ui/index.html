@@ -3,62 +3,131 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#10191c">
-  <meta name="description" content="Стратегическая игра «Вирусы» для двух игроков." data-i18n-content="brand.tagline">
-  <title>Вирусы — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=turn-undo1">
+  <meta name="theme-color" content="#0c1517">
+  <meta name="description" content="Cascade Wars — стратегическая игра для двух игроков." data-i18n-content="brand.tagline">
+  <title>Cascade Wars — стратегия для двух игроков</title>
+  <link rel="stylesheet" href="/ui/style.css?v=account-system1">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
     <canvas class="menu-ambient" id="menu-ambient" aria-hidden="true"></canvas>
     <div class="menu-vignette" aria-hidden="true"></div>
     <header class="menu-topbar">
-      <a class="brand" href="/" aria-label="Вирусы — на главную" data-i18n-aria-label="brand.home">
-        <span class="brand-mark" aria-hidden="true">V</span>
-        <span><span data-i18n="brand.name">Вирусы</span><span class="brand-period">.</span></span>
+      <a class="brand brand-home" href="/" aria-label="Cascade Wars — главная" data-i18n-aria-label="brand.home">
+        <span class="brand-mark" aria-hidden="true">CW</span>
+        <span class="brand-wordmark"><span class="brand-cascade">CASCADE</span><span class="brand-wars">WARS</span></span>
       </a>
       <div class="menu-account-area">
-        <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">Русский</option><option value="en">English</option></select></label>
+        <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">RU</option><option value="en">EN</option></select></label>
         <div class="account-chip" aria-label="Гостевой профиль" data-i18n-aria-label="menu.account">
           <span class="account-avatar" aria-hidden="true">◉</span>
-          <span class="account-copy"><strong data-i18n="menu.guest">Гость</strong><small data-i18n="menu.guestStatus">Локальный профиль</small></span>
+          <span class="account-copy"><strong id="account-header-name" data-i18n="menu.guest">Гость</strong><small id="account-header-detail" data-i18n="menu.guestStatus">Локальный профиль</small></span>
           <button class="account-action" id="account-action" type="button" data-i18n="menu.accountAction">Профиль</button>
         </div>
       </div>
     </header>
 
     <main class="menu-content">
-      <section class="menu-hero" aria-labelledby="menu-title">
-        <div class="menu-duel-frame"><canvas class="menu-duel" id="menu-duel" role="img" aria-label="Перетаскиваемые вирусные колонии разделены бактериальным инь-ян" data-i18n-aria-label="menu.duelLabel"></canvas><div class="duel-label duel-label-x" aria-hidden="true">X / 01</div><div class="duel-label duel-label-o" aria-hidden="true">O / 02</div><span class="duel-drag-hint" data-i18n="menu.dragHint">Перетащите колонии</span></div>
-        <p class="menu-eyebrow"><span class="menu-eyebrow-dot" aria-hidden="true"></span><span data-i18n="menu.eyebrow">Живая симуляция</span></p>
-        <h1 id="menu-title" data-i18n="menu.title">Две системы. Ни одна не уступает.</h1>
-        <p class="menu-description" data-i18n="menu.description">Они растут, атакуют и встречают сопротивление. Выбери режим и измени равновесие.</p>
-        <div class="menu-art-note"><span aria-hidden="true">✳</span><span data-i18n="menu.artNote">Атака. Ответ. Равновесие.</span></div>
-      </section>
-
       <section class="menu-launcher" aria-label="Режимы игры" data-i18n-aria-label="menu.modes">
         <p class="menu-section-label" data-i18n="menu.modes">РЕЖИМЫ ИГРЫ</p>
-        <button class="mode-button mode-button-local mode-button-featured" id="local-game-button" type="button">
-          <span class="mode-icon" aria-hidden="true">◈</span><span class="mode-copy"><strong data-i18n="menu.local">На одном устройстве</strong><small data-i18n="menu.localHelp">Два игрока · один экран</small></span><span class="mode-arrow" aria-hidden="true">→</span>
+        <button class="mode-button mode-button-featured mode-button-computer" id="computer-game-button" type="button" aria-haspopup="dialog" aria-controls="computer-difficulty-modal">
+          <span class="mode-icon" aria-hidden="true">◎</span><span class="mode-copy"><strong data-i18n="menu.computer">Против компьютера</strong><small data-i18n="menu.computerHelp">Быстрый старт · три уровня</small></span><span class="mode-arrow" aria-hidden="true">→</span>
         </button>
         <button class="mode-button" id="online-game-button" type="button" aria-haspopup="dialog" aria-controls="online-room-modal">
-          <span class="mode-icon" aria-hidden="true">⌁</span><span class="mode-copy"><strong data-i18n="menu.online">Сетевая игра</strong><small data-i18n="menu.onlineHelp">Создай комнату или введи код приглашения</small></span><span class="mode-arrow" aria-hidden="true">→</span>
+          <span class="mode-icon" aria-hidden="true">⌁</span><span class="mode-copy"><strong data-i18n="menu.online">Сетевая игра</strong><small data-i18n="menu.onlineHelp">Комната по коду приглашения</small></span><span class="mode-arrow" aria-hidden="true">→</span>
+        </button>
+        <button class="mode-button mode-button-local" id="local-game-button" type="button">
+          <span class="mode-icon" aria-hidden="true">◈</span><span class="mode-copy"><strong data-i18n="menu.local">На одном устройстве</strong><small data-i18n="menu.localHelp">Два игрока · один экран</small></span><span class="mode-arrow" aria-hidden="true">→</span>
         </button>
         <button class="mode-button" id="training-mode-button" type="button">
-          <span class="mode-icon" aria-hidden="true">◇</span><span class="mode-copy"><strong data-i18n="menu.training">Обучение</strong><small data-i18n="menu.trainingHelp">Освой механику на практике</small></span><span class="mode-arrow" aria-hidden="true">↗</span>
-        </button>
-        <button class="mode-button" id="computer-game-button" type="button" aria-haspopup="dialog" aria-controls="computer-difficulty-modal">
-          <span class="mode-icon" aria-hidden="true">◎</span><span class="mode-copy"><strong data-i18n="menu.computer">Против компьютера</strong><small data-i18n="menu.computerHelp">Проверь стратегию в одиночку</small></span><span class="mode-arrow" aria-hidden="true">→</span>
+          <span class="mode-icon" aria-hidden="true">◇</span><span class="mode-copy"><strong data-i18n="menu.training">Обучение</strong><small data-i18n="menu.trainingHelp">Механика за пару минут</small></span><span class="mode-arrow" aria-hidden="true">↗</span>
         </button>
         <div class="menu-launcher-footer">
-          <span class="menu-status-dot" aria-hidden="true"></span><span data-i18n="menu.localReady">Локальная партия уже доступна</span>
-          <button class="menu-settings-button" id="menu-settings-button" type="button"><span aria-hidden="true">⚙</span><span data-i18n="menu.settings">Общие настройки</span></button>
+          <span class="menu-status-dot" aria-hidden="true"></span><span data-i18n="menu.localReady">Локальная партия доступна</span>
+          <button class="menu-settings-button" id="menu-settings-button" type="button"><span aria-hidden="true">⚙</span><span data-i18n="menu.settings">Настройки</span></button>
         </div>
         <p class="menu-notice" id="menu-notice" role="status" aria-live="polite" hidden></p>
       </section>
+      <div class="menu-visual-column">
+        <section class="menu-hero" aria-label="Игровая сцена">
+          <div class="menu-duel-frame"><canvas class="menu-duel" id="menu-duel" role="img" aria-label="Две бактериальные колонии и их связь" data-i18n-aria-label="menu.duelLabel"></canvas><div class="duel-label duel-label-x" aria-hidden="true">X</div><div class="duel-label duel-label-o" aria-hidden="true">O</div><span class="duel-drag-hint" data-i18n="menu.dragHint">Перетаскивайте колонии мышью</span></div>
+        </section>
+        <section class="demo-card" aria-label="Листаемые кадры из обучения" data-i18n-aria-label="demo.aria" data-demo-current="0">
+          <div class="demo-player-labels"><span class="demo-player-x" data-i18n="demo.botX">● Бот X</span><span class="demo-player-o" data-i18n="demo.botO">Бот O ●</span></div>
+          <div class="demo-board-wrap">
+            <div class="demo-training-frames" role="img" aria-label="Учебные примеры игрового поля" data-i18n-aria-label="demo.boardAria">
+              <div class="demo-scene demo-training-frame" data-demo-scene-index="0" aria-hidden="true"></div>
+              <div class="demo-scene demo-training-frame" data-demo-scene-index="1" aria-hidden="true"></div>
+              <div class="demo-scene demo-training-frame" data-demo-scene-index="2" aria-hidden="true"></div>
+              <div class="demo-scene demo-training-frame" data-demo-scene-index="3" aria-hidden="true"></div>
+            </div>
+            <div class="demo-scene demo-item-tray" data-demo-scene-index="2" aria-hidden="true"><img src="/ui/assets/items/shield.svg" alt=""><span data-i18n="item.shield">Щит</span></div>
+            <div class="demo-scene demo-item-tray" data-demo-scene-index="3" aria-hidden="true"><img src="/ui/assets/items/bomb.svg" alt=""><span data-i18n="item.bomb">Бомба</span></div>
+          </div>
+          <div class="demo-copy" aria-live="polite">
+            <div class="demo-scene demo-copy-scene" data-demo-scene-index="0"><h2 data-i18n="training.lesson.connect.title">Построй цепочку</h2><p data-i18n="training.lesson.connect.description">Поставь фигуру X в выделенную клетку рядом со своей цепочкой.</p></div>
+            <div class="demo-scene demo-copy-scene" data-demo-scene-index="1"><h2 data-i18n="training.lesson.contact.title">Запусти цепную реакцию</h2><p data-i18n="training.lesson.contact.description">Поставь X в отмеченную клетку. Она коснётся нескольких O: уничтожатся соприкоснувшиеся фигуры и только первый прилегающий слой.</p></div>
+            <div class="demo-scene demo-copy-scene" data-demo-scene-index="2"><h2 data-i18n="training.lesson.shield.title">Поставь щиты</h2><p data-i18n="training.lesson.shield.description">Можешь сначала поставить X в свободную подсвеченную клетку: очередь не переключится. Затем выбери Щит в инвентаре и защити три клетки.</p></div>
+            <div class="demo-scene demo-copy-scene" data-demo-scene-index="3"><h2 data-i18n="training.lesson.bomb.title">Примени бомбу</h2><p data-i18n="training.lesson.bomb.description">Выбери Бомбу в инвентаре, наведи на выделенный квадрат 2×2 и нажми на него. Все четыре клетки очистятся, включая фигуры.</p></div>
+          </div>
+          <div class="demo-controls"><button class="demo-nav-button" type="button" data-demo-previous aria-label="Previous scene" data-i18n-aria-label="demo.previous"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5"/></svg></button><div class="demo-progress" role="group" aria-label="Choose a scene" data-i18n-aria-label="demo.chooseScene"><button class="demo-progress-segment" type="button" data-demo-index="0" data-demo-scene-label="training.lesson.connect.title" aria-label="Growth"></button><button class="demo-progress-segment" type="button" data-demo-index="1" data-demo-scene-label="training.lesson.contact.title" aria-label="Contact"></button><button class="demo-progress-segment" type="button" data-demo-index="2" data-demo-scene-label="training.lesson.shield.title" aria-label="Items"></button><button class="demo-progress-segment" type="button" data-demo-index="3" data-demo-scene-label="training.lesson.bomb.title" aria-label="No moves"></button></div><button class="demo-nav-button" type="button" data-demo-next aria-label="Next scene" data-i18n-aria-label="demo.next"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button></div>
+        </section>
+      </div>
     </main>
-    <footer class="menu-footer"><span data-i18n="menu.footer">Создано для тех, кто мыслит на ход вперёд.</span><span class="menu-footer-mark" aria-hidden="true">V / 01</span></footer>
+    <footer class="menu-footer">
+      <div class="footer-info">
+        <section class="footer-group footer-contacts">
+          <strong data-i18n="contact.title">Контакты</strong>
+          <span data-i18n="contact.subtitle">по вопросам сотрудничества:</span>
+          <div class="footer-links"><a href="mailto:crumpuss.games@gmail.com">crumpuss.games@gmail.com</a><a href="https://t.me/AlikhanZakonov" target="_blank" rel="noreferrer">Telegram @AlikhanZakonov</a></div>
+        </section>
+        <section class="footer-group footer-support">
+          <strong data-i18n="contact.supportTitle">Поддержать проект</strong>
+          <span data-i18n="contact.supportPending">Реквизиты для денежной поддержки добавлю позже.</span>
+        </section>
+      </div>
+      <span class="menu-footer-mark" aria-hidden="true">CW / 01</span>
+    </footer>
   </div>
+
+  <dialog id="account-modal" class="settings-modal account-modal" aria-labelledby="account-modal-title">
+    <section class="settings-card">
+      <header class="settings-header">
+        <div><p class="eyebrow" data-i18n="account.eyebrow">Cascade Wars</p><h2 id="account-modal-title" data-i18n="account.title">Профиль и рейтинг</h2></div>
+        <button id="account-modal-close" class="icon-button" type="button" aria-label="Закрыть" data-i18n-aria-label="online.close">×</button>
+      </header>
+      <p id="account-status" class="settings-summary" role="status" aria-live="polite"></p>
+      <section id="account-auth-forms" class="account-auth-forms">
+        <form id="account-login-form" class="account-form">
+          <h3 data-i18n="account.loginTitle">Вход</h3>
+          <label for="account-login-username" data-i18n="account.username">Имя пользователя</label>
+          <input id="account-login-username" name="username" type="text" minlength="3" maxlength="24" autocomplete="username" required>
+          <label for="account-login-password" data-i18n="account.password">Пароль</label>
+          <input id="account-login-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required>
+          <button class="button button-primary" type="submit" data-i18n="account.login">Войти</button>
+        </form>
+        <form id="account-register-form" class="account-form">
+          <h3 data-i18n="account.registerTitle">Создать аккаунт</h3>
+          <label for="account-register-username" data-i18n="account.username">Имя пользователя</label>
+          <input id="account-register-username" name="username" type="text" minlength="3" maxlength="24" autocomplete="username" required>
+          <label for="account-register-password" data-i18n="account.password">Пароль</label>
+          <input id="account-register-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+          <small data-i18n="account.passwordHelp">Не менее 10 символов. Используйте уникальный пароль.</small>
+          <button class="button button-secondary" type="submit" data-i18n="account.register">Зарегистрироваться</button>
+        </form>
+      </section>
+      <section id="account-profile" class="account-profile" hidden>
+        <div class="account-rating-summary"><strong id="account-profile-name"></strong><span><b id="account-profile-rating">1200</b> <span data-i18n="account.rating">рейтинг</span></span></div>
+        <p><span data-i18n="account.wins">Победы</span>: <b id="account-profile-wins">0</b> · <span data-i18n="account.losses">Поражения</span>: <b id="account-profile-losses">0</b></p>
+        <button id="account-logout" class="button button-secondary" type="button" data-i18n="account.logout">Выйти</button>
+      </section>
+      <section class="leaderboard-section">
+        <div class="leaderboard-heading"><h3 data-i18n="account.leaderboard">Таблица лидеров</h3><button id="account-leaderboard-refresh" class="button button-secondary" type="button" data-i18n="account.refresh">Обновить</button></div>
+        <p id="leaderboard-status" class="settings-summary" role="status" aria-live="polite"></p>
+        <ol id="leaderboard-list" class="leaderboard-list"></ol>
+      </section>
+    </section>
+  </dialog>
 
   <dialog id="online-room-modal" class="settings-modal online-room-modal" aria-labelledby="online-room-title" aria-describedby="online-room-help">
     <section class="settings-card">
@@ -133,9 +202,9 @@
 
   <main class="app-shell" id="game-screen" hidden>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Вирусы — на главную" data-i18n-aria-label="brand.home">
-        <span class="brand-mark" aria-hidden="true">V</span>
-        <span><span data-i18n="brand.name">Вирусы</span><span class="brand-period">.</span></span>
+      <a class="brand" href="/" aria-label="Cascade Wars — главная" data-i18n-aria-label="brand.home">
+        <span class="brand-mark" aria-hidden="true">CW</span>
+        <span class="brand-wordmark"><span class="brand-cascade">CASCADE</span><span class="brand-wars">WARS</span></span>
       </a>
       <span class="topbar-note" data-i18n="brand.tagline">Стратегия для двух игроков</span>
       <button id="return-menu-button" class="button button-secondary return-menu-button" type="button"><span aria-hidden="true">←</span><span data-i18n="menu.back">В главное меню</span></button>
@@ -491,6 +560,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=visual-polish1"></script>
+  <script type="module" src="/ui/script.js?v=account-system1"></script>
 </body>
 </html>

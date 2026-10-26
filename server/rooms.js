@@ -81,7 +81,9 @@ export class RoomManager {
     random = Math.random,
     sideRandom = () => randomBytes(1)[0] / 256,
     scheduleTimeout = setTimeout,
-    cancelTimeout = clearTimeout
+    cancelTimeout = clearTimeout,
+    onMatchFinished = null,
+    onMatchStarted = null
   } = {}) {
     this.settings = { ...DEFAULT_SETTINGS, ...settings, adminMode: false };
     this.maxRooms = maxRooms;
@@ -97,10 +99,20 @@ export class RoomManager {
     this.sideRandom = sideRandom;
     this.scheduleTimeout = scheduleTimeout;
     this.cancelTimeout = cancelTimeout;
+    this.onMatchFinished = onMatchFinished;
+    this.onMatchStarted = onMatchStarted;
     this.rooms = new Map();
   }
 
-  createRoom(requestedSettings) {
+  setMatchFinishedHandler(handler) {
+    this.onMatchFinished = typeof handler === "function" ? handler : null;
+  }
+
+  setMatchStartedHandler(handler) {
+    this.onMatchStarted = typeof handler === "function" ? handler : null;
+  }
+
+  createRoom(requestedSettings, { accountId = null } = {}) {
     if (this.rooms.size >= this.maxRooms) return failure("server-full");
     const roomSettings = normalizeRoomSettings(requestedSettings, this.settings);
     if (!roomSettings) return failure("invalid-settings");
@@ -119,6 +131,7 @@ export class RoomManager {
     const initialState = createGameState(roomSettings, this.random);
     const room = {
       code,
+      matchId: randomUUID(),
       state: initialState,
       history: [],
       nextHistoryId: 1,
@@ -126,6 +139,9 @@ export class RoomManager {
       undoProposal: null,
       version: 0,
       status: "waiting",
+      startRatings: null,
+      ratingPromise: null,
+      ratingRecorded: false,
       createdAt,
       lastActivityAt: createdAt,
       clock: {
@@ -140,7 +156,7 @@ export class RoomManager {
         generation: 0
       },
       seats: {
-        X: this.#newSeat(token, createdAt),
+        X: this.#newSeat(token, createdAt, accountId),
         O: null
       },
       aims: { X: null, O: null },
@@ -169,16 +185,17 @@ export class RoomManager {
     };
   }
 
-  joinRoom(rawCode) {
+  joinRoom(rawCode, { accountId = null, ratingsByAccount = {} } = {}) {
     const code = normalizeCode(rawCode);
     const room = this.rooms.get(code);
     if (!room) return failure("room-not-found");
     if (room.status !== "waiting" || room.seats.O) return failure("room-full");
+    if (accountId && room.seats.X.accountId === accountId) return failure("same-account");
 
     const token = this.playerTokenFactory();
     const joinedAt = this.now();
     const creatorSeat = room.seats.X;
-    const joiningSeat = this.#newSeat(token, joinedAt);
+    const joiningSeat = this.#newSeat(token, joinedAt, accountId);
     const creatorSide = this.sideRandom() < 0.5 ? "X" : "O";
     const joiningSide = creatorSide === "X" ? "O" : "X";
     room.seats = creatorSide === "X"
@@ -188,6 +205,12 @@ export class RoomManager {
       if (room.seats[side].connection) room.seats[side].connection.side = side;
     }
     room.status = "active";
+    if (room.seats.X.accountId && room.seats.O.accountId) {
+      room.startRatings = {
+        [room.seats.X.accountId]: Number(ratingsByAccount[room.seats.X.accountId]),
+        [room.seats.O.accountId]: Number(ratingsByAccount[room.seats.O.accountId])
+      };
+    }
     room.lastActivityAt = joinedAt;
     if (room.state.phase === "playing") this.#startClock(room, room.state.currentPlayer, joinedAt);
     return {
@@ -220,7 +243,7 @@ export class RoomManager {
     return { ok: true, connection };
   }
 
-  resumeRoom(rawCode, playerToken, send) {
+  resumeRoom(rawCode, playerToken, send, { accountId = null } = {}) {
     const code = normalizeCode(rawCode);
     const room = this.rooms.get(code);
     if (!room) return failure("room-not-found");
@@ -235,6 +258,7 @@ export class RoomManager {
     if (!side) return failure("invalid-resume-token");
 
     const seat = room.seats[side];
+    if ((seat.accountId ?? null) !== accountId) return failure("account-mismatch");
     if (seat.connection) return failure("seat-already-connected");
     if (seat.disconnectedAt === null) return failure("seat-not-disconnected");
     if (this.now() - seat.disconnectedAt >= this.reconnectGraceMs) return failure("reconnect-expired");
@@ -253,6 +277,12 @@ export class RoomManager {
       ...this.#undoView(room, side),
       connection: attached.connection
     };
+  }
+
+  getParticipantAccountIds(rawCode) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return [];
+    return [room.seats.X?.accountId, room.seats.O?.accountId].filter(Boolean);
   }
 
   detachConnection(rawCode, side, connection) {
@@ -311,7 +341,7 @@ export class RoomManager {
   voteRestart(rawCode, side, proposalId, accept) {
     const room = this.rooms.get(normalizeCode(rawCode));
     if (!room) return Promise.resolve(failure("room-not-found"));
-    const operation = room.queue.then(() => {
+    const operation = room.queue.then(async () => {
       if (this.rooms.get(room.code) !== room) return failure("room-not-found");
       if (!room.seats[side]?.connection) return failure("player-disconnected");
       const proposal = room.restartProposal;
@@ -332,6 +362,13 @@ export class RoomManager {
         return failure("wrong-phase");
       }
 
+      if (this.onMatchStarted) {
+        try {
+          room.startRatings = await this.onMatchStarted(this.getParticipantAccountIds(room.code));
+        } catch {
+          return failure("rating-service-unavailable");
+        }
+      }
       this.#restartRoom(room, proposal);
       return { ok: true, accepted: true, version: room.version };
     });
@@ -543,6 +580,7 @@ export class RoomManager {
         this.#cancelRestartProposal(room, "match-finished");
       }
       this.#clearAllAims(room);
+      this.#recordFinishedMatch(room);
       this.#broadcastSnapshots(room, "state", historyEntry ? { historyEntry } : {});
       if (previousAbility && ["bomb", "antiBomb", "pointDestroy"].includes(previousAbility.type)
         && room.state.board !== previousState.board && room.state.lastDestroyed.length > 0) {
@@ -577,7 +615,8 @@ export class RoomManager {
       let reason = null;
       if (room.status === "waiting" && now - room.createdAt >= this.waitingRoomTtlMs) {
         reason = "waiting-room-expired";
-      } else if (room.state.phase === "finished" && now - room.lastActivityAt >= this.finishedRoomTtlMs) {
+      } else if (room.state.phase === "finished" && !this.#hasPendingRatedResult(room)
+        && now - room.lastActivityAt >= this.finishedRoomTtlMs) {
         reason = "finished-room-expired";
       } else if (room.status === "active") {
         const expiredSeat = SIDES.some((side) => {
@@ -588,6 +627,7 @@ export class RoomManager {
         });
         if (expiredSeat) reason = "reconnect-expired";
       }
+      if (room.state.phase === "finished") this.#recordFinishedMatch(room);
       if (!reason) continue;
       this.#clearUndoProposal(room);
       this.#stopClock(room);
@@ -620,8 +660,47 @@ export class RoomManager {
     return this.rooms.size;
   }
 
-  #newSeat(token, disconnectedAt) {
-    return { tokenHash: hashToken(token), connection: null, disconnectedAt };
+  #newSeat(token, disconnectedAt, accountId = null) {
+    return { tokenHash: hashToken(token), connection: null, disconnectedAt, accountId };
+  }
+
+  #recordFinishedMatch(room) {
+    if (room.ratingRecorded || room.ratingPromise || !this.onMatchFinished
+      || room.state.phase !== "finished" || !room.state.winner
+      || !room.seats.X?.accountId || !room.seats.O?.accountId
+      || room.seats.X.accountId === room.seats.O.accountId || !room.startRatings) return;
+    const winnerId = room.seats[room.state.winner]?.accountId;
+    const loserSide = room.state.winner === "X" ? "O" : "X";
+    const loserId = room.seats[loserSide]?.accountId;
+    if (!winnerId || !loserId) return;
+    const matchId = room.matchId;
+    const ratingPromise = Promise.resolve().then(() => this.onMatchFinished({
+      matchId,
+      winnerId,
+      loserId,
+      ratingsAtStart: room.startRatings
+    })).then((result) => {
+      if (room.matchId === matchId) {
+        room.ratingRecorded = true;
+        if (result?.recorded || result?.reason === "already-recorded") {
+          this.#broadcastEphemeral(room, { type: "rating-updated", roomCode: room.code });
+        }
+      }
+    }).catch(() => {
+      // A later room sweep retries; database uniqueness makes this safe if the first write committed.
+    }).finally(() => {
+      if (room.ratingPromise === ratingPromise) room.ratingPromise = null;
+    });
+    room.ratingPromise = ratingPromise;
+  }
+
+  #hasPendingRatedResult(room) {
+    return room.state.phase === "finished" && Boolean(room.state.winner)
+      && Boolean(room.seats.X?.accountId && room.seats.O?.accountId)
+      && room.seats.X.accountId !== room.seats.O.accountId
+      && Number.isFinite(room.startRatings?.[room.seats.X.accountId])
+      && Number.isFinite(room.startRatings?.[room.seats.O.accountId])
+      && !room.ratingRecorded;
   }
 
   #cancelRestartProposal(room, reason) {
@@ -692,6 +771,8 @@ export class RoomManager {
     this.#clearUndoProposal(room);
     room.restartProposal = null;
     room.state = createGameState(proposal.settings, this.random);
+    room.matchId = randomUUID();
+    room.ratingRecorded = false;
     room.history = [];
     const initialEntry = createHistoryEntry(null, room.state, room.nextHistoryId);
     if (initialEntry) {
@@ -874,6 +955,7 @@ export class RoomManager {
     room.version += 1;
     room.lastActivityAt = now;
     this.#clearAllAims(room);
+    this.#recordFinishedMatch(room);
     this.#broadcastSnapshots(room, "state", historyEntry ? { historyEntry } : {});
     return true;
   }

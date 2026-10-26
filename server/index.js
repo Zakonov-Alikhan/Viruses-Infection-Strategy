@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { createMultiplayerServer } from "./websocket.js";
+import { createAccountStoreFromEnv } from "./accounts.js";
 
 function parsePort(value, fallback) {
   if (value === undefined || value === "") return fallback;
@@ -34,7 +35,7 @@ export function parseAllowedOrigins(value, { production = false } = {}) {
   return new Set(origins);
 }
 
-export function startMultiplayerServer({
+export async function startMultiplayerServer({
   port = parsePort(process.env.MULTIPLAYER_PORT || process.env.PORT, 3001),
   host = process.env.MULTIPLAYER_HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
   allowedOrigins = parseAllowedOrigins(process.env.MULTIPLAYER_ALLOWED_ORIGINS, {
@@ -43,7 +44,9 @@ export function startMultiplayerServer({
   trustProxy = process.env.MULTIPLAYER_TRUST_PROXY === "true",
   adminSecret = process.env.MULTIPLAYER_ADMIN_SECRET || null
 } = {}) {
-  const server = createMultiplayerServer({ port, host, allowedOrigins, trustProxy, adminSecret });
+  const accountStore = createAccountStoreFromEnv();
+  if (accountStore) await accountStore.initialize();
+  const server = createMultiplayerServer({ port, host, allowedOrigins, trustProxy, adminSecret, accountStore });
   return server.listen().then((address) => {
     console.log(`Multiplayer WebSocket listening on ${address.address}:${address.port} at /ws`);
     return server;
@@ -51,8 +54,8 @@ export function startMultiplayerServer({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  startMultiplayerServer().catch((error) => {
-    console.error("Could not start multiplayer server:", error);
+  startMultiplayerServer().catch(() => {
+    console.error("Could not start multiplayer server. Check the service configuration and database availability.");
     process.exitCode = 1;
   });
 }

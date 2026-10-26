@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { RoomManager } from "./rooms.js";
+import { clearSessionCookie, readSessionCookie, sessionCookie } from "./accounts.js";
 
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
@@ -14,6 +15,8 @@ const DEFAULT_ROOM_CREATE_LIMIT = Object.freeze({ max: 5, windowMs: 10 * 60_000 
 const DEFAULT_ROOM_JOIN_LIMIT = Object.freeze({ max: 30, windowMs: 60_000 });
 const DEFAULT_AIM_UPDATE_LIMIT = Object.freeze({ max: 30, windowMs: 1_000 });
 const DEFAULT_ADMIN_AUTH_LIMIT = Object.freeze({ max: 6, windowMs: 10 * 60_000 });
+const DEFAULT_LOGIN_LIMIT = Object.freeze({ max: 10, windowMs: 15 * 60_000 });
+const DEFAULT_REGISTER_LIMIT = Object.freeze({ max: 4, windowMs: 60 * 60_000 });
 
 class FixedWindowRateLimiter {
   constructor({ max, windowMs, now, maxKeys = 10_000 }) {
@@ -97,6 +100,28 @@ function sendError(socket, code, requestId) {
   safeJsonSend(socket, message);
 }
 
+function sendJson(response, status, payload, headers = {}) {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers });
+  response.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(request, maxBytes = 4096) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maxBytes) throw Object.assign(new Error("payload-too-large"), { status: 413 });
+    chunks.push(chunk);
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
+    return body;
+  } catch {
+    throw Object.assign(new Error("invalid-json"), { status: 400 });
+  }
+}
+
 export function createMultiplayerServer({
   roomManager = new RoomManager(),
   host = "127.0.0.1",
@@ -110,13 +135,20 @@ export function createMultiplayerServer({
   roomJoinRateLimit = DEFAULT_ROOM_JOIN_LIMIT,
   aimUpdateRateLimit = DEFAULT_AIM_UPDATE_LIMIT,
   adminAuthRateLimit = DEFAULT_ADMIN_AUTH_LIMIT,
+  loginRateLimit = DEFAULT_LOGIN_LIMIT,
+  registerRateLimit = DEFAULT_REGISTER_LIMIT,
   adminSecret = null,
+  accountStore = null,
   now = Date.now
 } = {}) {
   const httpServer = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({ status: "ok", service: "viruses-multiplayer" }));
+      return;
+    }
+    if (request.url?.startsWith("/api/")) {
+      void handleAccountApi(request, response);
       return;
     }
     response.writeHead(404, { "content-type": "application/json; charset=utf-8" });
@@ -132,8 +164,81 @@ export function createMultiplayerServer({
   const joinLimiter = new FixedWindowRateLimiter({ ...roomJoinRateLimit, now });
   const aimLimiter = new FixedWindowRateLimiter({ ...aimUpdateRateLimit, now });
   const adminAuthLimiter = new FixedWindowRateLimiter({ ...adminAuthRateLimit, now });
+  const loginLimiter = new FixedWindowRateLimiter({ ...loginRateLimit, now });
+  const registerLimiter = new FixedWindowRateLimiter({ ...registerRateLimit, now });
   let cleanupTimer = null;
   let closing = false;
+
+  async function handleAccountApi(request, response) {
+    const origin = request.headers.origin;
+    const allowOrigin = typeof origin === "string" && allowedOrigins?.has(origin);
+    const corsHeaders = allowOrigin ? {
+      "access-control-allow-origin": origin,
+      "access-control-allow-credentials": "true",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-headers": "Content-Type, X-CW-Request",
+      "access-control-max-age": "600",
+      vary: "Origin"
+    } : {};
+    if (!allowOrigin) return sendJson(response, 403, { error: "origin-not-allowed" });
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, corsHeaders);
+      response.end();
+      return;
+    }
+    const address = getClientAddress(request, trustProxy);
+    const pathName = new URL(request.url, "http://localhost").pathname;
+    try {
+      if (!accountStore) return sendJson(response, 503, { error: "accounts-unavailable" }, corsHeaders);
+      if (request.method === "GET" && pathName === "/api/leaderboard") {
+        return sendJson(response, 200, { entries: await accountStore.leaderboard() }, corsHeaders);
+      }
+      const token = readSessionCookie(request.headers.cookie);
+      if (request.method === "GET" && pathName === "/api/me") {
+        const account = token ? await accountStore.getSession(token) : null;
+        return sendJson(response, 200, { account }, corsHeaders);
+      }
+      if (request.method !== "POST") return sendJson(response, 404, { error: "not-found" }, corsHeaders);
+      if (request.headers["x-cw-request"] !== "1" || !String(request.headers["content-type"] || "").startsWith("application/json")) {
+        return sendJson(response, 403, { error: "request-verification-failed" }, corsHeaders);
+      }
+      if (pathName === "/api/auth/logout") {
+        if (token) await accountStore.deleteSession(token);
+        return sendJson(response, 200, { ok: true }, { ...corsHeaders, "set-cookie": clearSessionCookie() });
+      }
+      if (pathName !== "/api/auth/register" && pathName !== "/api/auth/login") {
+        return sendJson(response, 404, { error: "not-found" }, corsHeaders);
+      }
+      const registering = pathName.endsWith("/register");
+      const limiter = registering ? registerLimiter : loginLimiter;
+      if (!limiter.allow(address)) return sendJson(response, 429, { error: "rate-limited" }, corsHeaders);
+      const body = await readJsonBody(request);
+      if (Object.keys(body).some((key) => !["username", "password"].includes(key))
+        || typeof body.username !== "string" || typeof body.password !== "string") {
+        return sendJson(response, 400, { error: "invalid-request" }, corsHeaders);
+      }
+      let account;
+      if (registering) {
+        const result = await accountStore.register(body);
+        if (!result.ok) return sendJson(response, result.code === "username-taken" ? 409 : 400, { error: result.code }, corsHeaders);
+        account = result.account;
+      } else {
+        account = await accountStore.authenticate(body);
+        if (!account) return sendJson(response, 401, { error: "invalid-credentials" }, corsHeaders);
+      }
+      if (token) await accountStore.deleteSession(token);
+      const freshToken = await accountStore.createSession(account.id);
+      const safeAccount = await accountStore.getSession(freshToken);
+      return sendJson(response, registering ? 201 : 200, { account: safeAccount }, {
+        ...corsHeaders,
+        "set-cookie": sessionCookie(freshToken)
+      });
+    } catch (error) {
+      if (error?.status) return sendJson(response, error.status, { error: error.message }, corsHeaders);
+      // Do not log request bodies, credentials, cookies, or database error details.
+      return sendJson(response, 500, { error: "server-error" }, corsHeaders);
+    }
+  }
 
   httpServer.on("upgrade", (request, socket, head) => {
     let pathname;
@@ -150,15 +255,27 @@ export function createMultiplayerServer({
       socket.destroy();
       return;
     }
-    webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
-      webSocketServer.emit("connection", webSocket, request);
-    });
+    void (async () => {
+      try {
+        const token = readSessionCookie(request.headers.cookie);
+        const identity = token && accountStore ? await accountStore.getSession(token) : null;
+        webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+          webSocketServer.emit("connection", webSocket, request, identity);
+        });
+      } catch {
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+      }
+    })();
   });
 
-  webSocketServer.on("connection", (socket, request) => {
+  roomManager.setMatchFinishedHandler?.((match) => accountStore?.recordRatedMatch(match));
+  roomManager.setMatchStartedHandler?.(async (accountIds) => accountStore?.getRatings(accountIds) ?? {});
+
+  webSocketServer.on("connection", (socket, request, identity = null) => {
     socket.on("error", () => {});
     const clientAddress = getClientAddress(request, trustProxy);
-    socket.on("message", (raw, isBinary) => {
+    socket.on("message", async (raw, isBinary) => {
       if (isBinary) {
         sendError(socket, "binary-message-not-supported");
         return;
@@ -178,11 +295,12 @@ export function createMultiplayerServer({
       }
 
       const context = contexts.get(socket);
+      if (context?.pending) return sendError(socket, "room-joining", message.requestId);
       if (message.type === "create-room") {
         if (!exactKeys(message, ["type", "settings", "requestId"])) return sendError(socket, "invalid-message", message.requestId);
         if (context) return sendError(socket, "already-in-room", message.requestId);
         if (!createLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
-        const created = roomManager.createRoom(message.settings);
+        const created = roomManager.createRoom(message.settings, { accountId: identity?.id ?? null });
         if (!created.ok) return sendError(socket, created.error.code, message.requestId);
         const attached = roomManager.attachConnection(created.roomCode, created.seatKey, (outgoing) => {
           safeJsonSend(socket, outgoing, attached.connection);
@@ -216,12 +334,34 @@ export function createMultiplayerServer({
         }
         if (context) return sendError(socket, "already-in-room", message.requestId);
         if (!joinLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
-        const joined = roomManager.joinRoom(message.code);
-        if (!joined.ok) return sendError(socket, joined.error.code, message.requestId);
+        contexts.set(socket, { pending: true });
+        const accountIds = [...new Set([...(roomManager.getParticipantAccountIds?.(message.code) ?? []), identity?.id].filter(Boolean))];
+        if (socket.readyState !== WebSocket.OPEN) {
+          contexts.delete(socket);
+          return;
+        }
+        let ratingsByAccount = {};
+        try {
+          if (accountStore && accountIds.length) ratingsByAccount = await accountStore.getRatings(accountIds);
+        } catch {
+          contexts.delete(socket);
+          return sendError(socket, "account-service-unavailable", message.requestId);
+        }
+        const joined = roomManager.joinRoom(message.code, {
+          accountId: identity?.id ?? null,
+          ratingsByAccount
+        });
+        if (!joined.ok) {
+          contexts.delete(socket);
+          return sendError(socket, joined.error.code, message.requestId);
+        }
         const attached = roomManager.attachConnection(joined.roomCode, joined.seatKey, (outgoing) => {
           safeJsonSend(socket, outgoing, attached.connection);
         });
-        if (!attached.ok) return sendError(socket, attached.error.code, message.requestId);
+        if (!attached.ok) {
+          contexts.delete(socket);
+          return sendError(socket, attached.error.code, message.requestId);
+        }
         contexts.set(socket, {
           roomCode: joined.roomCode,
           connection: attached.connection,
@@ -253,7 +393,7 @@ export function createMultiplayerServer({
         if (context) return sendError(socket, "already-in-room", message.requestId);
         const resumed = roomManager.resumeRoom(message.code, message.playerToken, (outgoing) => {
           safeJsonSend(socket, outgoing, resumed.connection);
-        });
+        }, { accountId: identity?.id ?? null });
         if (!resumed.ok) return sendError(socket, resumed.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: resumed.roomCode,
@@ -446,9 +586,10 @@ export function createMultiplayerServer({
       roomManager.stopAllClocks?.();
       for (const socket of webSocketServer.clients) socket.close(1001, "server-shutdown");
       return new Promise((resolve) => {
+        const closeStore = () => Promise.resolve(accountStore?.close?.()).then(resolve, resolve);
         const closeHttp = () => {
-          if (!httpServer.listening) return resolve();
-          httpServer.close(() => resolve());
+          if (!httpServer.listening) return closeStore();
+          httpServer.close(closeStore);
         };
         webSocketServer.close(closeHttp);
       });
