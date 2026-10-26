@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AccountsClient, resolveAccountApiBase } from "./accounts.js";
+import ru from "./locale-ru.js";
+import en from "./locale-en.js";
+
+test("account entry labels make sign-in and profile access clear in both locales", () => {
+  assert.equal(ru["account.guestHeader"], "Войти / Регистрация");
+  assert.equal(ru["account.guestDetail"], "Рейтинг и профиль");
+  assert.equal(en["account.guestHeader"], "Sign in / Register");
+  assert.equal(en["account.guestDetail"], "Rating and profile");
+});
 
 test("account API origin is derived from the configured WebSocket host without credentials", () => {
   assert.equal(resolveAccountApiBase("wss://multiplayer.example.test/ws"), "https://multiplayer.example.test/api");

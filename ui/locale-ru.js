@@ -253,7 +253,7 @@ export default Object.freeze({ ...{
   "online.error.account-mismatch": "Для возвращения в эту комнату войдите в тот же аккаунт.",
   "online.error.rating-service-unavailable": "Не удалось получить актуальные рейтинги для новой партии. Попробуйте ещё раз.",
   "online.error.room-joining": "Подключение к комнате ещё выполняется. Подождите немного.",
-  "account.guestHeader": "Гость",
-  "account.guestDetail": "Локальный профиль",
+  "account.guestHeader": "Войти / Регистрация",
+  "account.guestDetail": "Рейтинг и профиль",
   "account.headerRating": "Рейтинг {rating}"
 } });

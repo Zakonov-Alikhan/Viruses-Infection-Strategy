@@ -29,7 +29,7 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-routing1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-system1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-entry1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -3168,6 +3168,8 @@ function accountErrorMessage(error) {
 
 function renderAccount(account) {
   currentAccount = account ?? null;
+  accountActionButton.classList.toggle("is-guest", !currentAccount);
+  accountActionButton.classList.toggle("is-authenticated", Boolean(currentAccount));
   accountAuthForms.hidden = Boolean(currentAccount);
   accountProfile.hidden = !currentAccount;
   if (currentAccount) {

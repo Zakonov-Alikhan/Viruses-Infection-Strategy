@@ -282,7 +282,7 @@ export default Object.freeze({ ...{
   "online.error.account-mismatch": "Sign into the same account to return to this room.",
   "online.error.rating-service-unavailable": "Could not load current ratings for the next match. Please try again.",
   "online.error.room-joining": "The room connection is still being established. Please wait.",
-  "account.guestHeader": "Guest",
-  "account.guestDetail": "Local profile",
+  "account.guestHeader": "Sign in / Register",
+  "account.guestDetail": "Rating and profile",
   "account.headerRating": "Rating {rating}"
 } });

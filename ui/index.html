@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0c1517">
   <meta name="description" content="Cascade Wars — стратегическая игра для двух игроков." data-i18n-content="brand.tagline">
   <title>Cascade Wars — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=admin-clear1">
+  <link rel="stylesheet" href="/ui/style.css?v=account-entry1">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -19,11 +19,10 @@
       </a>
       <div class="menu-account-area">
         <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">RU</option><option value="en">EN</option></select></label>
-        <div class="account-chip" aria-label="Гостевой профиль" data-i18n-aria-label="menu.account">
+        <button class="account-chip is-guest" id="account-action" type="button" aria-haspopup="dialog" aria-controls="account-modal">
           <span class="account-avatar" aria-hidden="true">◉</span>
-          <span class="account-copy"><strong id="account-header-name" data-i18n="menu.guest">Гость</strong><small id="account-header-detail" data-i18n="menu.guestStatus">Локальный профиль</small></span>
-          <button class="account-action" id="account-action" type="button" data-i18n="menu.accountAction">Профиль</button>
-        </div>
+          <span class="account-copy"><strong id="account-header-name" data-i18n="account.guestHeader">Войти / Регистрация</strong><small id="account-header-detail" data-i18n="account.guestDetail">Рейтинг и профиль</small></span>
+        </button>
       </div>
     </header>
 
@@ -560,6 +559,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=admin-clear1"></script>
+  <script type="module" src="/ui/script.js?v=account-entry1"></script>
 </body>
 </html>
