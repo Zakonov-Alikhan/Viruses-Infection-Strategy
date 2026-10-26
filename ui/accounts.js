@@ -9,6 +9,31 @@ export function resolveAccountApiBase(webSocketUrl = resolveMultiplayerUrl()) {
   return url.toString().replace(/\/$/, "");
 }
 
+export async function submitAccountCredentials({
+  event,
+  client,
+  method,
+  username,
+  password,
+  onLoading = () => {},
+  onSuccess = () => {},
+  onError = () => {}
+}) {
+  event.preventDefault();
+  if (!["login", "register"].includes(method)) throw new TypeError("Unsupported account action");
+  onLoading(true);
+  try {
+    const result = await client[method](username, password);
+    onSuccess(result);
+    return true;
+  } catch (error) {
+    onError(error);
+    return false;
+  } finally {
+    onLoading(false);
+  }
+}
+
 export class AccountsClient {
   constructor({ baseUrl = resolveAccountApiBase(), fetchImpl = globalThis.fetch } = {}) {
     this.baseUrl = baseUrl;

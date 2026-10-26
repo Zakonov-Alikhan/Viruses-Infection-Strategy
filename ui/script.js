@@ -34,7 +34,7 @@ import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
-import { AccountsClient } from "./accounts.js?v=account-system1";
+import { AccountsClient, submitAccountCredentials } from "./accounts.js?v=account-tabs1";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
@@ -114,6 +114,7 @@ const accountModal = document.querySelector("#account-modal");
 const accountModalClose = document.querySelector("#account-modal-close");
 const accountLoginForm = document.querySelector("#account-login-form");
 const accountRegisterForm = document.querySelector("#account-register-form");
+const accountAuthTabs = document.querySelector("#account-auth-tabs");
 const accountAuthForms = document.querySelector("#account-auth-forms");
 const accountProfile = document.querySelector("#account-profile");
 const accountStatus = document.querySelector("#account-status");
@@ -123,6 +124,7 @@ const leaderboardList = document.querySelector("#leaderboard-list");
 const leaderboardStatus = document.querySelector("#leaderboard-status");
 const accountsClient = new AccountsClient();
 let currentAccount = null;
+let accountSubmitting = false;
 const menuCanvas = document.querySelector("#menu-ambient");
 const menuCanvasContext = menuCanvas.getContext("2d");
 const menuDuelCanvas = document.querySelector("#menu-duel");
@@ -3168,6 +3170,7 @@ function accountErrorMessage(error) {
 
 function renderAccount(account) {
   currentAccount = account ?? null;
+  accountStatus.classList.remove("account-status-error");
   accountActionButton.classList.toggle("is-guest", !currentAccount);
   accountActionButton.classList.toggle("is-authenticated", Boolean(currentAccount));
   accountAuthForms.hidden = Boolean(currentAccount);
@@ -3193,6 +3196,7 @@ async function refreshAccount() {
   } catch (error) {
     renderAccount(null);
     accountStatus.textContent = accountErrorMessage(error);
+    accountStatus.classList.add("account-status-error");
   }
 }
 
@@ -3216,26 +3220,62 @@ async function refreshLeaderboard() {
     }
   } catch (error) {
     leaderboardStatus.textContent = accountErrorMessage(error);
+    leaderboardStatus.classList.add("account-status-error");
+  }
+}
+
+function selectAccountTab(name) {
+  for (const tab of accountAuthTabs.querySelectorAll("[data-account-tab]")) {
+    const active = tab.dataset.accountTab === name;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+  }
+  accountLoginForm.hidden = name !== "login";
+  accountRegisterForm.hidden = name !== "register";
+  for (const form of [accountLoginForm, accountRegisterForm]) {
+    const error = form.querySelector(".account-form-error");
+    error.hidden = true;
+    error.textContent = "";
   }
 }
 
 async function submitAccountForm(event, method) {
-  event.preventDefault();
+  if (accountSubmitting) {
+    event.preventDefault();
+    return;
+  }
   const form = event.currentTarget;
   const data = new FormData(form);
   const submit = form.querySelector('button[type="submit"]');
-  submit.disabled = true;
-  try {
-    const result = await accountsClient[method](data.get("username"), data.get("password"));
-    renderAccount(result.account);
-    form.reset();
-    if (method === "register") accountStatus.textContent = `${t("account.registered")} ${accountStatus.textContent}`;
-    await refreshLeaderboard();
-  } catch (error) {
-    accountStatus.textContent = accountErrorMessage(error);
-  } finally {
-    submit.disabled = false;
-  }
+  const errorElement = form.querySelector(".account-form-error");
+  errorElement.hidden = true;
+  errorElement.textContent = "";
+  accountStatus.classList.remove("account-status-error");
+  await submitAccountCredentials({
+    event,
+    client: accountsClient,
+    method,
+    username: data.get("username"),
+    password: data.get("password"),
+    onLoading(loading) {
+      accountSubmitting = loading;
+      accountAuthTabs.querySelectorAll("button").forEach((tab) => { tab.disabled = loading; });
+      submit.disabled = loading;
+      submit.setAttribute("aria-busy", String(loading));
+      submit.textContent = t(loading ? `account.loading.${method}` : `account.${method}`);
+    },
+    onSuccess(result) {
+      renderAccount(result.account);
+      form.reset();
+      if (method === "register") accountStatus.textContent = `${t("account.registered")} ${accountStatus.textContent}`;
+      void refreshLeaderboard();
+    },
+    onError(error) {
+      errorElement.textContent = accountErrorMessage(error);
+      errorElement.hidden = false;
+    }
+  });
 }
 
 accountActionButton.addEventListener("click", () => {
@@ -3249,6 +3289,19 @@ accountModal.addEventListener("click", (event) => {
 });
 accountLoginForm.addEventListener("submit", (event) => void submitAccountForm(event, "login"));
 accountRegisterForm.addEventListener("submit", (event) => void submitAccountForm(event, "register"));
+accountAuthTabs.addEventListener("click", (event) => {
+  if (accountSubmitting) return;
+  const tab = event.target.closest("[data-account-tab]");
+  if (tab) selectAccountTab(tab.dataset.accountTab);
+});
+accountAuthTabs.addEventListener("keydown", (event) => {
+  if (accountSubmitting) return;
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const next = event.target.dataset.accountTab === "login" ? "register" : "login";
+  selectAccountTab(next);
+  accountAuthTabs.querySelector(`[data-account-tab="${next}"]`).focus();
+});
 document.querySelector("#account-logout").addEventListener("click", async () => {
   try {
     await accountsClient.logout();

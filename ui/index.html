@@ -97,22 +97,26 @@
       </header>
       <p id="account-status" class="settings-summary" role="status" aria-live="polite"></p>
       <section id="account-auth-forms" class="account-auth-forms">
-        <form id="account-login-form" class="account-form">
-          <h3 data-i18n="account.loginTitle">Вход</h3>
+        <div id="account-auth-tabs" class="account-auth-tabs" role="tablist" aria-label="Авторизация" data-i18n-aria-label="account.tabsLabel">
+          <button id="account-login-tab" class="account-auth-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="account-login-form" tabindex="0" data-account-tab="login" data-i18n="account.loginTab">Войти</button>
+          <button id="account-register-tab" class="account-auth-tab" type="button" role="tab" aria-selected="false" aria-controls="account-register-form" tabindex="-1" data-account-tab="register" data-i18n="account.registerTab">Регистрация</button>
+        </div>
+        <form id="account-login-form" class="account-form" role="tabpanel" aria-labelledby="account-login-tab">
           <label for="account-login-username" data-i18n="account.username">Имя пользователя</label>
           <input id="account-login-username" name="username" type="text" minlength="3" maxlength="24" autocomplete="username" required>
           <label for="account-login-password" data-i18n="account.password">Пароль</label>
           <input id="account-login-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required>
           <button class="button button-primary" type="submit" data-i18n="account.login">Войти</button>
+          <p class="account-form-error" role="status" aria-live="polite" hidden></p>
         </form>
-        <form id="account-register-form" class="account-form">
-          <h3 data-i18n="account.registerTitle">Создать аккаунт</h3>
+        <form id="account-register-form" class="account-form" role="tabpanel" aria-labelledby="account-register-tab" hidden>
           <label for="account-register-username" data-i18n="account.username">Имя пользователя</label>
           <input id="account-register-username" name="username" type="text" minlength="3" maxlength="24" autocomplete="username" required>
           <label for="account-register-password" data-i18n="account.password">Пароль</label>
           <input id="account-register-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
           <small data-i18n="account.passwordHelp">Не менее 10 символов. Используйте уникальный пароль.</small>
           <button class="button button-secondary" type="submit" data-i18n="account.register">Зарегистрироваться</button>
+          <p class="account-form-error" role="status" aria-live="polite" hidden></p>
         </form>
       </section>
       <section id="account-profile" class="account-profile" hidden>
