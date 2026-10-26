@@ -441,3 +441,35 @@ test("board editor command requires server authority and can edit without consum
   assert.equal(invalid.error.code, "invalid-action");
   assert.equal(invalid.state, state);
 });
+
+test("board clear is admin-only, removes the complete cell contents, and rejects empty cells atomically", () => {
+  const state = playingState();
+  const board = state.board.map((row) => row.slice());
+  board[0][0] = "X";
+  const withContent = {
+    ...state,
+    board,
+    eventItems: [{ id: 44, type: "bomb", row: 0, col: 0 }],
+    protections: [{ row: 0, col: 0, owner: "X", permanent: true }]
+  };
+  const command = { type: "board-edit", object: { kind: "clear", row: 0, col: 0 } };
+  const denied = processGameCommand(withContent, "O", command);
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, "admin-required");
+  assert.equal(denied.state, withContent);
+
+  const cleared = processGameCommand(withContent, "O", command, { authority: "admin" });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.state.board[0][0], EMPTY_CELL);
+  assert.deepEqual(cleared.state.eventItems, []);
+  assert.deepEqual(cleared.state.protections, []);
+  assert.equal(cleared.state.currentPlayer, withContent.currentPlayer);
+  assert.equal(cleared.state.piecesLeft, withContent.piecesLeft);
+  assert.equal(withContent.board[0][0], "X");
+
+  const empty = processGameCommand(state, "O", {
+    type: "board-edit", object: { kind: "clear", row: 4, col: 4 }
+  }, { authority: "admin" });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.state, state);
+});

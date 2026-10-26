@@ -320,6 +320,27 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
     || !Number.isInteger(object.row) || !Number.isInteger(object.col)
     || !inBounds(object.row, object.col, state.board)) return state;
 
+  if (object.kind === "clear" && Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))) {
+    const { row, col } = object;
+    const hasBoardObject = state.board[row][col] !== EMPTY_CELL
+      || state.eventItems.some((item) => item.row === row && item.col === col)
+      || state.protections.some((protection) => protection.row === row && protection.col === col)
+      || isWormholeCell(state, row, col);
+    if (!hasBoardObject) return state;
+
+    const board = copyBoard(state.board);
+    board[row][col] = EMPTY_CELL;
+    const coordinates = [{ row, col }];
+    return {
+      ...state,
+      board,
+      eventItems: clearEventItemsAt(state, coordinates),
+      protections: removeProtectionsAt(state, coordinates),
+      wormholePair: clearWormholePairAt(state, coordinates),
+      lastDestroyed: (state.lastDestroyed || []).filter((cell) => cell.row !== row || cell.col !== col)
+    };
+  }
+
   if (state.board[object.row][object.col] !== EMPTY_CELL || isWormholeCell(state, object.row, object.col)) return state;
   const itemAtTarget = state.eventItems.some((item) => item.row === object.row && item.col === object.col);
   const protectionAtTarget = state.protections.some((protection) => protection.row === object.row && protection.col === object.col);

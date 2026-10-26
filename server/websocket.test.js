@@ -265,6 +265,15 @@ test("WebSocket board editing requires the configured admin secret and broadcast
   assert.equal(xState.state.currentPlayer, "X");
   assert.equal(xState.state.piecesLeft, readyO.state.piecesLeft);
   assert.equal(JSON.stringify(x.messages.concat(o.messages)).includes(secret), false);
+
+  x.send({ type: "command", command: {
+    type: "board-edit", object: { kind: "clear", row: 4, col: 4 }
+  }, requestId: "clear-cell" });
+  const [clearedX, clearedO] = await Promise.all([x.next("state"), o.next("state")]);
+  assert.equal(clearedX.version, xState.version + 1);
+  assert.equal(clearedX.version, clearedO.version);
+  assert.deepEqual(clearedX.state.eventItems, []);
+  assert.deepEqual(clearedX.state.eventItems, clearedO.state.eventItems);
 });
 
 test("forwards validated room settings through WebSocket creation to both players", async (t) => {

@@ -655,7 +655,7 @@ function renderInventories(displayState = state) {
   boardEditorStatus.textContent = t(boardEditorMessageKey || (boardEditorTool ? "admin.editorSelected" : "admin.editorNoTool"), {
     object: boardEditorTool?.kind === "item"
       ? t(EVENT_ITEM_DEFINITIONS[boardEditorTool.itemType].nameKey)
-      : t("admin.deadCell")
+      : t(boardEditorTool?.kind === "clear" ? "admin.clearCell" : "admin.deadCell")
   });
   if ((hasAdminItemPermission || (onlineMode && onlineAdminAuthenticated)) && boardEditorActive) {
     for (const type of EVENT_ITEMS) {
@@ -693,6 +693,20 @@ function renderInventories(displayState = state) {
     blockedIcon.setAttribute("aria-hidden", "true");
     blockedButton.append(blockedIcon, document.createTextNode(t("admin.deadCell")));
     boardEditorTools.appendChild(blockedButton);
+
+    const clearButton = document.createElement("button");
+    clearButton.type = "button";
+    clearButton.className = "admin-item-button editor-tool-button";
+    clearButton.dataset.editorKind = "clear";
+    clearButton.classList.toggle("is-selected", boardEditorTool?.kind === "clear");
+    clearButton.disabled = !adminToolsReady || isComputerControlledTurn()
+      || (onlineMode && (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated));
+    const clearIcon = document.createElement("span");
+    clearIcon.className = "editor-clear-icon";
+    clearIcon.textContent = "⌫";
+    clearIcon.setAttribute("aria-hidden", "true");
+    clearButton.append(clearIcon, document.createTextNode(t("admin.clearCell")));
+    boardEditorTools.appendChild(clearButton);
   }
 }
 
@@ -2346,6 +2360,7 @@ function renderGamePosition(state) {
   if (activeAreaEffect && animationNow - activeAreaEffect.startedAt >= 520) activeAreaEffect = null;
   boardElement.innerHTML = "";
   const destroyedCells = new Set(state.lastDestroyed.map(({ row, col }) => row + "," + col));
+  const protectedCells = new Set(state.protections.map(({ row, col }) => row + "," + col));
   const selectedAbility = state.phase === "playing" ? getSelectedAbility(state) : null;
   const activeAreaAbility = selectedAbility && (selectedAbility.type === "bomb" || selectedAbility.type === "antiBomb")
     ? selectedAbility
@@ -2359,6 +2374,7 @@ function renderGamePosition(state) {
     for (let col = 0; col < state.settings.width; col += 1) {
       const value = state.board[row][col];
       const eventItem = state.eventItems.find((item) => item.row === row && item.col === col);
+      const protectedCell = protectedCells.has(row + "," + col);
       const endpoints = state.wormholePair?.endpoints;
       const wormholeEndpoint = endpoints?.orange?.row === row && endpoints.orange.col === col
         ? ["orange", endpoints.orange]
@@ -2436,7 +2452,9 @@ function renderGamePosition(state) {
 
       if (boardEditorActive && state.phase === "playing" && !isComputerControlledTurn()
         && (!onlineMode || (onlineConnected && onlineAdminAuthenticated && !onlineCommandPending))) {
-        const editableCell = value === EMPTY_CELL && !wormholeEndpoint;
+        const editableCell = boardEditorTool?.kind === "clear"
+          ? value !== EMPTY_CELL || eventItem || protectedCell || wormholeEndpoint
+          : value === EMPTY_CELL && !wormholeEndpoint;
         cell.disabled = !editableCell || historyViewId !== null;
         cell.classList.toggle("editor-target", editableCell && Boolean(boardEditorTool));
         if (editableCell) cell.addEventListener("click", () => placeBoardEditorObject(row, col));
@@ -3560,7 +3578,7 @@ boardEditorTools.addEventListener("click", (event) => {
       : !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM))) return;
   boardEditorTool = button.dataset.editorKind === "item"
     ? { kind: "item", itemType: button.dataset.itemType }
-    : { kind: "blocked" };
+    : { kind: button.dataset.editorKind };
   boardEditorMessageKey = null;
   render();
 });

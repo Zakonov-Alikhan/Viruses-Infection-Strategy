@@ -54,6 +54,11 @@ function isCoordinate(row, col) {
 
 function isValidEditorObject(object) {
   if (!object || typeof object !== "object" || Array.isArray(object)) return false;
+  if (object.kind === "clear") {
+    return Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))
+      && Object.keys(object).length === 3
+      && isCoordinate(object.row, object.col);
+  }
   if (object.kind === "item") {
     return Object.keys(object).every((key) => ["kind", "itemType", "row", "col"].includes(key))
       && Object.keys(object).length === 4

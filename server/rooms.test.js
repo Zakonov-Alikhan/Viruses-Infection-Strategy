@@ -412,6 +412,20 @@ test("authorized board edit updates both player snapshots without consuming a tu
   assert.equal(xSnapshot.state.currentPlayer, before.state.currentPlayer);
   assert.equal(xSnapshot.state.piecesLeft, before.state.piecesLeft);
   assert.deepEqual(xSnapshot.clock, oSnapshot.clock);
+
+  const cleared = await manager.submitCommand(room.roomCode, "O", {
+    type: "board-edit", object: { kind: "clear", row: 4, col: 4 }
+  }, { isAdmin: true });
+  assert.equal(cleared.ok, true);
+  const clearX = received.X.at(-1);
+  const clearO = received.O.at(-1);
+  assert.equal(clearX.version, xSnapshot.version + 1);
+  assert.equal(clearX.version, clearO.version);
+  assert.deepEqual(clearX.state.eventItems, []);
+  assert.deepEqual(clearX.state.eventItems, clearO.state.eventItems);
+  assert.equal(clearX.state.currentPlayer, before.state.currentPlayer);
+  assert.equal(clearX.state.piecesLeft, before.state.piecesLeft);
+  assert.deepEqual(clearX.clock, clearO.clock);
 });
 
 test("rejects a command that cannot be used in the current phase without mutating room state", async () => {

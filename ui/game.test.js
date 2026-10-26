@@ -914,6 +914,43 @@ test("board editor adds canonical event items and dead cells without changing un
   assert.equal(blockedState.piecesLeft, state.piecesLeft);
 });
 
+test("board editor clears a cell atomically, including an associated shield or wormhole pair", () => {
+  const base = makePlayingState({ adminMode: true });
+  const board = base.board.map((row) => row.slice());
+  board[0][1] = "X";
+  board[0][2] = BLOCKED_CELL;
+  const state = {
+    ...base,
+    board,
+    eventItems: [{ id: 31, type: "bomb", row: 0, col: 3 }],
+    protections: [{ row: 0, col: 1, owner: "X", permanent: true }],
+    wormholePair: { id: 4, roundsRemaining: 3, endpoints: {
+      orange: { row: 1, col: 1 }, blue: { row: 2, col: 2 }
+    } },
+    lastDestroyed: [{ row: 0, col: 1 }, { row: 8, col: 8 }]
+  };
+  const original = structuredClone(state);
+
+  const clearedPiece = placeEditorObject(state, "O", { kind: "clear", row: 0, col: 1 }, { admin: true });
+  assert.equal(clearedPiece.board[0][1], EMPTY_CELL);
+  assert.deepEqual(clearedPiece.protections, []);
+  assert.deepEqual(clearedPiece.lastDestroyed, [{ row: 8, col: 8 }]);
+  assert.equal(clearedPiece.currentPlayer, state.currentPlayer);
+  assert.equal(clearedPiece.piecesLeft, state.piecesLeft);
+
+  const clearedItem = placeEditorObject(state, "O", { kind: "clear", row: 0, col: 3 }, { admin: true });
+  assert.deepEqual(clearedItem.eventItems, []);
+  const clearedDeadCell = placeEditorObject(state, "O", { kind: "clear", row: 0, col: 2 }, { admin: true });
+  assert.equal(clearedDeadCell.board[0][2], EMPTY_CELL);
+  const clearedPortal = placeEditorObject(state, "O", { kind: "clear", row: 1, col: 1 }, { admin: true });
+  assert.equal(clearedPortal.wormholePair, null);
+  assert.deepEqual(state, original);
+
+  assert.equal(placeEditorObject(state, "O", { kind: "clear", row: 5, col: 5 }, { admin: true }), state);
+  const nonAdmin = makePlayingState();
+  assert.equal(placeEditorObject(nonAdmin, "O", { kind: "clear", row: 0, col: 0 }), nonAdmin);
+});
+
 test("board editor rejects unauthorized, overlapping, disabled, excessive, and turn-breaking placements atomically", () => {
   const admin = makePlayingState({ adminMode: true, disabledItems: ["bomb"] });
   const nonAdmin = makePlayingState();
