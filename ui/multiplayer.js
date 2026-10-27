@@ -2,7 +2,7 @@ const SESSION_STORAGE_KEY = "viruses.online-room";
 const REQUEST_TIMEOUT_MS = 10_000;
 const RECONNECT_DELAY_MS = 1_200;
 const MAX_RECONNECT_ATTEMPTS = 110;
-const VERSIONED_TYPES = new Set(["room-created", "room-joined", "room-resumed", "room-ready", "state"]);
+const VERSIONED_TYPES = new Set(["room-created", "room-joined", "room-resumed", "observing-room", "room-ready", "state"]);
 const TERMINAL_RESUME_ERRORS = new Set(["room-not-found", "invalid-resume-token", "reconnect-expired"]);
 
 export const MULTIPLAYER_CONFIG = Object.freeze({
@@ -88,6 +88,7 @@ export class MultiplayerClient {
     this.lastVersionRoomCode = null;
     this.lastRoomSnapshot = null;
     this.seenVisualEventIds = new Set();
+    this.isObserving = false;
   }
 
   get connected() {
@@ -136,14 +137,30 @@ export class MultiplayerClient {
     return this.connectPromise;
   }
 
-  async createRoom(settings) {
+  async createRoom(settings, { publicRoom = false } = {}) {
     await this.connect();
-    return this.#request("create-room", settings ? { settings } : {}, "room-created");
+    return this.#request("create-room", { ...(settings ? { settings } : {}), publicRoom }, "room-created");
+  }
+
+  async observeRoom(roomId, adminSecret = undefined) {
+    if (typeof roomId !== "string" || !roomId) throw new MultiplayerError("invalid-room-id");
+    await this.connect();
+    this.isObserving = true;
+    return this.#request("observe-room", {
+      roomId,
+      ...(adminSecret ? { adminSecret } : {})
+    }, "observing-room");
   }
 
   async joinRoom(code) {
     await this.connect();
     return this.#request("join-room", { code: String(code).trim().toUpperCase() }, "room-joined");
+  }
+
+  async joinPublicRoom(roomId) {
+    if (typeof roomId !== "string" || !roomId) throw new MultiplayerError("invalid-room-id");
+    await this.connect();
+    return this.#request("join-public-room", { roomId }, "room-joined");
   }
 
   async resumeSavedRoom() {
@@ -165,6 +182,17 @@ export class MultiplayerClient {
     if (!this.connected || !command || typeof command !== "object" || Array.isArray(command)) return false;
     const requestId = this.#nextRequestId();
     return this.#send({ type: "command", command, requestId });
+  }
+
+  addTimeToOpponent() {
+    return this.#request("opponent-time", {}, "opponent-time-added");
+  }
+
+  adjustAdminTime(target, seconds = 30) {
+    if (!["both", "X", "O"].includes(target) || !Number.isInteger(seconds) || seconds < 1 || seconds > 600) {
+      return Promise.reject(new MultiplayerError("invalid-time-adjustment"));
+    }
+    return this.#request("admin-time", { target, seconds }, "admin-time-recorded");
   }
 
   authenticateAdmin(secret) {
@@ -213,8 +241,15 @@ export class MultiplayerClient {
   }
 
   leave() {
+    this.isObserving = false;
     this.disconnect({ preserveSession: false });
     this.#emit({ type: "left-room" });
+  }
+
+  leaveObserver() {
+    this.isObserving = false;
+    this.disconnect({ preserveSession: true });
+    this.#emit({ type: "left-observation" });
   }
 
   disconnect({ preserveSession = true } = {}) {
@@ -272,19 +307,20 @@ export class MultiplayerClient {
     }
     if (!message || typeof message !== "object" || typeof message.type !== "string") return;
     if (Number.isSafeInteger(message.version) && VERSIONED_TYPES.has(message.type)) {
-      const beginsRoomSession = message.type === "room-created" || message.type === "room-joined";
+      const beginsRoomSession = ["room-created", "room-joined", "observing-room"].includes(message.type);
+      const roomIdentity = message.roomCode ? `player:${message.roomCode}` : message.roomId ? `observer:${message.roomId}` : null;
       if (beginsRoomSession) {
-        if (this.lastVersionRoomCode !== message.roomCode) {
+        if (this.lastVersionRoomCode !== roomIdentity) {
           this.lastVersion = -1;
           this.lastRoomSnapshot = null;
           this.seenVisualEventIds.clear();
         }
-        this.lastVersionRoomCode = message.roomCode;
-      } else if (this.lastVersionRoomCode && message.roomCode !== this.lastVersionRoomCode) {
+        this.lastVersionRoomCode = roomIdentity;
+      } else if (this.lastVersionRoomCode && roomIdentity && roomIdentity !== this.lastVersionRoomCode) {
         return;
       } else if (!this.lastVersionRoomCode) {
         if (this.savedSession?.roomCode !== message.roomCode) return;
-        this.lastVersionRoomCode = message.roomCode;
+        this.lastVersionRoomCode = `player:${message.roomCode}`;
       }
 
       const mayRepeatVersion = message.type === "room-ready" || message.type === "room-resumed";
@@ -304,7 +340,10 @@ export class MultiplayerClient {
     if (message.type === "aim" && message.roomCode !== this.savedSession?.roomCode) return;
 
     if (message.type === "room-created" || message.type === "room-joined") {
+      this.isObserving = false;
       this.#saveSession(message);
+    } else if (message.type === "observing-room") {
+      this.isObserving = true;
     } else if (message.type === "room-closed") {
       this.#clearSavedSession();
     } else if (["room-ready", "room-resumed", "state"].includes(message.type)) {
@@ -345,7 +384,7 @@ export class MultiplayerClient {
       return;
     }
     this.#emit({ type: "disconnected", code: event.code });
-    if (this.savedSession) this.#reconnect();
+    if (!this.isObserving && this.savedSession) this.#reconnect();
   }
 
   #reconnect() {

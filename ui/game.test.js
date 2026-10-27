@@ -19,6 +19,7 @@ import {
   isValidDebrisTarget,
   isValidShieldTarget,
   placeEditorObject,
+  placeEditorWormholePair,
   playMove,
   selectAbility,
   useBomb,
@@ -914,6 +915,24 @@ test("board editor adds canonical event items and dead cells without changing un
   assert.equal(blockedState.piecesLeft, state.piecesLeft);
 });
 
+test("administrator wormhole pair placement is atomic, neutral, and restricted to two free distinct cells", () => {
+  const state = makePlayingState({ width: 10, height: 10 });
+  const placed = placeEditorWormholePair(state, "X", { row: 4, col: 4 }, { row: 7, col: 7 }, {
+    admin: true,
+    random: () => 0
+  });
+  assert.equal(placed.wormholePair.endpoints.orange.row, 4);
+  assert.equal(placed.wormholePair.endpoints.blue.row, 7);
+  assert.equal(placed.wormholePair.roundsRemaining, 3);
+  assert.equal(placeEditorWormholePair(placed, "X", { row: 2, col: 2 }, { row: 3, col: 3 }, { admin: true }), placed);
+  assert.equal(placeEditorWormholePair(state, "X", { row: 4, col: 4 }, { row: 4, col: 4 }, { admin: true }), state);
+  assert.equal(placeEditorWormholePair(state, "X", { row: 0, col: 0 }, { row: 3, col: 3 }, { admin: true }), state);
+  const noPermissionState = { ...state, playerRoles: { X: "player", O: "player" } };
+  const noPermission = placeEditorWormholePair(noPermissionState, "X",
+    { row: 4, col: 4 }, { row: 7, col: 7 });
+  assert.equal(noPermission, noPermissionState);
+});
+
 test("board editor clears a cell atomically, including an associated shield or wormhole pair", () => {
   const base = makePlayingState({ adminMode: true });
   const board = base.board.map((row) => row.slice());
@@ -951,11 +970,11 @@ test("board editor clears a cell atomically, including an associated shield or w
   assert.equal(placeEditorObject(nonAdmin, "O", { kind: "clear", row: 0, col: 0 }), nonAdmin);
 });
 
-test("board editor rejects unauthorized, overlapping, disabled, excessive, and turn-breaking placements atomically", () => {
+test("board editor rejects unauthorized, overlapping, disabled, and turn-breaking placements atomically", () => {
   const admin = makePlayingState({ adminMode: true, disabledItems: ["bomb"] });
   const nonAdmin = makePlayingState();
   const overlapState = { ...admin, eventItems: [{ id: 3, type: "shield", row: 0, col: 1 }] };
-  const fullItemState = { ...admin, eventItems: [1, 2, 3].map((id, index) => ({
+  const overThreeItemsState = { ...admin, eventItems: [1, 2, 3].map((id, index) => ({
     id, type: "shield", row: index + 1, col: 1
   })) };
   for (const [source, result] of [
@@ -964,8 +983,13 @@ test("board editor rejects unauthorized, overlapping, disabled, excessive, and t
     [admin, placeEditorObject(admin, "X", { kind: "item", itemType: "unknown", row: 0, col: 1 })],
     [admin, placeEditorObject(admin, "X", { kind: "blocked", row: 0, col: 0 })],
     [overlapState, placeEditorObject(overlapState, "X", { kind: "blocked", row: 0, col: 1 })],
-    [fullItemState, placeEditorObject(fullItemState, "X", { kind: "item", itemType: "shield", row: 0, col: 1 })]
   ]) assert.equal(result, source);
+
+  const overThreeItems = placeEditorObject(overThreeItemsState, "X", {
+    kind: "item", itemType: "shield", row: 0, col: 1
+  });
+  assert.equal(overThreeItems.eventItems.length, 4);
+  assert.equal(overThreeItems.eventItems[3].row, 0);
 
   const sparseBoard = Array.from({ length: 10 }, () => Array(10).fill(BLOCKED_CELL));
   sparseBoard[0][0] = "X";
@@ -975,6 +999,47 @@ test("board editor rejects unauthorized, overlapping, disabled, excessive, and t
   const original = structuredClone(constrained);
   assert.equal(placeEditorObject(constrained, "X", { kind: "blocked", row: 0, col: 1 }), constrained);
   assert.deepEqual(constrained, original);
+});
+
+test("new games default to a 20×20 board and 3+10 clocks", () => {
+  const state = createGameState();
+  assert.equal(state.settings.width, 20);
+  assert.equal(state.settings.height, 20);
+  assert.equal(state.settings.clockMinutes, 3);
+  assert.equal(state.settings.incrementSeconds, 10);
+});
+
+test("field item lifetime is unlimited by default and decreases once per completed player turn", () => {
+  const unlimited = makePlayingState({ eventItems: undefined });
+  assert.equal(unlimited.settings.unlimitedItemLifetime, true);
+  assert.equal(unlimited.eventItems.length, 0);
+
+  let state = makePlayingState({ unlimitedItemLifetime: false, itemLifetimeTurns: 2 });
+  state = {
+    ...state,
+    eventItems: [
+      { id: 9001, type: "shield", row: 5, col: 5, lifetimeTurns: 2 },
+      { id: 9002, type: "bomb", row: 6, col: 6, lifetimeTurns: 1 }
+    ]
+  };
+  state = playMove(state, 0, 1, () => 0.99);
+  assert.deepEqual(state.eventItems, [{ id: 9001, type: "shield", row: 5, col: 5, lifetimeTurns: 1 }]);
+  state = playMove(state, 9, 8, () => 0.99);
+  assert.deepEqual(state.eventItems, []);
+});
+
+test("field item lifetime does not age during partial placements or extra turns and new spawns keep full lifetime", () => {
+  let state = makePlayingState({
+    piecesPerTurn: 2,
+    randomEvents: false,
+    unlimitedItemLifetime: false,
+    itemLifetimeTurns: 4
+  });
+  state = { ...state, eventItems: [{ id: 77, type: "bomb", row: 5, col: 5, lifetimeTurns: 3 }] };
+  state = playMove(state, 0, 1, () => 0.99);
+  assert.equal(state.eventItems[0].lifetimeTurns, 3);
+  state = playMove(state, 0, 2, () => 0.99);
+  assert.equal(state.eventItems[0].lifetimeTurns, 2);
 });
 
 test("admin can cancel a pending ability selection before entering board edit mode", () => {

@@ -442,6 +442,25 @@ test("board editor command requires server authority and can edit without consum
   assert.equal(invalid.state, state);
 });
 
+test("authoritative board editor creates wormhole pairs only as one validated command", () => {
+  const state = createGameState({ ...DEFAULT_SETTINGS, width: 10, height: 10, randomEvents: false, freeStartingPositions: false });
+  const command = { type: "board-edit", object: {
+    kind: "wormhole-pair", first: { row: 4, col: 4 }, second: { row: 7, col: 7 }
+  } };
+  const denied = processGameCommand(state, "X", command, { authority: "player", random: () => 0 });
+  assert.equal(denied.ok, false);
+  assert.equal(state.wormholePair, null);
+  const accepted = processGameCommand(state, "X", command, { authority: "admin", random: () => 0 });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.state.wormholePair.roundsRemaining, 3);
+  assert.equal(state.wormholePair, null);
+  const malformed = processGameCommand(state, "X", {
+    type: "board-edit", object: { kind: "wormhole-pair", first: { row: 4, col: 4 } }
+  }, { authority: "admin" });
+  assert.equal(malformed.ok, false);
+  assert.equal(state.wormholePair, null);
+});
+
 test("board clear is admin-only, removes the complete cell contents, and rejects empty cells atomically", () => {
   const state = playingState();
   const board = state.board.map((row) => row.slice());

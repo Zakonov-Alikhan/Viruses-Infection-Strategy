@@ -28,9 +28,12 @@ If GitHub access is not connected to Render, connect the repository from Render 
 - **Health check path:** `/`
 - **Environment variables:**
   - `VIRUSES_MULTIPLAYER_URL` = `wss://<actual-node-service>.onrender.com/ws`
+  - `VIRUSES_API_URL` = `https://viruses-multiplayer.onrender.com` (verified with the Node service's `/health`; set the HTTPS origin only, without `/api`)
   - Render supplies `PORT`. The app listens on `0.0.0.0:$PORT`.
 
 `/runtime-config.js` exposes only the configured WebSocket URL to the browser and is sent with `Cache-Control: no-store`. Do not put credentials or tokens in this URL.
+`SUPPORT_CARD_NUMBER` is an optional public card number configured on the Go website service. Leave it unset until the owner supplies a real number; when set, runtime config publishes only its digit-only value (13–19 digits) for the support card. It is not a credential and is never used for payment processing.
+Account requests use relative `/api/...` paths on the Go site's origin. The Go server proxies those requests to `VIRUSES_API_URL`, so the browser never contacts the Node service's separate origin for accounts. The proxy target is fixed from server environment and cannot be supplied by a browser request.
 
 ## Node.js multiplayer service
 
@@ -49,7 +52,7 @@ If GitHub access is not connected to Render, connect the repository from Render 
 
 Use exact web origins in `MULTIPLAYER_ALLOWED_ORIGINS`, comma-separated if you have more than one, for example the Render domain and a custom domain. Do not include paths or trailing slashes. The server rejects a missing or non-allow-listed `Origin` on WebSocket upgrades.
 
-The Node service also serves account endpoints at `/api`. The browser derives this API origin from the configured WebSocket URL, so no database credential or extra runtime secret is exposed to the client. The account API uses the same exact `MULTIPLAYER_ALLOWED_ORIGINS` list and credentialed CORS.
+The Node service also serves account endpoints at `/api`. Requests reach it through the Go service's same-origin `/api/` proxy, which preserves the original `Origin` header so the Node API's existing allow-list and request verification remain active. No database credential or API URL is exposed to the browser.
 
 For custom domains, serve the Go site and Node API/WebSocket under the same registrable domain (for example, `play.example.com` and `api.example.com`); unrelated sites can have their cross-site cookies blocked by browser privacy settings.
 
@@ -66,9 +69,12 @@ To enable the online board editor, set `MULTIPLAYER_ADMIN_SECRET` to a randomly 
 After Render assigns both hostnames, configure:
 
 - On the **Go website** service, `VIRUSES_MULTIPLAYER_URL` = `wss://<Node hostname>/ws`.
+- On the **Go website** service, `VIRUSES_API_URL` = `https://viruses-multiplayer.onrender.com` (verified Node hostname; HTTP API origin only; do not use `wss://` or append `/ws` or `/api`).
 - On the **Node game** service, `MULTIPLAYER_ALLOWED_ORIGINS` = `https://<Go hostname>`.
 
 Use exact Render hostnames, without angle brackets. The allowed Origin must not include a path or trailing slash. Keep `NODE_ENV=production`, `MULTIPLAYER_HOST=0.0.0.0`, and `MULTIPLAYER_TRUST_PROXY=true`; do not disable Origin checks. Save the variables and redeploy both services.
+
+For local development, run the Node service on port 3001 and set `VIRUSES_API_URL=http://127.0.0.1:3001` in the Go process environment before starting it. For example, in PowerShell: `$env:VIRUSES_API_URL = 'http://127.0.0.1:3001'; go run .`. Keep the Node allowed Origin set to `http://127.0.0.1:3000` (its default when not in production). The WebSocket URL remains configured independently and is not routed through the HTTP API proxy.
 
 ## Verify the deployment
 

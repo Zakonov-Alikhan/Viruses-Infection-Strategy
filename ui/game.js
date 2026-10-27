@@ -1,11 +1,13 @@
 export const MIN_BOARD_DIMENSION = 10;
 export const MAX_BOARD_DIMENSION = 50;
 export const DEFAULT_SETTINGS = Object.freeze({
-  width: 15,
-  height: 15,
+  width: 20,
+  height: 20,
   piecesPerTurn: 3,
-  clockMinutes: 5,
-  incrementSeconds: 0,
+  clockMinutes: 3,
+  incrementSeconds: 10,
+  unlimitedItemLifetime: true,
+  itemLifetimeTurns: 10,
   unlimitedTime: false,
   randomEvents: true,
   itemSpawnMode: "standard",
@@ -34,7 +36,6 @@ export const EVENT_ITEMS = Object.freeze([
 export const ITEM_SPAWN_MODES = Object.freeze(["standard", "cascade", "adaptive", "hybrid"]);
 const RANDOM_ARTIFACT = "randomArtifact";
 const EVENT_SPAWN_CHANCE = 0.3;
-const MAX_EDITOR_ITEMS_ON_BOARD = 3;
 const MAX_INVENTORY_ITEMS = 3;
 
 function emptyBoard(width, height) {
@@ -237,13 +238,35 @@ function spawnOneEventItem(state, random) {
 
   const location = available[Math.min(available.length - 1, Math.floor(random() * available.length))];
   const type = enabledItems[Math.min(enabledItems.length - 1, Math.floor(random() * enabledItems.length))];
-  const eventItem = { id: state.nextEventItemId, type, ...location };
+  const eventItem = {
+    id: state.nextEventItemId,
+    type,
+    ...location,
+    ...(!state.settings.unlimitedItemLifetime ? { lifetimeTurns: state.settings.itemLifetimeTurns } : {})
+  };
   return {
     ...state,
     eventItems: [...state.eventItems, eventItem],
     nextEventItemId: state.nextEventItemId + 1,
     message: appendMessage(state.message, message("message.spawn", { type }))
   };
+}
+
+function ageFieldItems(state) {
+  if (state.settings.unlimitedItemLifetime) return state;
+  const eventItems = [];
+  for (const item of state.eventItems) {
+    // Legacy/editor-created items acquire the configured lifetime when they
+    // first cross a completed-turn boundary.
+    const remaining = Number.isInteger(item.lifetimeTurns)
+      ? item.lifetimeTurns - 1
+      : state.settings.itemLifetimeTurns - 1;
+    if (remaining > 0) eventItems.push({ ...item, lifetimeTurns: remaining });
+  }
+  return eventItems.length === state.eventItems.length
+    && eventItems.every((item, index) => item === state.eventItems[index])
+    ? state
+    : { ...state, eventItems };
 }
 
 function maybeSpawnEventItem(state, random) {
@@ -349,7 +372,6 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
     if (Object.keys(object).some((key) => !["kind", "itemType", "row", "col"].includes(key))
       || !isItemEnabled(state, object.itemType) || itemAtTarget || protectionAtTarget
       || (object.itemType === RANDOM_ARTIFACT && randomArtifactCandidates(state).length === 0)
-      || state.eventItems.length >= MAX_EDITOR_ITEMS_ON_BOARD
       || !Number.isSafeInteger(state.nextEventItemId) || state.nextEventItemId < 0) return state;
     const usedIds = new Set(state.eventItems.map((item) => item.id));
     let itemId = state.nextEventItemId;
@@ -361,7 +383,8 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
         id: itemId,
         type: object.itemType,
         row: object.row,
-        col: object.col
+        col: object.col,
+        ...(!state.settings.unlimitedItemLifetime ? { lifetimeTurns: state.settings.itemLifetimeTurns } : {})
       }],
       nextEventItemId: itemId + 1
     };
@@ -376,6 +399,33 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
   }
 
   return state;
+}
+
+export function placeEditorWormholePair(state, player, first, second, { admin = false, random = Math.random } = {}) {
+  if (!state || state.phase !== "playing" || !["X", "O"].includes(player)
+    || (!admin && !hasPermission(state, player, PLAYER_PERMISSIONS.USE_ANY_ITEM))
+    || state.wormholePair || !first || !second
+    || !Number.isInteger(first.row) || !Number.isInteger(first.col)
+    || !Number.isInteger(second.row) || !Number.isInteger(second.col)
+    || !inBounds(first.row, first.col, state.board) || !inBounds(second.row, second.col, state.board)
+    || (first.row === second.row && first.col === second.col)) return state;
+  const occupiedItems = new Set(state.eventItems.map(({ row, col }) => `${row},${col}`));
+  const occupiedProtections = new Set(state.protections.map(({ row, col }) => `${row},${col}`));
+  for (const point of [first, second]) {
+    const key = `${point.row},${point.col}`;
+    if (state.board[point.row][point.col] !== EMPTY_CELL || occupiedItems.has(key) || occupiedProtections.has(key)) return state;
+  }
+  const maxRounds = Math.max(3, Math.round(Math.sqrt(state.settings.width * state.settings.height)));
+  const roundsRemaining = 3 + randomIndex(random, maxRounds - 2);
+  return {
+    ...state,
+    wormholePair: {
+      id: state.nextWormholeId,
+      endpoints: { orange: { ...first }, blue: { ...second } },
+      roundsRemaining
+    },
+    nextWormholeId: state.nextWormholeId + 1
+  };
 }
 
 function getAbility(state, player, itemId) {
@@ -965,6 +1015,7 @@ export function playMove(state, row, col, random = Math.random) {
     const pendingExtraTurns = pendingExtraTurnQueues(next);
     const pendingExtraTurn = pendingExtraTurns[player][0];
     if (pendingExtraTurn !== undefined) {
+      next = ageFieldItems(next);
       const nextInventory = copyInventory(next.inventory);
       removeInventoryItem(nextInventory, player, pendingExtraTurn);
       pendingExtraTurns[player].shift();
@@ -983,6 +1034,7 @@ export function playMove(state, row, col, random = Math.random) {
     }
 
     const nextPlayer = player === "X" ? "O" : "X";
+    next = ageFieldItems(next);
     next = startTurn(next, nextPlayer, state.settings.piecesPerTurn);
     const completedRound = player === "O";
     const pairExpired = completedRound && Boolean(next.wormholePair && next.wormholePair.roundsRemaining <= 1);

@@ -14,6 +14,7 @@ const VERSIONED_MESSAGE_TYPES = new Set([
 const DEFAULT_ROOM_CREATE_LIMIT = Object.freeze({ max: 5, windowMs: 10 * 60_000 });
 const DEFAULT_ROOM_JOIN_LIMIT = Object.freeze({ max: 30, windowMs: 60_000 });
 const DEFAULT_AIM_UPDATE_LIMIT = Object.freeze({ max: 30, windowMs: 1_000 });
+const DEFAULT_TIME_BOOST_LIMIT = Object.freeze({ max: 4, windowMs: 60_000 });
 const DEFAULT_ADMIN_AUTH_LIMIT = Object.freeze({ max: 6, windowMs: 10 * 60_000 });
 const DEFAULT_LOGIN_LIMIT = Object.freeze({ max: 10, windowMs: 15 * 60_000 });
 const DEFAULT_REGISTER_LIMIT = Object.freeze({ max: 4, windowMs: 60 * 60_000 });
@@ -134,6 +135,7 @@ export function createMultiplayerServer({
   roomCreationRateLimit = DEFAULT_ROOM_CREATE_LIMIT,
   roomJoinRateLimit = DEFAULT_ROOM_JOIN_LIMIT,
   aimUpdateRateLimit = DEFAULT_AIM_UPDATE_LIMIT,
+  timeBoostRateLimit = DEFAULT_TIME_BOOST_LIMIT,
   adminAuthRateLimit = DEFAULT_ADMIN_AUTH_LIMIT,
   loginRateLimit = DEFAULT_LOGIN_LIMIT,
   registerRateLimit = DEFAULT_REGISTER_LIMIT,
@@ -146,6 +148,25 @@ export function createMultiplayerServer({
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({ status: "ok", service: "viruses-multiplayer" }));
       return;
+    }
+    if (request.method === "GET" && request.url?.startsWith("/api/rooms")) {
+      const origin = request.headers.origin;
+      if (typeof origin !== "string" || !allowedOrigins?.has(origin)) {
+        return sendJson(response, 403, { error: "origin-not-allowed" });
+      }
+      const pathname = new URL(request.url, "http://localhost").pathname;
+      const rooms = roomManager.listRoomCatalog?.() ?? [];
+      if (pathname === "/api/rooms") {
+        return sendJson(response, 200, { rooms }, { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", vary: "Origin" });
+      }
+      const match = pathname.match(/^\/api\/rooms\/([0-9a-f-]{36})$/i);
+      if (match) {
+        const room = rooms.find((entry) => entry.id === match[1]);
+        return sendJson(response, room ? 200 : 404, room ? { room } : { error: "room-not-found" }, {
+          "access-control-allow-origin": origin, "access-control-allow-credentials": "true", vary: "Origin"
+        });
+      }
+      return sendJson(response, 404, { error: "not-found" });
     }
     if (request.url?.startsWith("/api/")) {
       void handleAccountApi(request, response);
@@ -163,6 +184,7 @@ export function createMultiplayerServer({
   const createLimiter = new FixedWindowRateLimiter({ ...roomCreationRateLimit, now });
   const joinLimiter = new FixedWindowRateLimiter({ ...roomJoinRateLimit, now });
   const aimLimiter = new FixedWindowRateLimiter({ ...aimUpdateRateLimit, now });
+  const timeBoostLimiter = new FixedWindowRateLimiter({ ...timeBoostRateLimit, now });
   const adminAuthLimiter = new FixedWindowRateLimiter({ ...adminAuthRateLimit, now });
   const loginLimiter = new FixedWindowRateLimiter({ ...loginRateLimit, now });
   const registerLimiter = new FixedWindowRateLimiter({ ...registerRateLimit, now });
@@ -296,12 +318,17 @@ export function createMultiplayerServer({
 
       const context = contexts.get(socket);
       if (context?.pending) return sendError(socket, "room-joining", message.requestId);
+      if (context?.observer && !["command", "admin-time"].includes(message.type)) {
+        return sendError(socket, "spectator-read-only", message.requestId);
+      }
       if (message.type === "create-room") {
-        if (!exactKeys(message, ["type", "settings", "requestId"])) return sendError(socket, "invalid-message", message.requestId);
+        if (!exactKeys(message, ["type", "settings", "publicRoom", "requestId"])
+          || (message.publicRoom !== undefined && typeof message.publicRoom !== "boolean")) return sendError(socket, "invalid-message", message.requestId);
         if (context) return sendError(socket, "already-in-room", message.requestId);
         if (!createLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
         const created = roomManager.createRoom(message.settings, { accountId: identity?.id ?? null });
         if (!created.ok) return sendError(socket, created.error.code, message.requestId);
+        roomManager.setRoomVisibility?.(created.roomCode, message.publicRoom === true);
         const attached = roomManager.attachConnection(created.roomCode, created.seatKey, (outgoing) => {
           safeJsonSend(socket, outgoing, attached.connection);
         });
@@ -385,6 +412,41 @@ export function createMultiplayerServer({
         return;
       }
 
+      if (message.type === "join-public-room") {
+        if (!exactKeys(message, ["type", "roomId", "requestId"]) || typeof message.roomId !== "string") {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (context) return sendError(socket, "already-in-room", message.requestId);
+        if (!joinLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
+        const catalogRoom = roomManager.resolveCatalogRoom(message.roomId);
+        if (!catalogRoom || !catalogRoom.publicRoom) return sendError(socket, "room-not-public", message.requestId);
+        contexts.set(socket, { pending: true });
+        const accountIds = [...new Set([...(roomManager.getParticipantAccountIds(catalogRoom.code) ?? []), identity?.id].filter(Boolean))];
+        let ratingsByAccount = {};
+        try {
+          if (accountStore && accountIds.length) ratingsByAccount = await accountStore.getRatings(accountIds);
+        } catch {
+          contexts.delete(socket);
+          return sendError(socket, "account-service-unavailable", message.requestId);
+        }
+        if (socket.readyState !== WebSocket.OPEN) { contexts.delete(socket); return; }
+        const joined = roomManager.joinRoom(catalogRoom.code, { accountId: identity?.id ?? null, ratingsByAccount });
+        if (!joined.ok) { contexts.delete(socket); return sendError(socket, joined.error.code, message.requestId); }
+        const attached = roomManager.attachConnection(joined.roomCode, joined.seatKey, (outgoing) => {
+          safeJsonSend(socket, outgoing, attached.connection);
+        });
+        if (!attached.ok) { contexts.delete(socket); return sendError(socket, attached.error.code, message.requestId); }
+        contexts.set(socket, { roomCode: joined.roomCode, connection: attached.connection, isAdmin: false });
+        safeJsonSend(socket, {
+          type: "room-joined", roomCode: joined.roomCode, side: joined.side,
+          playerToken: joined.playerToken, status: joined.status, version: joined.version,
+          state: joined.state, history: joined.history, clock: joined.clock,
+          undoAvailable: joined.undoAvailable, undoProposal: joined.undoProposal, requestId: message.requestId
+        }, attached.connection);
+        roomManager.broadcastReady(joined.roomCode);
+        return;
+      }
+
       if (message.type === "resume-room") {
         if (!exactKeys(message, ["type", "code", "playerToken", "requestId"])
           || typeof message.code !== "string" || typeof message.playerToken !== "string") {
@@ -416,14 +478,48 @@ export function createMultiplayerServer({
         return;
       }
 
+      if (message.type === "observe-room") {
+        if (!exactKeys(message, ["type", "roomId", "adminSecret", "requestId"])
+          || typeof message.roomId !== "string"
+          || (message.adminSecret !== undefined && (typeof message.adminSecret !== "string" || message.adminSecret.length > 512))) {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (context) return sendError(socket, "already-in-room", message.requestId);
+        const isAdmin = matchesAdminSecret(message.adminSecret, adminSecret);
+        if (message.adminSecret && !isAdmin) return sendError(socket, "admin-auth-failed", message.requestId);
+        const observed = roomManager.attachObserver(message.roomId, {
+          isAdmin,
+          send: (outgoing) => safeJsonSend(socket, outgoing)
+        });
+        if (!observed.ok) return sendError(socket, observed.error.code, message.requestId);
+        contexts.set(socket, {
+          observer: true,
+          isAdminObserver: isAdmin,
+          roomId: observed.roomId,
+          roomCode: roomManager.resolveCatalogRoom(observed.roomId)?.code,
+          observerId: observed.observerId
+        });
+        safeJsonSend(socket, {
+          type: "observing-room", roomId: observed.roomId, status: observed.status,
+          version: observed.version, state: observed.state, clock: observed.clock,
+          settings: observed.settings, isAdmin, requestId: message.requestId
+        });
+        return;
+      }
+
       if (message.type === "command") {
         if (!exactKeys(message, ["type", "command", "requestId"]) || !message.command
           || typeof message.command !== "object" || Array.isArray(message.command)) {
           return sendError(socket, "invalid-message", message.requestId);
         }
         if (!context) return sendError(socket, "not-in-room", message.requestId);
-        roomManager.submitCommand(context.roomCode, context.connection.side, message.command, {
-          isAdmin: context.isAdmin === true
+        if (context.observer && !context.isAdminObserver) return sendError(socket, "spectator-read-only", message.requestId);
+        if (context.isAdminObserver && !["board-edit", "select-ability", "ability-target", "place"].includes(message.command.type)) {
+          return sendError(socket, "admin-command-not-allowed", message.requestId);
+        }
+        roomManager.submitCommand(context.roomCode, context.observer ? null : context.connection.side, message.command, {
+          isAdmin: context.isAdmin === true || context.isAdminObserver === true,
+          adminObserverId: context.isAdminObserver ? context.observerId : null
         }).then((result) => {
           if (!result.ok && socket.readyState === WebSocket.OPEN) {
             safeJsonSend(socket, {
@@ -437,12 +533,39 @@ export function createMultiplayerServer({
         return;
       }
 
+      if (message.type === "opponent-time") {
+        if (!exactKeys(message, ["type", "requestId"])) return sendError(socket, "invalid-message", message.requestId);
+        if (!context || context.observer) return sendError(socket, "not-a-player", message.requestId);
+        if (!timeBoostLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
+        roomManager.addOpponentTime(context.roomCode, context.connection.side).then((result) => {
+          if (!result.ok) return sendError(socket, result.error.code, message.requestId);
+          safeJsonSend(socket, { type: "opponent-time-added", roomCode: context.roomCode, requestId: message.requestId });
+        }).catch(() => sendError(socket, "time-update-failed", message.requestId));
+        return;
+      }
+
+      if (message.type === "admin-time") {
+        if (!exactKeys(message, ["type", "target", "seconds", "requestId"])
+          || !["both", "X", "O"].includes(message.target)
+          || !Number.isInteger(message.seconds) || message.seconds < 1 || message.seconds > 600) {
+          return sendError(socket, "invalid-message", message.requestId);
+        }
+        if (!context || !(context.isAdmin || context.isAdminObserver)) return sendError(socket, "admin-required", message.requestId);
+        if (!timeBoostLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
+        roomManager.addAdminTime(context.roomId || roomManager.resolveCatalogRoom(context.roomCode)?.catalogId, message.target, message.seconds)
+          .then((result) => {
+            if (!result.ok) return sendError(socket, result.error.code, message.requestId);
+            safeJsonSend(socket, { type: "admin-time-recorded", roomId: context.roomId, requestId: message.requestId });
+          }).catch(() => sendError(socket, "time-update-failed", message.requestId));
+        return;
+      }
+
       if (message.type === "admin-auth") {
         if (!exactKeys(message, ["type", "secret", "requestId"])
           || typeof message.secret !== "string" || message.secret.length < 1 || message.secret.length > 512) {
           return sendError(socket, "invalid-message", message.requestId);
         }
-        if (!context) return sendError(socket, "not-in-room", message.requestId);
+        if (!context || context.observer) return sendError(socket, "not-in-room", message.requestId);
         if (!adminAuthLimiter.allow(clientAddress)) return sendError(socket, "rate-limited", message.requestId);
         if (!matchesAdminSecret(message.secret, adminSecret)) return sendError(socket, "admin-auth-failed", message.requestId);
         context.isAdmin = true;
@@ -549,7 +672,8 @@ export function createMultiplayerServer({
 
     socket.on("close", () => {
       const context = contexts.get(socket);
-      if (context) roomManager.detachConnection(context.roomCode, context.connection.side, context.connection);
+      if (context?.observer) roomManager.detachObserver(context.roomId, context.observerId);
+      else if (context) roomManager.detachConnection(context.roomCode, context.connection.side, context.connection);
     });
   });
 

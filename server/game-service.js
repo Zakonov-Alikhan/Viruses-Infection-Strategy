@@ -5,6 +5,7 @@ import {
   getSelectedAbility,
   playMove,
   placeEditorObject,
+  placeEditorWormholePair,
   resign,
   selectAbility,
   useAntiBomb,
@@ -34,7 +35,9 @@ const PUBLIC_SETTING_FIELDS = Object.freeze([
   "wormholesEnabled",
   "animationsEnabled",
   "freeStartingPositions",
-  "disabledItems"
+  "disabledItems",
+  "unlimitedItemLifetime",
+  "itemLifetimeTurns"
 ]);
 
 function failure(state, code) {
@@ -64,6 +67,14 @@ function isValidEditorObject(object) {
       && Object.keys(object).length === 4
       && typeof object.itemType === "string"
       && isCoordinate(object.row, object.col);
+  }
+  if (object.kind === "wormhole-pair") {
+    const validPoint = (point) => point && typeof point === "object" && !Array.isArray(point)
+      && Object.keys(point).length === 2 && Object.keys(point).every((key) => ["row", "col"].includes(key))
+      && isCoordinate(point.row, point.col);
+    return Object.keys(object).length === 3
+      && Object.keys(object).every((key) => ["kind", "first", "second"].includes(key))
+      && validPoint(object.first) && validPoint(object.second);
   }
   return object.kind === "blocked"
     && Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))
@@ -113,8 +124,20 @@ export function processGameCommand(state, side, command, {
     if (authority !== "admin") return failure(state, "admin-required");
     if (state.phase !== "playing") return failure(state, "wrong-phase");
     if (!isValidEditorObject(command.object)) return failure(state, "invalid-editor-object");
-    const next = placeEditorObject(state, side, command.object, { admin: true });
+    const next = command.object.kind === "wormhole-pair"
+      ? placeEditorWormholePair(state, side, command.object.first, command.object.second, { admin: true, random })
+      : placeEditorObject(state, side, command.object, { admin: true });
     return next === state ? failure(state, "invalid-action") : { ok: true, state: next };
+  }
+
+  if (authority === "admin" && ["select-ability", "ability-target", "place"].includes(command.type)) {
+    const trustedState = {
+      ...state,
+      playerRoles: { ...(state.playerRoles || {}), [side]: "admin" }
+    };
+    const result = processGameCommand(trustedState, side, command, { random, authority: "player" });
+    if (result.ok) result.state = { ...result.state, playerRoles: state.playerRoles };
+    return result;
   }
 
   if (command.type === "choose-start") {
@@ -200,7 +223,10 @@ export function getPlayerView(state, side) {
         : null
     },
     lastDestroyed: (state.lastDestroyed || []).map(({ row, col }) => ({ row, col })),
-    eventItems: (state.eventItems || []).map(({ id, type, row, col }) => ({ id, type, row, col })),
+    eventItems: (state.eventItems || []).map(({ id, type, row, col, lifetimeTurns }) => ({
+      id, type, row, col,
+      ...(Number.isInteger(lifetimeTurns) ? { lifetimeTurns } : {})
+    })),
     wormholePair: state.wormholePair ? {
       id: state.wormholePair.id,
       endpoints: {
@@ -225,4 +251,17 @@ export function getPlayerView(state, side) {
       ? structuredClone(state.finishReason)
       : null
   };
+}
+
+/** Detached read-only projection for a spectator; hidden setup choices and target selection stay private. */
+export function getSpectatorView(state, { isAdmin = false } = {}) {
+  const view = getPlayerView(state, "X");
+  view.startChoices = { X: null, O: null };
+  if (isAdmin) {
+    view.playerRoles = { X: "admin", O: "admin" };
+  } else {
+    view.selectedAbility = null;
+    view.abilityTargets = [];
+  }
+  return view;
 }

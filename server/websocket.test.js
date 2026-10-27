@@ -100,7 +100,7 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.equal(created.side, null);
   assert.equal(created.status, "waiting");
   assert.equal(created.clock.enabled, true);
-  assert.deepEqual(created.clock.remainingMs, { X: 5 * 60_000, O: 5 * 60_000 });
+  assert.deepEqual(created.clock.remainingMs, { X: 3 * 60_000, O: 3 * 60_000 });
   assert.equal("playerRoles" in created.state, false);
   assert.equal("pendingExtraTurn" in created.state, false);
 
@@ -163,6 +163,120 @@ test("real WebSocket peers get server-assigned seats and private, versioned stat
   assert.deepEqual(xMoveState.state, oMoveState.state);
   assert.deepEqual(xMoveState.historyEntry.coordinates, [{ row: 0, col: 1 }]);
   assert.equal(xMoveState.historyEntry.id, oMoveState.historyEntry.id);
+});
+
+test("public observers receive sanitized snapshots and cannot submit gameplay commands", async (t) => {
+  const roomManager = new RoomManager({
+    settings: { width: 10, height: 10, piecesPerTurn: 1, clockMinutes: 3, incrementSeconds: 10,
+      unlimitedTime: true, randomEvents: false, freeStartingPositions: false },
+    roomCodeFactory: () => "SPECTATOR", random: () => 0.5, sideRandom: () => 0.1
+  });
+  const { server, address } = await makeTestServer({ roomManager, adminSecret: "test-admin-secret" });
+  const peers = [];
+  t.after(async () => {
+    await Promise.all(peers.map((peer) => peer.close().catch(() => {})));
+    await server.close();
+  });
+
+  const x = await openPeer(address); peers.push(x);
+  x.send({ type: "create-room", publicRoom: true, requestId: "create" });
+  const created = await x.next("room-created");
+  const o = await openPeer(address); peers.push(o);
+  o.send({ type: "join-room", code: created.roomCode, requestId: "join" });
+  await o.next("room-joined");
+  const ready = await x.next("room-ready");
+
+  const watcher = await openPeer(address); peers.push(watcher);
+  watcher.send({ type: "observe-room", roomId: roomManager.listRoomCatalog()[0].id, requestId: "watch" });
+  const observing = await watcher.next("observing-room");
+  assert.equal(observing.state.phase, "playing");
+  assert.deepEqual(observing.state.startChoices, { X: null, O: null });
+  assert.equal(observing.state.selectedAbility, null);
+  assert.equal("roomCode" in observing, false);
+
+  const before = ready.state.board.map((row) => [...row]);
+  watcher.send({ type: "command", command: { type: "place", row: 0, col: 8 }, requestId: "cheat" });
+  const rejected = await watcher.next("server-error");
+  assert.equal(rejected.code, "spectator-read-only");
+  assert.deepEqual(roomManager.resolveCatalogRoom(observing.roomId).state.board, before);
+
+  x.send({ type: "command", command: { type: "place", row: 0, col: 8 }, requestId: "move" });
+  const update = await watcher.next("state");
+  assert.equal(update.state.board[0][8], "X");
+  assert.equal("roomCode" in update, false);
+});
+
+test("a public waiting-room catalog entry can be joined without exposing the invite code first", async (t) => {
+  const { server, address, roomManager } = await makeTestServer();
+  const peers = [];
+  t.after(async () => {
+    await Promise.all(peers.map((peer) => peer.close().catch(() => {})));
+    await server.close();
+  });
+  const host = await openPeer(address); peers.push(host);
+  host.send({ type: "create-room", publicRoom: true, requestId: "public-create" });
+  const created = await host.next("room-created");
+  const roomId = roomManager.listRoomCatalog()[0].id;
+  const guest = await openPeer(address); peers.push(guest);
+  guest.send({ type: "join-public-room", roomId, requestId: "catalog-join" });
+  const joined = await guest.next("room-joined");
+  assert.equal(joined.requestId, "catalog-join");
+  assert.equal(joined.roomCode, created.roomCode);
+  assert.equal(joined.side, "O");
+  assert.equal((await host.next("room-ready")).state.phase, "setup-x");
+});
+
+test("an administrator can manage a private active match as a non-seat observer", async (t) => {
+  const { server, address, roomManager } = await makeTestServer({ adminSecret: "test-admin-secret" });
+  const peers = [];
+  t.after(async () => {
+    await Promise.all(peers.map((peer) => peer.close().catch(() => {})));
+    await server.close();
+  });
+  const x = await openPeer(address); peers.push(x);
+  x.send({ type: "create-room", settings: { piecesPerTurn: 1, freeStartingPositions: true }, requestId: "private-create" });
+  const created = await x.next("room-created");
+  const o = await openPeer(address); peers.push(o);
+  o.send({ type: "join-room", code: created.roomCode, requestId: "private-join" });
+  await o.next("room-joined");
+  await x.next("room-ready");
+  const xState = x.next("state");
+  const oState = o.next("state");
+  x.send({ type: "command", command: { type: "choose-start", row: 0, col: 0 } });
+  await Promise.all([xState, oState]);
+  const startX = x.next("state");
+  const startO = o.next("state");
+  o.send({ type: "command", command: { type: "choose-start", row: 9, col: 9 } });
+  await Promise.all([startX, startO]);
+
+  const admin = await openPeer(address); peers.push(admin);
+  const roomId = roomManager.listRoomCatalog()[0].id;
+  admin.send({ type: "observe-room", roomId, adminSecret: "test-admin-secret", requestId: "admin-watch" });
+  const observed = await admin.next("observing-room");
+  assert.equal(observed.isAdmin, true);
+  assert.equal(observed.state.playerRoles.X, "admin");
+  assert.equal(roomManager.listRoomCatalog()[0].players, 2);
+  assert.equal(roomManager.listRoomCatalog()[0].observers, 1);
+  const changed = admin.next("admin-time-added");
+  admin.send({ type: "admin-time", target: "both", seconds: 30, requestId: "admin-boost" });
+  const event = await changed;
+  assert.equal(event.roomId, roomId);
+  assert.equal(event.seconds, 30);
+  assert.equal(roomManager.resolveCatalogRoom(roomId).clock.remainingMs.X > 0, true);
+});
+
+test("room catalog HTTP response returns settings but never room or seat secrets", async (t) => {
+  const { server, address, roomManager } = await makeTestServer();
+  t.after(() => server.close());
+  const created = roomManager.createRoom();
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/rooms`, {
+    headers: { origin: "http://localhost:3000" }
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.rooms[0].settings.width, 10);
+  assert.equal(JSON.stringify(body).includes(created.roomCode), false);
+  assert.equal(JSON.stringify(body).includes(created.playerToken), false);
 });
 
 test("WebSocket takeback accepts only a proposal ID and returns one authoritative restored snapshot", async (t) => {
@@ -318,7 +432,9 @@ test("forwards validated room settings through WebSocket creation to both player
     wormholesEnabled: false,
     animationsEnabled: false,
     freeStartingPositions: false,
-    disabledItems: ["bomb", "shield"]
+    disabledItems: ["bomb", "shield"],
+    unlimitedItemLifetime: true,
+    itemLifetimeTurns: 10
   });
   assert.equal(created.state.phase, "playing");
   assert.deepEqual(created.clock.remainingMs, { X: 4 * 60_000, O: 4 * 60_000 });

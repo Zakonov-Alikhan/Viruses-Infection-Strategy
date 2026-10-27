@@ -11,6 +11,10 @@ services:
     envVars:
       - key: VIRUSES_MULTIPLAYER_URL
         sync: false
+      - key: VIRUSES_API_URL
+        sync: false
+      - key: SUPPORT_CARD_NUMBER
+        value: ""
 
   - type: web
     name: viruses-multiplayer

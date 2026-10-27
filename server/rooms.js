@@ -4,7 +4,7 @@ import {
   getSelectedAbility, isValidAreaTarget, isValidDebrisTarget, isValidPointDestroyTarget,
   isValidShieldTarget
 } from "../ui/game.js";
-import { getPlayerView, processGameCommand } from "./game-service.js";
+import { getPlayerView, getSpectatorView, processGameCommand } from "./game-service.js";
 import { appendHistoryEntry, createHistoryEntry, createUndoHistoryEntry, MAX_HISTORY_ENTRIES } from "../ui/history.js";
 import { TurnUndoHistory } from "../ui/turn-undo.js";
 
@@ -34,7 +34,8 @@ function normalizeCode(code) {
 
 const ROOM_SETTING_FIELDS = new Set([
   "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds",
-  "unlimitedTime", "randomEvents", "itemSpawnMode", "wormholesEnabled", "animationsEnabled", "freeStartingPositions", "disabledItems"
+  "unlimitedTime", "randomEvents", "itemSpawnMode", "wormholesEnabled", "animationsEnabled", "freeStartingPositions", "disabledItems",
+  "unlimitedItemLifetime", "itemLifetimeTurns"
 ]);
 
 function normalizeRoomSettings(input, defaults) {
@@ -62,6 +63,8 @@ function normalizeRoomSettings(input, defaults) {
     || !Number.isInteger(settings.incrementSeconds) || settings.incrementSeconds < 0 || settings.incrementSeconds > 60
     || !["unlimitedTime", "randomEvents", "wormholesEnabled", "animationsEnabled", "freeStartingPositions"]
       .every((key) => typeof settings[key] === "boolean")) return null;
+  if (typeof settings.unlimitedItemLifetime !== "boolean"
+    || !Number.isInteger(settings.itemLifetimeTurns) || settings.itemLifetimeTurns < 1 || settings.itemLifetimeTurns > 1000) return null;
   if (!ITEM_SPAWN_MODES.includes(settings.itemSpawnMode)) return null;
   return settings;
 }
@@ -131,6 +134,9 @@ export class RoomManager {
     const initialState = createGameState(roomSettings, this.random);
     const room = {
       code,
+      catalogId: randomUUID(),
+      publicRoom: false,
+      observers: new Map(),
       matchId: randomUUID(),
       state: initialState,
       history: [],
@@ -283,6 +289,63 @@ export class RoomManager {
     const room = this.rooms.get(normalizeCode(rawCode));
     if (!room) return [];
     return [room.seats.X?.accountId, room.seats.O?.accountId].filter(Boolean);
+  }
+
+  setRoomVisibility(rawCode, isPublic) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room || room.status !== "waiting" || typeof isPublic !== "boolean") return false;
+    room.publicRoom = isPublic;
+    return true;
+  }
+
+  listRoomCatalog() {
+    return [...this.rooms.values()].filter((room) => (room.status === "active" || room.status === "waiting")
+      && room.state.phase !== "finished")
+      .map((room) => ({
+        id: room.catalogId,
+        visibility: room.publicRoom ? "public" : "private",
+        status: room.status,
+        players: SIDES.filter((side) => room.seats[side]).length,
+        maxPlayers: 2,
+        observers: room.observers.size,
+        settings: Object.fromEntries([
+          "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds", "unlimitedTime",
+          "randomEvents", "itemSpawnMode", "wormholesEnabled", "freeStartingPositions", "disabledItems",
+          "unlimitedItemLifetime", "itemLifetimeTurns"
+        ].filter((key) => Object.hasOwn(room.state.settings, key)).map((key) => [
+          key, key === "disabledItems" ? [...room.state.settings[key]] : room.state.settings[key]
+        ]))
+      }));
+  }
+
+  attachObserver(catalogId, { isAdmin = false, send } = {}) {
+    const room = [...this.rooms.values()].find((candidate) => candidate.catalogId === catalogId);
+    if (!room || (room.status !== "active" && room.status !== "waiting")) return failure("room-not-found");
+    if (!room.publicRoom && !isAdmin) return failure("private-room");
+    if (typeof send !== "function") return failure("invalid-connection");
+    const observerId = randomUUID();
+    const connection = { id: observerId, send, isAdmin, lastSentVersion: room.version };
+    room.observers.set(observerId, connection);
+    return {
+      ok: true,
+      roomId: room.catalogId,
+      status: room.status,
+      version: room.version,
+      state: getSpectatorView(room.state, { isAdmin }),
+      clock: this.#clockSnapshot(room),
+      settings: this.listRoomCatalog().find(({ id }) => id === room.catalogId)?.settings,
+      observerId,
+      isAdmin
+    };
+  }
+
+  detachObserver(catalogId, observerId) {
+    const room = [...this.rooms.values()].find((candidate) => candidate.catalogId === catalogId);
+    return room?.observers.delete(observerId) ?? false;
+  }
+
+  resolveCatalogRoom(catalogId) {
+    return [...this.rooms.values()].find((room) => room.catalogId === catalogId) ?? null;
   }
 
   detachConnection(rawCode, side, connection) {
@@ -539,16 +602,19 @@ export class RoomManager {
     return true;
   }
 
-  submitCommand(rawCode, side, command, { isAdmin = false } = {}) {
+  submitCommand(rawCode, side, command, { isAdmin = false, adminObserverId = null } = {}) {
     const room = this.rooms.get(normalizeCode(rawCode));
     if (!room) return Promise.resolve(failure("room-not-found"));
-    if (!room.seats[side]) return Promise.resolve(failure("seat-not-found"));
+    if (!SIDES.includes(side) && !adminObserverId) return Promise.resolve(failure("invalid-player"));
+    if (!adminObserverId && !room.seats[side]) return Promise.resolve(failure("seat-not-found"));
     if (room.status !== "active") return Promise.resolve(failure("room-not-ready"));
 
     const operation = room.queue.then(() => {
       if (this.rooms.get(room.code) !== room) return failure("room-not-found");
       if (room.status !== "active") return failure("room-not-ready");
-      if (!room.seats[side]?.connection) return failure("player-disconnected");
+      if (!room.seats[side]?.connection
+        && !(isAdmin && adminObserverId && room.observers.get(adminObserverId)?.isAdmin)) return failure("player-disconnected");
+      const commandSide = adminObserverId ? room.state.currentPlayer : side;
       if (room.undoProposal) return { ...failure("undo-pending"), version: room.version };
 
       const now = this.now();
@@ -556,7 +622,7 @@ export class RoomManager {
         return { ...failure("time-expired"), version: room.version };
       }
 
-      const result = processGameCommand(room.state, side, command, {
+      const result = processGameCommand(room.state, commandSide, command, {
         random: this.random,
         authority: isAdmin ? "admin" : "player"
       });
@@ -567,7 +633,7 @@ export class RoomManager {
       const selectedExchange = command.type === "select-ability"
         && previousState.inventory?.[side]?.some((item) => item.id === command.itemId && item.type === "exchange");
       room.state = result.state;
-      const historyEntry = createHistoryEntry(previousState, room.state, room.nextHistoryId, { command, side });
+      const historyEntry = createHistoryEntry(previousState, room.state, room.nextHistoryId, { command, side: commandSide });
       if (historyEntry) {
         room.history = appendHistoryEntry(room.history, historyEntry, MAX_HISTORY_ENTRIES);
         room.nextHistoryId += 1;
@@ -603,6 +669,60 @@ export class RoomManager {
         });
       }
       return { ok: true, version: room.version };
+    });
+    room.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  addOpponentTime(rawCode, side) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    if (!room) return Promise.resolve(failure("room-not-found"));
+    if (!SIDES.includes(side)) return Promise.resolve(failure("invalid-player"));
+    const operation = room.queue.then(() => {
+      if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (room.status !== "active" || room.state.phase !== "playing") return failure("wrong-phase");
+      if (!room.clock.enabled) return failure("clock-disabled");
+      if (!room.seats.X?.connection || !room.seats.O?.connection) return failure("player-disconnected");
+      const now = this.now();
+      if (this.#expireClockIfDue(room, now)) return failure("time-expired");
+      const targetSide = side === "X" ? "O" : "X";
+      room.clock.remainingMs[targetSide] += 15_000;
+      if (room.clock.activePlayer === targetSide) this.#startClock(room, targetSide, now);
+      room.lastActivityAt = now;
+      const clock = this.#clockSnapshot(room);
+      this.#broadcastEphemeral(room, {
+        type: "time-added",
+        roomCode: room.code,
+        side,
+        targetSide,
+        seconds: 15,
+        clock
+      });
+      return { ok: true, targetSide, seconds: 15, clock };
+    });
+    room.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  addAdminTime(catalogId, target, seconds = 30) {
+    const room = this.resolveCatalogRoom(catalogId);
+    if (!room) return Promise.resolve(failure("room-not-found"));
+    if (!["both", "X", "O"].includes(target) || !Number.isInteger(seconds) || seconds < 1 || seconds > 600) {
+      return Promise.resolve(failure("invalid-time-adjustment"));
+    }
+    const operation = room.queue.then(() => {
+      if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (room.status !== "active" || room.state.phase !== "playing") return failure("wrong-phase");
+      if (!room.clock.enabled) return failure("clock-disabled");
+      const now = this.now();
+      if (this.#expireClockIfDue(room, now)) return failure("time-expired");
+      const targets = target === "both" ? SIDES : [target];
+      for (const side of targets) room.clock.remainingMs[side] += seconds * 1000;
+      if (targets.includes(room.clock.activePlayer)) this.#startClock(room, room.clock.activePlayer, now);
+      room.lastActivityAt = now;
+      const clock = this.#clockSnapshot(room);
+      this.#broadcastEphemeral(room, { type: "admin-time-added", roomId: room.catalogId, target, seconds, clock });
+      return { ok: true, target, seconds, clock };
     });
     room.queue = operation.then(() => undefined, () => undefined);
     return operation;
@@ -818,12 +938,12 @@ export class RoomManager {
     room.aims[side] = target;
     const opponent = side === "X" ? "O" : "X";
     const connection = room.seats[opponent]?.connection;
-    if (!connection) return;
-    try {
-      connection.send({ type: "aim", roomCode: room.code, side, target });
-    } catch {
-      this.detachConnection(room.code, opponent, connection);
+    const message = { type: "aim", roomCode: room.code, side, target };
+    if (connection) {
+      try { connection.send(message); }
+      catch { this.detachConnection(room.code, opponent, connection); }
     }
+    for (const observer of room.observers.values()) this.#sendToObserver(room, observer, message);
   }
 
   #clearAim(room, side) {
@@ -844,6 +964,14 @@ export class RoomManager {
         this.detachConnection(room.code, side, connection);
       }
     }
+    for (const observer of room.observers.values()) this.#sendToObserver(room, observer, message);
+  }
+
+  #sendToObserver(room, observer, message) {
+    const safeMessage = { ...message, roomId: room.catalogId };
+    delete safeMessage.roomCode;
+    try { observer.send(safeMessage); }
+    catch { room.observers.delete(observer.id); }
   }
 
   #broadcastSnapshots(room, type, extra = {}) {
@@ -867,6 +995,27 @@ export class RoomManager {
       } catch {
         this.detachConnection(room.code, side, connection);
       }
+    }
+    for (const observer of room.observers.values()) {
+      if (type !== "room-ready" && room.version <= observer.lastSentVersion) continue;
+      const { history: _privateHistory, ...safeExtra } = extra;
+      const envelope = {
+        type,
+        roomId: room.catalogId,
+        roomCode: undefined,
+        side: null,
+        version: room.version,
+        ...safeExtra,
+        state: getSpectatorView(room.state, { isAdmin: observer.isAdmin }),
+        clock: this.#clockSnapshot(room),
+        undoAvailable: false,
+        undoProposal: null
+      };
+      delete envelope.roomCode;
+      try {
+        observer.send(envelope);
+        observer.lastSentVersion = room.version;
+      } catch { room.observers.delete(observer.id); }
     }
   }
 

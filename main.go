@@ -12,7 +12,14 @@ import (
 )
 
 func main() {
+	apiProxy, err := newAPIProxyFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid account API proxy configuration: %v", err)
+	}
 	mux := http.NewServeMux()
+	// Account API calls stay same-origin in the browser; only this fixed route
+	// is forwarded to the configured Node service.
+	mux.Handle("/api/", apiProxy)
 	// каждый раз, когда идёт обращение начинается с "/ui", "ui" убирается, и по оставшемуся пути ищется соответствующий файл.
 	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.Dir("ui"))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +41,7 @@ func main() {
 	}
 	address := net.JoinHostPort("0.0.0.0", port)
 	log.Printf("Web server listening on %s", address)
-	if err := http.ListenAndServe(address, mux); err != nil {
+	if err := http.ListenAndServe(address, logAPIRequests(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -56,5 +63,26 @@ func serveRuntimeConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte("window.VIRUSES_MULTIPLAYER_URL = " + string(encodedURL) + ";\n"))
+	supportCardNumber := strings.TrimSpace(os.Getenv("SUPPORT_CARD_NUMBER"))
+	if !isPublicSupportCardNumber(supportCardNumber) {
+		supportCardNumber = ""
+	}
+	encodedSupportCardNumber, err := json.Marshal(supportCardNumber)
+	if err != nil {
+		http.Error(w, "Could not create runtime configuration", http.StatusInternalServerError)
+		return
+	}
+	_, _ = w.Write([]byte("window.VIRUSES_MULTIPLAYER_URL = " + string(encodedURL) + ";\nwindow.VIRUSES_SUPPORT_CARD_NUMBER = " + string(encodedSupportCardNumber) + ";\n"))
+}
+
+func isPublicSupportCardNumber(value string) bool {
+	if len(value) < 13 || len(value) > 19 {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }

@@ -110,6 +110,124 @@ test("creates private rooms without exposing a final side until the second playe
   assert.equal(manager.roomCount, 1);
 });
 
+test("room catalog omits invite codes and spectators require a public room or admin authority", () => {
+  const manager = makeManager();
+  const created = manager.createRoom();
+  const listing = manager.listRoomCatalog();
+  assert.equal(listing.length, 1);
+  assert.equal(listing[0].visibility, "private");
+  assert.equal(listing[0].players, 1);
+  assert.equal(listing[0].settings.width, 10);
+  assert.equal(JSON.stringify(listing).includes(created.roomCode), false);
+  assert.equal(manager.attachObserver(listing[0].id, { send() {} }).error.code, "private-room");
+
+  assert.equal(manager.setRoomVisibility(created.roomCode, true), true);
+  const received = [];
+  const observer = manager.attachObserver(listing[0].id, { send: (message) => received.push(message) });
+  assert.equal(observer.ok, true);
+  manager.joinRoom(created.roomCode);
+  manager.broadcastReady(created.roomCode);
+  assert.equal(received.at(-1).type, "room-ready");
+  assert.equal(received.at(-1).roomId, listing[0].id);
+  assert.equal("roomCode" in received.at(-1), false);
+  assert.equal(manager.listRoomCatalog()[0].observers, 1);
+  assert.equal(manager.detachObserver(listing[0].id, observer.observerId), true);
+});
+
+test("finished matches are excluded from the active room catalog", async () => {
+  const manager = makeManager();
+  const created = manager.createRoom();
+  manager.joinRoom(created.roomCode);
+  manager.setRoomVisibility(created.roomCode, true);
+  assert.equal(manager.listRoomCatalog().length, 1);
+  manager.rooms.get(created.roomCode).state = { ...manager.rooms.get(created.roomCode).state, phase: "finished" };
+  assert.equal(manager.listRoomCatalog().length, 0);
+});
+
+test("field item expiry is resolved once by the room engine and synchronized to players and observers", async () => {
+  const manager = makeManager({ random: () => 0.75 });
+  const created = manager.createRoom({
+    ...VALID_ROOM_SETTINGS,
+    piecesPerTurn: 1,
+    unlimitedItemLifetime: false,
+    itemLifetimeTurns: 1,
+    randomEvents: false
+  });
+  manager.setRoomVisibility(created.roomCode, true);
+  const joined = manager.joinRoom(created.roomCode);
+  const received = { X: [], O: [], observer: [] };
+  const connectionX = manager.attachConnection(created.roomCode, "X", (message) => received.X.push(message));
+  const connectionO = manager.attachConnection(created.roomCode, "O", (message) => received.O.push(message));
+  const roomId = manager.listRoomCatalog()[0].id;
+  const observer = manager.attachObserver(roomId, { send: (message) => received.observer.push(message) });
+  assert.equal(joined.ok, true);
+  await startGame(manager, created.roomCode, received);
+  const room = manager.resolveCatalogRoom(roomId);
+  room.state = { ...room.state, eventItems: [{ id: 101, type: "bomb", row: 5, col: 5, lifetimeTurns: 1 }] };
+  const move = getLegalMoves(room.state, "X")[0];
+  assert.ok(move);
+  const xSnapshot = received.X.length;
+  const oSnapshot = received.O.length;
+  const observerSnapshot = received.observer.length;
+  const result = await manager.submitCommand(created.roomCode, "X", { type: "place", ...move });
+  assert.equal(result.ok, true);
+  assert.deepEqual(room.state.eventItems, []);
+  assert.deepEqual(received.X.at(-1).state.eventItems, []);
+  assert.deepEqual(received.O.at(-1).state.eventItems, []);
+  assert.deepEqual(received.observer.at(-1).state.eventItems, []);
+  assert.equal(received.X.length, xSnapshot + 1);
+  assert.equal(received.O.length, oSnapshot + 1);
+  assert.equal(received.observer.length, observerSnapshot + 1);
+  manager.detachObserver(roomId, observer.observerId);
+  manager.detachConnection(created.roomCode, "X", connectionX.connection);
+  manager.detachConnection(created.roomCode, "O", connectionO.connection);
+});
+
+test("administrator clock adjustment is bounded and authoritative", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received } = makeTimedManager(scheduler);
+  await startGame(manager, room.roomCode, received);
+  const id = manager.listRoomCatalog()[0].id;
+  const before = manager.getSnapshot(room.roomCode, "X").clock.remainingMs;
+  const changed = await manager.addAdminTime(id, "both", 30);
+  assert.equal(changed.ok, true);
+  assert.equal(changed.clock.remainingMs.X, before.X + 30_000);
+  assert.equal(changed.clock.remainingMs.O, before.O + 30_000);
+  assert.equal((await manager.addAdminTime(id, "O", 0)).error.code, "invalid-time-adjustment");
+  assert.equal((await manager.addAdminTime(id, "O", 601)).error.code, "invalid-time-adjustment");
+});
+
+test("a player can add a fixed 15 seconds to the connected opponent in an active timed room", async () => {
+  const scheduler = makeFakeScheduler();
+  const { manager, room, received } = makeTimedManager(scheduler);
+  await startGame(manager, room.roomCode, received);
+  const before = manager.getSnapshot(room.roomCode, "X").clock;
+  const boosted = await manager.addOpponentTime(room.roomCode, "O");
+  assert.equal(boosted.ok, true);
+  assert.equal(boosted.targetSide, "X");
+  assert.equal(boosted.seconds, 15);
+  assert.equal(boosted.clock.remainingMs.X, before.remainingMs.X + 15_000);
+  assert.equal(received.X.at(-1).type, "time-added");
+  assert.deepEqual(received.X.at(-1), received.O.at(-1));
+  assert.equal(received.X.at(-1).targetSide, "X");
+});
+
+test("time boost rejects waiting, untimed, and invalid-player states", async () => {
+  const scheduler = makeFakeScheduler();
+  const waiting = makeTimedManager(scheduler);
+  assert.equal((await waiting.manager.addOpponentTime(waiting.room.roomCode, "X")).error.code, "wrong-phase");
+  assert.equal((await waiting.manager.addOpponentTime(waiting.room.roomCode, null)).error.code, "invalid-player");
+
+  const manager = makeManager();
+  const room = manager.createRoom({ ...VALID_ROOM_SETTINGS, unlimitedTime: true });
+  manager.joinRoom(room.roomCode);
+  const received = { X: [], O: [] };
+  manager.attachConnection(room.roomCode, "X", (message) => received.X.push(message));
+  manager.attachConnection(room.roomCode, "O", (message) => received.O.push(message));
+  await startGame(manager, room.roomCode, received);
+  assert.equal((await manager.addOpponentTime(room.roomCode, "X")).error.code, "clock-disabled");
+});
+
 test("rated room binds distinct account identities and reports only the server winner", async () => {
   const results = [];
   const manager = new RoomManager({
@@ -217,7 +335,9 @@ test("applies validated per-room settings to game state and clock, and rejects i
     wormholesEnabled: false,
     animationsEnabled: false,
     freeStartingPositions: false,
-    disabledItems: ["bomb", "shield"]
+    disabledItems: ["bomb", "shield"],
+    unlimitedItemLifetime: true,
+    itemLifetimeTurns: 10
   };
   const created = manager.createRoom(customSettings);
   assert.equal(created.ok, true);

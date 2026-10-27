@@ -1,10 +1,10 @@
 {
-  "name": "viruses-infection-strategy",
+  "name": "cascade-wars",
   "private": true,
   "type": "module",
   "scripts": {
     "start:multiplayer": "node server/index.js",
-    "test": "node --test ui/game.test.js ui/history.test.js ui/turn-undo.test.js ui/export.test.js ui/item-categories.test.js ui/settings.test.js ui/restart.test.js ui/ai.test.js ui/multiplayer.test.js ui/accounts.test.js server/game-service.test.js server/index.test.js server/rooms.test.js server/websocket.test.js server/accounts.test.js"
+    "test": "node --test ui/game.test.js ui/history.test.js ui/turn-undo.test.js ui/export.test.js ui/item-categories.test.js ui/settings.test.js ui/restart.test.js ui/ai.test.js ui/multiplayer.test.js ui/accounts.test.js ui/support.test.js server/game-service.test.js server/index.test.js server/rooms.test.js server/websocket.test.js server/accounts.test.js"
   },
   "dependencies": {
     "pg": "^8.23.1",

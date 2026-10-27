@@ -20,6 +20,7 @@ import {
   isValidPointDestroyTarget,
   isValidShieldTarget,
   placeEditorObject,
+  placeEditorWormholePair,
   playMove,
   PLAYER_PERMISSIONS,
   resign,
@@ -27,17 +28,18 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=wormhole-routing1";
+} from "./game.js?v=cascade-package1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
 import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-entry1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
 import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
-import { AccountsClient, submitAccountCredentials } from "./accounts.js?v=account-tabs1";
+import { AccountsClient, logAccountDiagnostic, submitAccountCredentials } from "./accounts.js?v=account-proxy2";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
+import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
 import {
   appendHistoryEntry,
   createHistoryEntry,
@@ -66,12 +68,26 @@ const turnPlayerLabel = document.querySelector("#turn-player-label");
 const turnProgressBar = turnProgress.querySelector('[role="progressbar"]');
 const startButton = document.querySelector("#start-button");
 const languageSelect = document.querySelector("#language-select");
+const supportBank = document.querySelector("#support-bank");
+const supportCardNumberElement = document.querySelector("#support-card-number");
+const supportPending = document.querySelector("#support-pending");
+const supportCopyButton = document.querySelector("#support-copy-card");
+const supportCopyStatus = document.querySelector("#support-copy-status");
+const supportCardNumber = isPublicSupportCardNumber(globalThis.VIRUSES_SUPPORT_CARD_NUMBER)
+  ? globalThis.VIRUSES_SUPPORT_CARD_NUMBER
+  : "";
 const mainMenuScreen = document.querySelector("#main-menu-screen");
 const gameScreen = document.querySelector("#game-screen");
 const localGameButton = document.querySelector("#local-game-button");
 const computerGameButton = document.querySelector("#computer-game-button");
 const onlineGameButton = document.querySelector("#online-game-button");
 const onlineRoomModal = document.querySelector("#online-room-modal");
+const onlinePublicRoomToggle = document.querySelector("#online-public-room");
+const activeGamesPage = document.querySelector("#active-games-page");
+const activeGamesRows = document.querySelector("#active-games-rows");
+const activeGamesStatus = document.querySelector("#active-games-status");
+const activeGamesRefresh = document.querySelector("#active-games-refresh");
+const activeGamesLink = document.querySelector("#active-games-link");
 const onlineRoomCloseButton = document.querySelector("#online-room-close");
 const onlineCreateRoomButton = document.querySelector("#online-create-room");
 const onlineBoardWidthInput = document.querySelector("#online-board-width");
@@ -81,6 +97,9 @@ const onlineClockMinutesInput = document.querySelector("#online-clock-minutes");
 const onlineClockIncrementInput = document.querySelector("#online-clock-increment");
 const onlineUnlimitedTimeToggle = document.querySelector("#online-unlimited-time");
 const onlineRandomEventsToggle = document.querySelector("#online-random-events");
+const onlineUnlimitedItemLifetimeToggle = document.querySelector("#online-unlimited-item-lifetime");
+const onlineItemLifetimeField = document.querySelector("#online-item-lifetime-field");
+const onlineItemLifetimeInput = document.querySelector("#online-item-lifetime-turns");
 const onlineItemSpawnMode = document.querySelector("#online-item-spawn-mode");
 const onlineItemSpawnModeHelp = document.querySelector("#online-item-spawn-mode-help");
 const onlineWormholesToggle = document.querySelector("#online-wormholes");
@@ -179,6 +198,9 @@ const clockMinutesInput = document.querySelector("#clock-minutes-input");
 const clockIncrementInput = document.querySelector("#clock-increment-input");
 const unlimitedTimeToggle = document.querySelector("#unlimited-time-toggle");
 const randomEventsToggle = document.querySelector("#random-events-toggle");
+const unlimitedItemLifetimeToggle = document.querySelector("#unlimited-item-lifetime-toggle");
+const itemLifetimeField = document.querySelector("#item-lifetime-field");
+const itemLifetimeInput = document.querySelector("#item-lifetime-turns-input");
 const itemSpawnModeSelect = document.querySelector("#item-spawn-mode");
 const itemSpawnModeHelp = document.querySelector("#item-spawn-mode-help");
 const wormholesToggle = document.querySelector("#wormholes-toggle");
@@ -186,6 +208,7 @@ const adminModeToggle = document.querySelector("#admin-mode-toggle");
 const itemOptions = document.querySelector("#item-options");
 const adminTools = document.querySelector("#admin-tools");
 const adminItemList = document.querySelector("#admin-item-list");
+const adminTimeControls = document.querySelector("#admin-time-controls");
 const adminTitle = document.querySelector("#admin-title");
 const adminHelp = document.querySelector("#admin-help");
 const boardEditorToggle = document.querySelector("#board-editor-toggle");
@@ -208,6 +231,7 @@ const clockOElement = document.querySelector("#clock-o");
 const clockPlayerX = document.querySelector("#clock-player-x");
 const clockPlayerO = document.querySelector("#clock-player-o");
 const clockPlayerOName = document.querySelector("#clock-player-o .clock-player-name span");
+const clockAddTimeButtons = [...document.querySelectorAll("[data-clock-add-time]")];
 const clockControlSummary = document.querySelector("#clock-control-summary");
 const resignButton = document.querySelector("#resign-button");
 const undoTurnButton = document.querySelector("#undo-turn-button");
@@ -319,6 +343,7 @@ let historyViewId = null;
 let localHistoryId = 0;
 let newlyPlacedCells = new Map();
 let newlySpawnedItems = new Map();
+const expiringItems = new Map();
 let newlySpawnedWormholes = new Map();
 let activeAreaEffect = null;
 let bombAimCell = null;
@@ -349,11 +374,15 @@ let trainingSession = null;
 let trainingSavedSettings = null;
 let boardEditorActive = false;
 let boardEditorTool = null;
+let boardEditorFirstWormholeCell = null;
 let boardEditorMessageKey = null;
 let computerOpponent = { enabled: false, difficulty: "easy" };
 let onlineMode = false;
 let onlineSide = null;
 let onlineRoomCode = null;
+let onlineRoomId = null;
+let onlineObserverMode = false;
+let onlineAdminObserver = false;
 let onlineConnected = false;
 let onlineAdminAuthenticated = false;
 let pendingBoardEdit = false;
@@ -363,6 +392,7 @@ let onlineStatusKey = null;
 let onlineStatusError = null;
 let onlineClockSnapshot = null;
 let onlineClockReceivedAt = null;
+let timeBoostPending = false;
 let onlineMenuError = null;
 let pendingSettings = null;
 let incomingRestartProposal = null;
@@ -421,6 +451,7 @@ function invalidateComputerAction() {
 function beginGameSession() {
   invalidateComputerAction();
   gameSessionId += 1;
+  expiringItems.clear();
 }
 
 function isComputerControlledTurn() {
@@ -571,6 +602,12 @@ function renderClock() {
   currentTurnCard.classList.toggle("turn-active", state && state.phase !== "finished");
   clockXElement.classList.toggle("clock-low", !settings.unlimitedTime && shownClock("X") <= 10_000);
   clockOElement.classList.toggle("clock-low", !settings.unlimitedTime && shownClock("O") <= 10_000);
+  for (const button of clockAddTimeButtons) {
+    const targetSide = button.dataset.clockAddTime;
+    button.hidden = !onlineMode || !onlineSide || targetSide === onlineSide || !onlineClockSnapshot?.enabled
+      || state?.phase !== "playing";
+    button.disabled = timeBoostPending || !onlineConnected || onlineCommandPending || onlineUndoPending;
+  }
   resignButton.disabled = historyViewId !== null || !state || state.phase !== "playing" || !canHumanAct();
   const localUndoSide = computerOpponent.enabled ? "X" : null;
   const localUndoAvailable = !onlineMode && !trainingSession && historyViewId === null && state?.phase === "playing"
@@ -619,14 +656,16 @@ function renderInventories(displayState = state) {
   }
   const hasAdminItemPermission = hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM);
   const adminToolsReady = state.phase === "playing";
-  adminTools.hidden = !hasAdminItemPermission && !onlineMode;
+  adminTools.hidden = !hasAdminItemPermission && !(onlineMode && onlineAdminAuthenticated);
+  adminTimeControls.hidden = !(onlineMode && onlineAdminAuthenticated);
   adminTitle.textContent = t(onlineMode ? "admin.editorTitle" : "admin.title");
   adminHelp.textContent = onlineMode
     ? t(onlineAdminAuthenticated ? "admin.editorServerHelp" : "admin.editorAuthHelp")
     : t(adminToolsReady ? "admin.help" : "admin.waiting");
   adminItemList.replaceChildren();
-  adminItemList.hidden = onlineMode;
-  if (hasAdminItemPermission) {
+  const canUseAdminItems = hasAdminItemPermission || (onlineMode && onlineAdminAuthenticated);
+  adminItemList.hidden = onlineMode && !onlineAdminAuthenticated;
+  if (canUseAdminItems) {
     for (const type of EVENT_ITEMS) {
       if (type === "randomArtifact" || !isItemEnabled(state, type)) continue;
       const definition = EVENT_ITEM_DEFINITIONS[type];
@@ -636,7 +675,8 @@ function renderInventories(displayState = state) {
       button.className = "admin-item-button" + (state.selectedAbility === itemId ? " is-selected" : "");
       button.dataset.itemCategory = getItemCategory(type);
       button.dataset.itemId = itemId;
-      button.disabled = historyViewId !== null || !adminToolsReady || !canHumanAct();
+      button.disabled = historyViewId !== null || !adminToolsReady
+        || (onlineMode ? (!onlineConnected || !onlineAdminAuthenticated || (!onlineObserverMode && !canHumanAct())) : !canHumanAct());
       const itemName = t(definition.nameKey);
       const categoryName = t(getItemCategoryLocalizationKey(type));
       button.title = `${t(adminToolsReady ? "admin.item" : "admin.itemWaiting", { name: itemName })} · ${categoryName}`;
@@ -649,7 +689,7 @@ function renderInventories(displayState = state) {
       adminItemList.appendChild(button);
     }
   }
-  boardEditorToggle.hidden = onlineMode ? !onlineConnected : !hasAdminItemPermission;
+  boardEditorToggle.hidden = onlineMode ? !onlineAdminAuthenticated : !hasAdminItemPermission;
   boardEditorControls.hidden = !boardEditorActive
     || (onlineMode ? !onlineAdminAuthenticated : !hasAdminItemPermission);
   boardEditorToggle.setAttribute("aria-pressed", String(boardEditorActive));
@@ -657,7 +697,8 @@ function renderInventories(displayState = state) {
   boardEditorStatus.textContent = t(boardEditorMessageKey || (boardEditorTool ? "admin.editorSelected" : "admin.editorNoTool"), {
     object: boardEditorTool?.kind === "item"
       ? t(EVENT_ITEM_DEFINITIONS[boardEditorTool.itemType].nameKey)
-      : t(boardEditorTool?.kind === "clear" ? "admin.clearCell" : "admin.deadCell")
+      : t(boardEditorTool?.kind === "clear" ? "admin.clearCell"
+        : boardEditorTool?.kind === "wormhole-pair" ? "admin.addWormholes" : "admin.deadCell")
   });
   if ((hasAdminItemPermission || (onlineMode && onlineAdminAuthenticated)) && boardEditorActive) {
     for (const type of EVENT_ITEMS) {
@@ -695,6 +736,16 @@ function renderInventories(displayState = state) {
     blockedIcon.setAttribute("aria-hidden", "true");
     blockedButton.append(blockedIcon, document.createTextNode(t("admin.deadCell")));
     boardEditorTools.appendChild(blockedButton);
+
+    const wormholeButton = document.createElement("button");
+    wormholeButton.type = "button";
+    wormholeButton.className = "admin-item-button editor-tool-button";
+    wormholeButton.dataset.editorKind = "wormhole-pair";
+    wormholeButton.classList.toggle("is-selected", boardEditorTool?.kind === "wormhole-pair");
+    wormholeButton.disabled = Boolean(state.wormholePair) || !adminToolsReady || isComputerControlledTurn()
+      || (onlineMode && (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated));
+    wormholeButton.textContent = t("admin.addWormholes");
+    boardEditorTools.appendChild(wormholeButton);
 
     const clearButton = document.createElement("button");
     clearButton.type = "button";
@@ -1354,6 +1405,106 @@ function onlineErrorMessage(code) {
   return t(key) === key ? t("online.error.generic") : t(key);
 }
 
+function isCurrentOnlineEvent(event) {
+  return onlineObserverMode
+    ? event.roomId === onlineRoomId
+    : event.roomCode === onlineRoomCode;
+}
+
+let activeGamesRefreshTimer = null;
+async function refreshActiveGames() {
+  if (!activeGamesPage || activeGamesPage.hidden) return;
+  activeGamesStatus.textContent = t("activeGames.loading");
+  try {
+    const response = await fetch("/api/rooms", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) throw new Error("room-catalog-unavailable");
+    const payload = await response.json();
+    const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
+    activeGamesRows.replaceChildren();
+    if (rooms.length === 0) {
+      activeGamesStatus.textContent = t("activeGames.empty");
+      return;
+    }
+    activeGamesStatus.textContent = "";
+    rooms.forEach((room, index) => {
+      const tr = document.createElement("tr");
+      const cell = (text) => { const td = document.createElement("td"); td.textContent = text; return td; };
+      tr.append(cell(`#${index + 1}`));
+      tr.append(cell(t(room.visibility === "public" ? "activeGames.public" : "activeGames.private")));
+      tr.append(cell(`${room.players}/2 · ${t("activeGames.spectators", { count: room.observers || 0 })}`));
+      tr.append(cell(`${room.settings.width}×${room.settings.height}`));
+      tr.append(cell(room.settings.unlimitedTime ? t("clock.unlimited") : `${room.settings.clockMinutes}+${room.settings.incrementSeconds}`));
+      tr.append(cell(String(room.maxPlayers)));
+      const actionCell = document.createElement("td");
+      const actions = document.createElement("div"); actions.className = "active-games-actions";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button button-secondary";
+      const action = room.visibility !== "public" ? "manage"
+        : room.status === "waiting" ? "join" : "observe";
+      button.textContent = t(`activeGames.${action}`);
+      button.disabled = room.status === "waiting" && room.players === 0;
+      button.addEventListener("click", () => action === "join"
+        ? multiplayerClient.joinPublicRoom(room.id).catch((error) => { activeGamesStatus.textContent = onlineErrorMessage(error.code); })
+        : observeCatalogRoom(room));
+      actions.append(button);
+      actionCell.append(actions);
+      const details = document.createElement("details");
+      details.className = "active-games-settings";
+      const summary = document.createElement("summary"); summary.textContent = t("activeGames.settings");
+      const content = document.createElement("p");
+      const disabled = (room.settings.disabledItems || []).map((type) => EVENT_ITEM_DEFINITIONS[type] ? t(EVENT_ITEM_DEFINITIONS[type].nameKey) : type).join(", ") || t("settings.itemsNoneDisabled");
+      content.textContent = [
+        `${room.settings.width}×${room.settings.height}`,
+        `${room.settings.piecesPerTurn} ${t("turn.pieces")}`,
+        room.settings.unlimitedTime ? t("clock.unlimited") : `${room.settings.clockMinutes}+${room.settings.incrementSeconds}`,
+        t(`settings.spawnMode.${room.settings.itemSpawnMode}`),
+        t(room.settings.randomEvents ? "settings.randomEnabled" : "settings.randomDisabled"),
+        `${t("settings.itemsTitle")}: ${disabled}`,
+        room.settings.unlimitedItemLifetime ? t("settings.itemsUnlimited") : `${t("settings.itemLifetime")}: ${room.settings.itemLifetimeTurns} ${t("settings.itemLifetimeTurns")}`,
+        t(room.settings.wormholesEnabled ? "settings.wormholesEnabled" : "settings.randomDisabled")
+      ].join(" · ");
+      details.append(summary, content);
+      actionCell.append(details);
+      tr.append(actionCell);
+      activeGamesRows.append(tr);
+    });
+  } catch {
+    activeGamesStatus.textContent = t("activeGames.failed");
+  }
+}
+
+function showActiveGamesPage(show) {
+  const menuContent = mainMenuScreen.querySelector(".menu-content");
+  const support = mainMenuScreen.querySelector(".support-card");
+  const footer = mainMenuScreen.querySelector(".menu-footer");
+  activeGamesPage.hidden = !show;
+  menuContent.hidden = show;
+  support.hidden = show;
+  footer.hidden = show;
+  if (show) {
+    if (activeGamesRefreshTimer !== null) window.clearInterval(activeGamesRefreshTimer);
+    void refreshActiveGames();
+    activeGamesRefreshTimer = window.setInterval(() => void refreshActiveGames(), 10_000);
+  } else if (activeGamesRefreshTimer !== null) {
+    window.clearInterval(activeGamesRefreshTimer);
+    activeGamesRefreshTimer = null;
+  }
+}
+
+async function observeCatalogRoom(room) {
+  let secret;
+  if (room.visibility !== "public") {
+    secret = window.prompt(t("activeGames.adminSecret"));
+    if (!secret) return;
+  }
+  try {
+    await multiplayerClient.observeRoom(room.id, secret);
+  } catch (error) {
+    activeGamesStatus.textContent = onlineErrorMessage(error.code);
+  }
+}
+
 function showOnlineError(code) {
   onlineMenuError = code;
   onlineErrorElement.textContent = onlineErrorMessage(code);
@@ -1361,9 +1512,14 @@ function showOnlineError(code) {
 }
 
 function clearOnlinePresentation() {
+  onlineObserverMode = false;
+  onlineAdminObserver = false;
+  onlineRoomId = null;
   onlineMode = false;
   onlineSide = null;
   onlineRoomCode = null;
+  onlineRoomId = null;
+  boardEditorFirstWormholeCell = null;
   onlineConnected = false;
   onlineAdminAuthenticated = false;
   pendingBoardEdit = false;
@@ -1391,10 +1547,13 @@ function clearOnlinePresentation() {
 }
 
 function leaveOnlineSession({ showMenu = false } = {}) {
+  const wasObserver = onlineObserverMode;
+  const fromGamesPage = !activeGamesPage.hidden;
   clearOnlinePresentation();
   remoteAim = null;
   lastSentAim = null;
-  multiplayerClient.leave();
+  if (wasObserver) multiplayerClient.leaveObserver();
+  else multiplayerClient.leave();
   if (resultModal.open) resultModal.close();
   if (restartConfirmModal.open) restartConfirmModal.close();
   if (restartProposalModal.open) restartProposalModal.close();
@@ -1408,6 +1567,7 @@ function leaveOnlineSession({ showMenu = false } = {}) {
     stopClock();
     transitionScreens(false);
     syncMenuAmbient();
+    if (fromGamesPage) showActiveGamesPage(true);
   }
 }
 
@@ -1434,6 +1594,11 @@ function syncOnlineRoomSettings() {
   onlineClockIncrementInput.value = String(settings.incrementSeconds);
   onlineUnlimitedTimeToggle.checked = settings.unlimitedTime;
   onlineRandomEventsToggle.checked = settings.randomEvents;
+  onlinePublicRoomToggle.checked = false;
+  onlineUnlimitedItemLifetimeToggle.checked = settings.unlimitedItemLifetime;
+  onlineItemLifetimeInput.value = String(settings.itemLifetimeTurns);
+  onlineItemLifetimeField.hidden = settings.unlimitedItemLifetime;
+  onlineItemLifetimeInput.disabled = settings.unlimitedItemLifetime;
   onlineItemSpawnMode.value = settings.itemSpawnMode;
   updateSpawnModeHelp(onlineItemSpawnMode, onlineItemSpawnModeHelp);
   onlineWormholesToggle.checked = settings.wormholesEnabled;
@@ -1460,12 +1625,18 @@ function collectOnlineRoomSettings() {
   }, DEFAULT_SETTINGS);
   const clockMinutes = resolvedClock?.clockMinutes ?? Number(onlineClockMinutesInput.value);
   const incrementSeconds = resolvedClock?.incrementSeconds ?? Number(onlineClockIncrementInput.value);
+  const unlimitedItemLifetime = onlineUnlimitedItemLifetimeToggle.checked;
+  const itemLifetimeTurns = Number(onlineItemLifetimeInput.value);
   onlinePiecesInput.max = String(Math.floor(width * height / 10));
   if (![width, height].every((value) => Number.isInteger(value) && value >= MIN_BOARD_DIMENSION && value <= MAX_BOARD_DIMENSION)
     || !Number.isInteger(piecesPerTurn) || piecesPerTurn < 1 || piecesPerTurn > Math.floor(width * height / 10)
-    || !resolvedClock) {
+    || !resolvedClock
+    || (!unlimitedItemLifetime && (!Number.isInteger(itemLifetimeTurns) || itemLifetimeTurns < 1 || itemLifetimeTurns > 1000))) {
     onlineErrorElement.textContent = t("online.error.invalid-settings");
     onlineErrorElement.hidden = false;
+    if (!unlimitedItemLifetime && (!Number.isInteger(itemLifetimeTurns) || itemLifetimeTurns < 1 || itemLifetimeTurns > 1000)) {
+      onlineItemLifetimeInput.focus();
+    }
     return null;
   }
   return {
@@ -1476,6 +1647,8 @@ function collectOnlineRoomSettings() {
     incrementSeconds,
     unlimitedTime,
     randomEvents: onlineRandomEventsToggle.checked,
+    unlimitedItemLifetime,
+    itemLifetimeTurns,
     itemSpawnMode: onlineItemSpawnMode.value,
     wormholesEnabled: onlineWormholesToggle.checked,
     animationsEnabled: settings.animationsEnabled,
@@ -1554,11 +1727,55 @@ function enterOnlineGame(message) {
 }
 
 function handleMultiplayerEvent(event) {
-  if (event.type === "rating-updated" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "observing-room") {
+    onlineObserverMode = true;
+    onlineAdminObserver = event.isAdmin === true;
+    onlineRoomId = event.roomId;
+    onlineRoomCode = null;
+    boardEditorFirstWormholeCell = null;
+    onlineSide = null;
+    onlineMode = true;
+    onlineConnected = true;
+    onlineAdminAuthenticated = onlineAdminObserver;
+    onlinePreviousSettings = { ...settings };
+    settings = { ...event.state.settings, adminMode: false };
+    state = event.state;
+    moveHistory = [];
+    historyViewId = null;
+    gameScreen.classList.add("is-online");
+    beginGameSession();
+    stopClock();
+    transitionScreens(true);
+    syncMenuAmbient();
+    onlineGameStatus.textContent = t("activeGames.observing");
+    onlineGameStatus.hidden = false;
+    onlineClockSnapshot = event.clock;
+    onlineClockReceivedAt = performance.now();
+    render();
+    return;
+  }
+  if (event.type === "admin-time-added" && onlineMode && isCurrentOnlineEvent(event)) {
+    onlineClockSnapshot = event.clock || onlineClockSnapshot;
+    onlineClockReceivedAt = performance.now();
+    onlineGameStatus.textContent = t("activeGames.adminTimeAdded");
+    onlineGameStatus.hidden = false;
+    renderClock();
+    return;
+  }
+  if (event.type === "room-ready" && onlineObserverMode) event.type = "state";
+  if (event.type === "time-added" && onlineMode && isCurrentOnlineEvent(event)) {
+    onlineClockSnapshot = event.clock || onlineClockSnapshot;
+    onlineClockReceivedAt = performance.now();
+    onlineGameStatus.textContent = t("clock.added", { player: event.targetSide, seconds: event.seconds });
+    onlineGameStatus.hidden = false;
+    renderClock();
+    return;
+  }
+  if (event.type === "rating-updated" && onlineMode && isCurrentOnlineEvent(event)) {
     void refreshAccount();
     return;
   }
-  if (event.type === "admin-authenticated" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "admin-authenticated" && onlineMode && isCurrentOnlineEvent(event)) {
     onlineAdminAuthenticated = true;
     return;
   }
@@ -1582,12 +1799,12 @@ function handleMultiplayerEvent(event) {
     } else enterOnlineGame(room);
     return;
   }
-  if (event.type === "aim" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "aim" && onlineMode && isCurrentOnlineEvent(event)) {
     remoteAim = event.target ? { ...event.target, side: event.side } : null;
     render();
     return;
   }
-  if (event.type === "undo-proposal" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "undo-proposal" && onlineMode && isCurrentOnlineEvent(event)) {
     onlineUndoPending = true;
     onlineUndoAvailable = false;
     onlineClockSnapshot = event.clock || onlineClockSnapshot;
@@ -1602,7 +1819,7 @@ function handleMultiplayerEvent(event) {
     render();
     return;
   }
-  if (event.type === "undo-cancelled" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "undo-cancelled" && onlineMode && isCurrentOnlineEvent(event)) {
     if (incomingUndoProposal?.proposalId === event.proposalId) incomingUndoProposal = null;
     onlineUndoPending = false;
     onlineUndoAvailable = event.undoAvailableFor === onlineSide;
@@ -1616,7 +1833,7 @@ function handleMultiplayerEvent(event) {
     onlineGameStatus.hidden = false;
     return;
   }
-  if (event.type === "undo-complete" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "undo-complete" && onlineMode && isCurrentOnlineEvent(event)) {
     onlineUndoPending = false;
     incomingUndoProposal = null;
     onlineStatusKey = null;
@@ -1626,7 +1843,7 @@ function handleMultiplayerEvent(event) {
     onlineGameStatus.hidden = false;
     return;
   }
-  if (event.type === "visual-event" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "visual-event" && onlineMode && isCurrentOnlineEvent(event)) {
     if (historyViewId !== null) return;
     if (event.abilityType === "exchange") {
       if (state?.settings.animationsEnabled) playInventoryExchangeAnimation();
@@ -1650,13 +1867,13 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
-  if (event.type === "undo-proposal-created" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "undo-proposal-created" && onlineMode && isCurrentOnlineEvent(event)) {
     onlineStatusKey = "undo.waiting";
     onlineUndoPending = true;
     render();
     return;
   }
-  if (event.type === "undo-vote-recorded" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "undo-vote-recorded" && onlineMode && isCurrentOnlineEvent(event)) {
     if (!event.accepted) {
       onlineStatusKey = null;
       render();
@@ -1665,7 +1882,7 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
-  if (event.type === "restart-proposal" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "restart-proposal" && onlineMode && isCurrentOnlineEvent(event)) {
     incomingRestartProposal = event;
     const offeredSettings = event.settings || {};
     const disabledNames = (offeredSettings.disabledItems || [])
@@ -1690,7 +1907,7 @@ function handleMultiplayerEvent(event) {
     restartProposalAcceptButton.focus();
     return;
   }
-  if (event.type === "restart-cancelled" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "restart-cancelled" && onlineMode && isCurrentOnlineEvent(event)) {
     incomingRestartProposal = null;
     if (resultRematchButton) resultRematchButton.disabled = false;
     if (restartProposalModal.open) restartProposalModal.close();
@@ -1704,14 +1921,14 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
-  if (event.type === "restart-complete" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "restart-complete" && onlineMode && isCurrentOnlineEvent(event)) {
     incomingRestartProposal = null;
     resultRematchButton.disabled = false;
     if (restartProposalModal.open) restartProposalModal.close();
     resultRematchStatus.hidden = true;
     return;
   }
-  if (event.type === "restart-proposal-created" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "restart-proposal-created" && onlineMode && isCurrentOnlineEvent(event)) {
     resultRematchButton.disabled = event.kind === "rematch";
     const message = t("dialog.restartWaiting");
     if (resultModal.open) {
@@ -1723,7 +1940,7 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
-  if (event.type === "state" && onlineMode && event.roomCode === onlineRoomCode) {
+  if (event.type === "state" && onlineMode && isCurrentOnlineEvent(event)) {
     onlineConnected = true;
     onlineSide = event.side || onlineSide;
     settings = { ...event.state.settings, adminMode: false };
@@ -2148,6 +2365,24 @@ function updateState(nextState, {
   if (onlineMode !== serverUpdate) return;
   if (historyViewId !== null && !serverUpdate) return;
   const previousState = state;
+  const nextItemIds = new Set(nextState.eventItems.map((item) => item.id));
+  if (previousState?.settings && !nextState.settings.unlimitedItemLifetime) {
+    for (const item of previousState.eventItems) {
+      if (item.lifetimeTurns === 1 && !nextItemIds.has(item.id)
+        && nextState.board?.[item.row]?.[item.col] === EMPTY_CELL
+        && nextState.settings.animationsEnabled
+        && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        const key = `${item.row},${item.col}`;
+        const expiry = { ...item, startedAt: performance.now() };
+        expiringItems.set(key, expiry);
+        const session = gameSessionId;
+        window.setTimeout(() => {
+          if (expiringItems.get(key) === expiry) expiringItems.delete(key);
+          if (session === gameSessionId) render();
+        }, 480);
+      }
+    }
+  }
   const now = performance.now();
   if (!onlineMode && previousState.phase === "playing" && !advanceClock(now)) return;
   if (!onlineMode && !trainingSession) {
@@ -2256,28 +2491,45 @@ function playInventoryExchangeAnimation() {
 
 function placeBoardEditorObject(row, col) {
   if (historyViewId !== null || !boardEditorTool || !state || state.phase !== "playing" || isComputerControlledTurn()) return;
+  if (boardEditorTool.kind === "wormhole-pair") {
+    if (!boardEditorFirstWormholeCell) {
+      boardEditorFirstWormholeCell = { row, col };
+      boardEditorMessageKey = "admin.wormholeFirst";
+      boardEditorStatus.textContent = t(boardEditorMessageKey);
+      render();
+      return;
+    }
+    if (boardEditorFirstWormholeCell.row === row && boardEditorFirstWormholeCell.col === col) return;
+  }
+  const object = boardEditorTool.kind === "wormhole-pair"
+    ? { kind: "wormhole-pair", first: boardEditorFirstWormholeCell, second: { row, col } }
+    : { ...boardEditorTool, row, col };
   if (onlineMode) {
     if (!onlineConnected || !onlineAdminAuthenticated || onlineCommandPending) return;
     pendingBoardEdit = true;
     if (!sendOnlineCommand({
       type: "board-edit",
-      object: { ...boardEditorTool, row, col }
+      object
     })) {
       pendingBoardEdit = false;
       boardEditorMessageKey = "admin.editorInvalid";
       boardEditorStatus.textContent = t(boardEditorMessageKey);
     }
+    if (boardEditorTool.kind === "wormhole-pair") boardEditorFirstWormholeCell = null;
     return;
   }
-  const nextState = placeEditorObject(state, state.currentPlayer, { ...boardEditorTool, row, col });
+  const nextState = boardEditorTool.kind === "wormhole-pair"
+    ? placeEditorWormholePair(state, state.currentPlayer, object.first, object.second, { admin: true })
+    : placeEditorObject(state, state.currentPlayer, object);
   if (nextState === state) {
     boardEditorStatus.textContent = t("admin.editorInvalid");
     return;
   }
+  boardEditorFirstWormholeCell = null;
   boardEditorMessageKey = "admin.editorPlaced";
   boardEditorStatus.textContent = t(boardEditorMessageKey);
   updateState(nextState, {
-    command: { type: "board-edit", object: { ...boardEditorTool, row, col } },
+    command: { type: "board-edit", object },
     side: state.currentPlayer
   });
 }
@@ -2425,12 +2677,27 @@ function renderGamePosition(state) {
         itemIcon.setAttribute("aria-hidden", "true");
         cell.classList.add("event-item", "event-item-" + eventItem.type);
         cell.dataset.itemCategory = getItemCategory(eventItem.type);
+        if (Number.isInteger(eventItem.lifetimeTurns)) {
+          cell.dataset.itemLifetime = String(eventItem.lifetimeTurns);
+          if (eventItem.lifetimeTurns <= 2) cell.classList.add("event-item-expiring");
+          if (eventItem.lifetimeTurns === 1) cell.classList.add("event-item-expiring-soon");
+        }
         const itemAnimationStartedAt = newlySpawnedItems.get(eventItem.id);
         if (itemAnimationStartedAt !== undefined && state.settings.animationsEnabled) {
           cell.classList.add("event-item-entering");
           cell.style.setProperty("--item-animation-delay", "-" + (animationNow - itemAnimationStartedAt) + "ms");
         }
         cell.appendChild(itemIcon);
+      } else {
+        const fadingItem = expiringItems.get(`${row},${col}`);
+        if (fadingItem) {
+          const icon = document.createElement("img");
+          icon.src = EVENT_ITEM_DEFINITIONS[fadingItem.type]?.icon || "";
+          icon.alt = "";
+          icon.className = "event-item-fading-away";
+          icon.setAttribute("aria-hidden", "true");
+          cell.append(icon);
+        }
       }
 
       const isSelectedTarget = state.abilityTargets.some((target) => target.row === row && target.col === col);
@@ -2456,9 +2723,11 @@ function renderGamePosition(state) {
         && (!onlineMode || (onlineConnected && onlineAdminAuthenticated && !onlineCommandPending))) {
         const editableCell = boardEditorTool?.kind === "clear"
           ? value !== EMPTY_CELL || eventItem || protectedCell || wormholeEndpoint
-          : value === EMPTY_CELL && !wormholeEndpoint;
+          : value === EMPTY_CELL && !wormholeEndpoint && !eventItem && !protectedCell;
         cell.disabled = !editableCell || historyViewId !== null;
         cell.classList.toggle("editor-target", editableCell && Boolean(boardEditorTool));
+        cell.classList.toggle("editor-wormhole-first", Boolean(boardEditorFirstWormholeCell
+          && boardEditorFirstWormholeCell.row === row && boardEditorFirstWormholeCell.col === col));
         if (editableCell) cell.addEventListener("click", () => placeBoardEditorObject(row, col));
       } else if (isComputerControlledTurn() || (onlineMode && !canHumanAct())) {
         cell.disabled = true;
@@ -2836,6 +3105,10 @@ function openSettings() {
   clockIncrementInput.value = String(settings.incrementSeconds);
   unlimitedTimeToggle.checked = settings.unlimitedTime;
   randomEventsToggle.checked = settings.randomEvents;
+  unlimitedItemLifetimeToggle.checked = settings.unlimitedItemLifetime;
+  itemLifetimeInput.value = String(settings.itemLifetimeTurns);
+  itemLifetimeField.hidden = settings.unlimitedItemLifetime;
+  itemLifetimeInput.disabled = settings.unlimitedItemLifetime;
   itemSpawnModeSelect.value = settings.itemSpawnMode;
   updateSpawnModeHelp(itemSpawnModeSelect, itemSpawnModeHelp);
   wormholesToggle.checked = settings.wormholesEnabled;
@@ -2868,6 +3141,8 @@ function applySettings(event) {
   const piecesPerTurn = Number(piecesInput.value);
   const unlimitedTime = unlimitedTimeToggle.checked;
   const randomEvents = randomEventsToggle.checked;
+  const unlimitedItemLifetime = unlimitedItemLifetimeToggle.checked;
+  const itemLifetimeTurns = Number(itemLifetimeInput.value);
   const animationsEnabled = animationsToggle.checked;
   const adminMode = adminModeToggle.checked;
   const resolvedClock = resolveClockSettings({
@@ -2899,6 +3174,12 @@ function applySettings(event) {
     showFieldError(clockIncrementInput, clockIncrementError, t("validation.increment"));
     firstInvalid = firstInvalid || clockIncrementInput;
   }
+  if (!unlimitedItemLifetime && (!Number.isInteger(itemLifetimeTurns) || itemLifetimeTurns < 1 || itemLifetimeTurns > 1000)) {
+    itemLifetimeInput.setAttribute("aria-invalid", "true");
+    itemLifetimeInput.focus();
+    return;
+  }
+  itemLifetimeInput.removeAttribute("aria-invalid");
 
   if (firstInvalid) {
     firstInvalid.focus();
@@ -2913,6 +3194,8 @@ function applySettings(event) {
     incrementSeconds,
     unlimitedTime,
     randomEvents,
+    unlimitedItemLifetime,
+    itemLifetimeTurns,
     itemSpawnMode: itemSpawnModeSelect.value,
     wormholesEnabled: wormholesToggle.checked,
     animationsEnabled,
@@ -3068,9 +3351,24 @@ freeStartToggle.addEventListener("change", () => {
 });
 itemSpawnModeSelect.addEventListener("change", () => updateSpawnModeHelp(itemSpawnModeSelect, itemSpawnModeHelp));
 onlineItemSpawnMode.addEventListener("change", () => updateSpawnModeHelp(onlineItemSpawnMode, onlineItemSpawnModeHelp));
+onlineUnlimitedItemLifetimeToggle.addEventListener("change", () => {
+  onlineItemLifetimeField.hidden = onlineUnlimitedItemLifetimeToggle.checked;
+  onlineItemLifetimeInput.disabled = onlineUnlimitedItemLifetimeToggle.checked;
+});
+unlimitedItemLifetimeToggle.addEventListener("change", () => {
+  itemLifetimeField.hidden = unlimitedItemLifetimeToggle.checked;
+  itemLifetimeInput.disabled = unlimitedItemLifetimeToggle.checked;
+});
 settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
 onlineGameButton.addEventListener("click", () => openOnlineRoom());
+activeGamesLink.addEventListener("click", (event) => {
+  event.preventDefault();
+  history.pushState({}, "", "/games");
+  showActiveGamesPage(true);
+});
+activeGamesRefresh.addEventListener("click", () => void refreshActiveGames());
+window.addEventListener("popstate", () => showActiveGamesPage(window.location.pathname === "/games"));
 onlineRoomCloseButton.addEventListener("click", () => onlineRoomModal.close());
 onlineCreateRoomButton.addEventListener("click", async () => {
   const roomSettings = collectOnlineRoomSettings();
@@ -3079,7 +3377,7 @@ onlineCreateRoomButton.addEventListener("click", async () => {
   onlineErrorElement.hidden = true;
   onlineRoomStatus.textContent = t("online.connecting");
   try {
-    await multiplayerClient.createRoom(roomSettings);
+    await multiplayerClient.createRoom(roomSettings, { publicRoom: onlinePublicRoomToggle.checked });
   } catch (error) {
     showOnlineError(error.code);
   } finally {
@@ -3150,6 +3448,19 @@ onlineReturnMenuButton.addEventListener("click", () => {
   onlineRoomEntry.hidden = false;
   onlineRoomLobby.hidden = true;
   onlineErrorElement.hidden = true;
+});
+adminTimeControls.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-admin-time]");
+  if (!button || !onlineMode || !onlineAdminAuthenticated || !onlineConnected) return;
+  button.disabled = true;
+  try {
+    await multiplayerClient.adjustAdminTime(button.dataset.adminTime, 30);
+  } catch (error) {
+    onlineGameStatus.textContent = t("clock.addFailed", { reason: error.code || "unknown" });
+    onlineGameStatus.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
 });
 computerGameButton.addEventListener("click", openComputerDifficulty);
 computerDifficultyModal.querySelectorAll("[data-computer-difficulty]").forEach((button) => {
@@ -3241,6 +3552,7 @@ function selectAccountTab(name) {
 }
 
 async function submitAccountForm(event, method) {
+  logAccountDiagnostic("form-handler-enter", { method, formId: event.currentTarget?.id });
   if (accountSubmitting) {
     event.preventDefault();
     return;
@@ -3259,6 +3571,7 @@ async function submitAccountForm(event, method) {
     username: data.get("username"),
     password: data.get("password"),
     onLoading(loading) {
+      logAccountDiagnostic("ui-loading", { method, loading });
       accountSubmitting = loading;
       accountAuthTabs.querySelectorAll("button").forEach((tab) => { tab.disabled = loading; });
       submit.disabled = loading;
@@ -3266,12 +3579,14 @@ async function submitAccountForm(event, method) {
       submit.textContent = t(loading ? `account.loading.${method}` : `account.${method}`);
     },
     onSuccess(result) {
+      logAccountDiagnostic("ui-profile-updated", { method, authenticated: Boolean(result?.account) });
       renderAccount(result.account);
       form.reset();
       if (method === "register") accountStatus.textContent = `${t("account.registered")} ${accountStatus.textContent}`;
       void refreshLeaderboard();
     },
     onError(error) {
+      logAccountDiagnostic("ui-error-rendered", { method, errorCode: error instanceof Error ? error.message : "unknown" });
       errorElement.textContent = accountErrorMessage(error);
       errorElement.hidden = false;
     }
@@ -3287,8 +3602,14 @@ accountModalClose.addEventListener("click", () => accountModal.close());
 accountModal.addEventListener("click", (event) => {
   if (event.target === accountModal) accountModal.close();
 });
-accountLoginForm.addEventListener("submit", (event) => void submitAccountForm(event, "login"));
-accountRegisterForm.addEventListener("submit", (event) => void submitAccountForm(event, "register"));
+accountLoginForm.addEventListener("submit", (event) => {
+  logAccountDiagnostic("dom-submit", { formId: event.currentTarget?.id });
+  void submitAccountForm(event, "login");
+});
+accountRegisterForm.addEventListener("submit", (event) => {
+  logAccountDiagnostic("dom-submit", { formId: event.currentTarget?.id });
+  void submitAccountForm(event, "register");
+});
 accountAuthTabs.addEventListener("click", (event) => {
   if (accountSubmitting) return;
   const tab = event.target.closest("[data-account-tab]");
@@ -3386,6 +3707,22 @@ for (const player of ["X", "O"]) {
       else updateState(selectAbility(state, item.id), {
         command: { type: "select-ability", itemId: item.id }, side: player
       });
+    }
+  });
+}
+for (const button of clockAddTimeButtons) {
+  button.addEventListener("click", async () => {
+    if (!onlineMode || button.hidden || timeBoostPending) return;
+    timeBoostPending = true;
+    renderClock();
+    try {
+      await multiplayerClient.addTimeToOpponent();
+    } catch (error) {
+      onlineGameStatus.textContent = t("clock.addFailed", { reason: error.code || "unknown" });
+      onlineGameStatus.hidden = false;
+    } finally {
+      timeBoostPending = false;
+      renderClock();
     }
   });
 }
@@ -3551,6 +3888,24 @@ demoBoard?.addEventListener("pointercancel", () => { demoSwipeStartX = null; });
 
 languageSelect.value = getLanguage();
 applyTranslations();
+supportBank.hidden = !supportCardNumber;
+supportCardNumberElement.hidden = !supportCardNumber;
+supportCardNumberElement.textContent = supportCardNumber.replace(/\B(?=(\d{4})+(?!\d))/g, " ");
+supportPending.hidden = Boolean(supportCardNumber);
+supportCopyButton.hidden = !supportCardNumber;
+supportCopyButton.addEventListener("click", async () => {
+  supportCopyButton.disabled = true;
+  supportCopyStatus.hidden = true;
+  try {
+    await copySupportCardNumber(supportCardNumber);
+    supportCopyStatus.textContent = t("support.copied");
+  } catch {
+    supportCopyStatus.textContent = t("support.copyError");
+  } finally {
+    supportCopyStatus.hidden = false;
+    supportCopyButton.disabled = false;
+  }
+});
 decorateRuleItemCards();
 languageSelect.addEventListener("change", () => setLanguage(languageSelect.value));
 document.addEventListener("languagechange", () => {
@@ -3593,7 +3948,14 @@ document.addEventListener("languagechange", () => {
 reduceMotionQuery.addEventListener?.("change", syncMenuAmbient);
 adminItemList.addEventListener("click", (event) => {
   const button = event.target.closest(".admin-item-button");
-  if (historyViewId !== null || !button || boardEditorActive || !canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)) return;
+  const authorizedAdmin = onlineMode && onlineConnected && onlineAdminAuthenticated;
+  if (historyViewId !== null || !button || boardEditorActive
+    || (onlineMode ? (!authorizedAdmin || (!onlineObserverMode && !canHumanAct()))
+      : (!canHumanAct() || !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM)))) return;
+  if (onlineMode) {
+    sendOnlineCommand({ type: "select-ability", itemId: button.dataset.itemId });
+    return;
+  }
   updateState(selectAbility(state, button.dataset.itemId), {
     command: { type: "select-ability", itemId: button.dataset.itemId }, side: state.currentPlayer
   });
@@ -3635,16 +3997,19 @@ boardEditorTools.addEventListener("click", (event) => {
     ? { kind: "item", itemType: button.dataset.itemType }
     : { kind: button.dataset.editorKind };
   boardEditorMessageKey = null;
+  boardEditorFirstWormholeCell = null;
   render();
 });
 boardEditorCancel.addEventListener("click", () => {
   boardEditorTool = null;
+  boardEditorFirstWormholeCell = null;
   boardEditorMessageKey = null;
   render();
 });
 boardEditorExit.addEventListener("click", () => {
   boardEditorActive = false;
   boardEditorTool = null;
+  boardEditorFirstWormholeCell = null;
   boardEditorMessageKey = null;
   render();
 });
@@ -3697,6 +4062,7 @@ if (typeof ResizeObserver === "function") {
 } else {
   window.addEventListener("resize", syncBoardGeometry);
 }
+if (window.location.pathname === "/games") showActiveGamesPage(true);
 const inviteUrl = new URL(window.location.href);
 const inviteCode = inviteUrl.searchParams.get("room");
 if (inviteCode) {
