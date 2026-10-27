@@ -196,6 +196,7 @@ export default Object.freeze({ ...{
   "online.publicRoom": "Public room", "online.publicRoomHelp": "The room will appear in the spectator directory",
   "activeGames.title": "Active games", "activeGames.help": "Watch public matches", "activeGames.eyebrow": "ONLINE",
   "activeGames.refresh": "Refresh", "activeGames.loading": "Loading rooms…", "activeGames.empty": "There are no active rooms right now.",
+  "activeGames.emptyTitle": "No active games yet", "activeGames.emptyHelp": "Create a public room and it will appear here.",
   "activeGames.failed": "Could not load the room list.", "activeGames.subtitle": "Open rooms and current matches",
   "activeGames.tableLabel": "Active game rooms", "activeGames.status": "Status", "activeGames.room": "Room",
   "activeGames.visibility": "Access", "activeGames.players": "Players", "activeGames.board": "Board",

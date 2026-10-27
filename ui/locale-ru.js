@@ -167,6 +167,7 @@ export default Object.freeze({ ...{
   "online.publicRoom": "Открытая комната", "online.publicRoomHelp": "Комната появится в каталоге для наблюдателей",
   "activeGames.title": "Активные игры", "activeGames.help": "Смотреть открытые партии", "activeGames.eyebrow": "ОНЛАЙН",
   "activeGames.refresh": "Обновить", "activeGames.loading": "Загружаем комнаты…", "activeGames.empty": "Сейчас нет активных комнат.",
+  "activeGames.emptyTitle": "Пока нет активных игр", "activeGames.emptyHelp": "Создайте открытую комнату — она появится здесь.",
   "activeGames.failed": "Не удалось загрузить список комнат.", "activeGames.subtitle": "Открытые комнаты и текущие партии",
   "activeGames.tableLabel": "Активные игровые комнаты", "activeGames.status": "Состояние", "activeGames.room": "Комната",
   "activeGames.visibility": "Доступ", "activeGames.players": "Игроки", "activeGames.board": "Поле",

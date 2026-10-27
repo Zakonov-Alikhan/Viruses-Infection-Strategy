@@ -30,7 +30,7 @@ import {
   usePointDestroy
 } from "./game.js?v=cascade-package1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-entry1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games4";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -91,6 +91,11 @@ const activeGamesPage = document.querySelector("#active-games-page");
 const activeGamesRows = document.querySelector("#active-games-rows");
 const activeGamesStatus = document.querySelector("#active-games-status");
 const activeGamesRefresh = document.querySelector("#active-games-refresh");
+const activeGamesEmptyRefresh = document.querySelector("#active-games-empty-refresh");
+const activeGamesLoading = document.querySelector("#active-games-loading");
+const activeGamesEmpty = document.querySelector("#active-games-empty");
+const activeGamesTableRegion = document.querySelector("#active-games-table-region");
+const activeGamesButtonSpinner = document.querySelector("#active-games-button-spinner");
 const activeRoomTooltip = document.querySelector("#active-room-tooltip");
 const activeRoomTooltipGroups = document.querySelector("#active-room-tooltip-groups");
 const onlineRoomCloseButton = document.querySelector("#online-room-close");
@@ -416,6 +421,7 @@ let screenTransitionId = 0;
 const SCREEN_TRANSITION_MS = 170;
 
 function transitionScreens(showGame) {
+  if (showGame && activeGamesPage && !activeGamesPage.hidden) showActiveGamesPage(false);
   const target = showGame ? gameScreen : mainMenuScreen;
   const outgoing = showGame ? mainMenuScreen : gameScreen;
   const shouldAnimate = !reduceMotionQuery.matches && !outgoing.hidden;
@@ -1418,6 +1424,7 @@ function isCurrentOnlineEvent(event) {
 
 let activeGamesRefreshTimer = null;
 let activeGamesOpenRow = null;
+let activeGamesRequestPending = false;
 function positionActiveRoomTooltip(row) {
   if (!row || activeRoomTooltip.hidden) return;
   const rowRect = row.getBoundingClientRect();
@@ -1479,8 +1486,19 @@ activeRoomTooltip.addEventListener("pointerleave", (event) => {
 });
 
 async function refreshActiveGames() {
-  if (!activeGamesPage || activeGamesPage.hidden) return;
-  activeGamesStatus.textContent = t("activeGames.loading");
+  if (!activeGamesPage || activeGamesPage.hidden || activeGamesRequestPending) return;
+  activeGamesRequestPending = true;
+  const hasRows = activeGamesRows.childElementCount > 0;
+  activeGamesRefresh.disabled = true;
+  activeGamesRefresh.classList.add("is-loading");
+  activeGamesButtonSpinner.hidden = false;
+  activeGamesStatus.hidden = hasRows;
+  if (!hasRows) {
+    activeGamesStatus.textContent = t("activeGames.loading");
+    activeGamesLoading.hidden = false;
+    activeGamesEmpty.hidden = true;
+    activeGamesTableRegion.hidden = true;
+  }
   try {
     const response = await fetch("/api/rooms", { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) throw new Error("room-catalog-unavailable");
@@ -1490,10 +1508,16 @@ async function refreshActiveGames() {
     closeActiveRoomTooltip();
     activeGamesRows.replaceChildren();
     if (rooms.length === 0) {
-      activeGamesStatus.textContent = t("activeGames.empty");
+      activeGamesStatus.hidden = true;
+      activeGamesLoading.hidden = true;
+      activeGamesTableRegion.hidden = true;
+      activeGamesEmpty.hidden = false;
       return;
     }
-    activeGamesStatus.textContent = "";
+    activeGamesStatus.hidden = true;
+    activeGamesLoading.hidden = true;
+    activeGamesEmpty.hidden = true;
+    activeGamesTableRegion.hidden = false;
     rooms.forEach((room) => {
       const view = buildActiveRoomView(room, t);
       const tr = document.createElement("tr");
@@ -1562,16 +1586,24 @@ async function refreshActiveGames() {
       if (previouslyOpenId === view.id) showActiveRoomTooltip(tr, view);
     });
   } catch {
+    activeGamesLoading.hidden = true;
+    activeGamesEmpty.hidden = true;
+    activeGamesTableRegion.hidden = !activeGamesRows.childElementCount;
+    activeGamesStatus.hidden = false;
     activeGamesStatus.textContent = t("activeGames.failed");
+  } finally {
+    activeGamesRequestPending = false;
+    activeGamesRefresh.disabled = false;
+    activeGamesRefresh.classList.remove("is-loading");
+    activeGamesButtonSpinner.hidden = true;
   }
 }
 
 function showActiveGamesPage(show) {
-  const menuContent = mainMenuScreen.querySelector(".menu-content");
-  const footer = mainMenuScreen.querySelector(".menu-footer");
+  mainMenuScreen.hidden = show;
+  mainMenuScreen.inert = show;
   activeGamesPage.hidden = !show;
-  menuContent.hidden = show;
-  footer.hidden = show;
+  activeGamesPage.inert = !show;
   if (show) {
     if (activeGamesRefreshTimer !== null) window.clearInterval(activeGamesRefreshTimer);
     void refreshActiveGames();
@@ -3453,6 +3485,7 @@ settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
 onlineGameButton.addEventListener("click", () => openOnlineRoom());
 activeGamesRefresh.addEventListener("click", () => void refreshActiveGames());
+activeGamesEmptyRefresh.addEventListener("click", () => void refreshActiveGames());
 onlineRoomCloseButton.addEventListener("click", () => onlineRoomModal.close());
 onlineCreateRoomButton.addEventListener("click", async () => {
   const roomSettings = collectOnlineRoomSettings();

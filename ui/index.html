@@ -10,7 +10,7 @@
   <meta property="og:type" content="website">
   <title>Cascade Wars — стратегия для двух игроков</title>
   <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg?v=cascade-brand1">
-  <link rel="stylesheet" href="/ui/style.css?v=cascade-package3">
+  <link rel="stylesheet" href="/ui/style.css?v=cascade-package4">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -217,9 +217,29 @@
   </dialog>
 
   <section class="active-games-page" id="active-games-page" aria-labelledby="active-games-title" hidden>
-    <header class="active-games-heading"><div><p class="eyebrow" data-i18n="activeGames.eyebrow">ОНЛАЙН</p><h1 id="active-games-title" data-i18n="activeGames.title">Активные игры</h1><p class="active-games-subtitle" data-i18n="activeGames.subtitle">Открытые комнаты и текущие партии</p></div><div class="active-games-heading-actions"><button class="button button-secondary" id="active-games-refresh" type="button" data-i18n="activeGames.refresh">Обновить</button><a class="button button-secondary" href="/" data-i18n="menu.back">В главное меню</a></div></header>
-    <p id="active-games-status" class="active-games-status" role="status" aria-live="polite" data-i18n="activeGames.loading">Загружаем комнаты…</p>
-    <div class="active-games-table-wrap"><table class="active-games-table" aria-label="Активные игровые комнаты" data-i18n-aria-label="activeGames.tableLabel"><thead><tr><th scope="col" data-i18n="activeGames.status">Состояние</th><th scope="col" data-i18n="activeGames.room">Комната</th><th scope="col" data-i18n="activeGames.players">Игроки</th><th scope="col" data-i18n="activeGames.modeBoard">Режим / поле</th><th scope="col" data-i18n="activeGames.time">Время</th><th scope="col" data-i18n="activeGames.visibility">Доступ</th><th scope="col" data-i18n="activeGames.details">Подробности</th><th scope="col" data-i18n="activeGames.action">Действие</th></tr></thead><tbody id="active-games-rows"></tbody></table></div>
+    <header class="active-games-heading">
+      <div><p class="eyebrow" data-i18n="activeGames.eyebrow">ОНЛАЙН</p><h1 id="active-games-title" data-i18n="activeGames.title">Активные игры</h1><p class="active-games-subtitle" data-i18n="activeGames.subtitle">Открытые комнаты и текущие партии</p></div>
+      <div class="active-games-heading-actions">
+        <button class="button button-secondary" id="active-games-refresh" type="button"><span data-i18n="activeGames.refresh">Обновить</span><span class="active-games-button-spinner" id="active-games-button-spinner" aria-hidden="true" hidden></span></button>
+        <a class="button button-secondary" href="/" data-i18n="menu.back">В главное меню</a>
+      </div>
+    </header>
+    <p id="active-games-status" class="active-games-status" role="status" aria-live="polite" hidden></p>
+    <div class="active-games-loading" id="active-games-loading" aria-hidden="true" hidden>
+      <div class="active-games-skeleton-head"><span></span><span></span><span></span><span></span></div>
+      <div class="active-games-skeleton-row"><span></span><span></span><span></span><span></span></div>
+      <div class="active-games-skeleton-row"><span></span><span></span><span></span><span></span></div>
+      <div class="active-games-skeleton-row"><span></span><span></span><span></span><span></span></div>
+    </div>
+    <section class="active-games-empty" id="active-games-empty" aria-labelledby="active-games-empty-title" hidden>
+      <div class="active-games-empty-mark" aria-hidden="true">⌁</div>
+      <h2 id="active-games-empty-title" data-i18n="activeGames.emptyTitle">Пока нет активных игр</h2>
+      <p data-i18n="activeGames.emptyHelp">Создайте открытую комнату — она появится здесь.</p>
+      <button class="button button-secondary" id="active-games-empty-refresh" type="button" data-i18n="activeGames.refresh">Обновить</button>
+    </section>
+    <div class="active-games-table-region" id="active-games-table-region" hidden>
+      <div class="active-games-table-wrap"><table class="active-games-table" aria-label="Активные игровые комнаты" data-i18n-aria-label="activeGames.tableLabel"><thead><tr><th scope="col" data-i18n="activeGames.status">Состояние</th><th scope="col" data-i18n="activeGames.room">Комната</th><th scope="col" data-i18n="activeGames.players">Игроки</th><th scope="col" data-i18n="activeGames.modeBoard">Режим / поле</th><th scope="col" data-i18n="activeGames.time">Время</th><th scope="col" data-i18n="activeGames.visibility">Доступ</th><th scope="col" data-i18n="activeGames.details">Подробности</th><th scope="col" data-i18n="activeGames.action">Действие</th></tr></thead><tbody id="active-games-rows"></tbody></table></div>
+    </div>
   </section>
   <aside class="active-room-tooltip" id="active-room-tooltip" role="tooltip" aria-labelledby="active-room-tooltip-title" hidden>
     <h2 id="active-room-tooltip-title" data-i18n="activeGames.settingsTitle">Настройки комнаты</h2>
@@ -616,6 +636,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=cascade-package3"></script>
+  <script type="module" src="/ui/script.js?v=cascade-package4"></script>
 </body>
 </html>
