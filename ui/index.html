@@ -217,10 +217,14 @@
   </dialog>
 
   <section class="active-games-page" id="active-games-page" aria-labelledby="active-games-title" hidden>
-    <header class="active-games-heading"><div><p class="eyebrow" data-i18n="activeGames.eyebrow">ОНЛАЙН</p><h1 id="active-games-title" data-i18n="activeGames.title">Активные игры</h1></div><div><button class="button button-secondary" id="active-games-refresh" type="button" data-i18n="activeGames.refresh">Обновить</button><a class="button button-secondary" href="/" data-i18n="menu.back">В главное меню</a></div></header>
-    <p id="active-games-status" role="status" aria-live="polite" data-i18n="activeGames.loading">Загружаем комнаты…</p>
-    <div class="active-games-table-wrap"><table class="active-games-table"><thead><tr><th data-i18n="activeGames.room">Комната</th><th data-i18n="activeGames.visibility">Статус</th><th data-i18n="activeGames.players">Игроки</th><th data-i18n="activeGames.board">Поле</th><th data-i18n="activeGames.time">Время</th><th data-i18n="activeGames.capacity">Максимум</th><th data-i18n="activeGames.action">Действие</th></tr></thead><tbody id="active-games-rows"></tbody></table></div>
+    <header class="active-games-heading"><div><p class="eyebrow" data-i18n="activeGames.eyebrow">ОНЛАЙН</p><h1 id="active-games-title" data-i18n="activeGames.title">Активные игры</h1><p class="active-games-subtitle" data-i18n="activeGames.subtitle">Открытые комнаты и текущие партии</p></div><div class="active-games-heading-actions"><button class="button button-secondary" id="active-games-refresh" type="button" data-i18n="activeGames.refresh">Обновить</button><a class="button button-secondary" href="/" data-i18n="menu.back">В главное меню</a></div></header>
+    <p id="active-games-status" class="active-games-status" role="status" aria-live="polite" data-i18n="activeGames.loading">Загружаем комнаты…</p>
+    <div class="active-games-table-wrap"><table class="active-games-table" aria-label="Активные игровые комнаты" data-i18n-aria-label="activeGames.tableLabel"><thead><tr><th scope="col" data-i18n="activeGames.status">Состояние</th><th scope="col" data-i18n="activeGames.room">Комната</th><th scope="col" data-i18n="activeGames.players">Игроки</th><th scope="col" data-i18n="activeGames.modeBoard">Режим / поле</th><th scope="col" data-i18n="activeGames.time">Время</th><th scope="col" data-i18n="activeGames.visibility">Доступ</th><th scope="col" data-i18n="activeGames.details">Подробности</th><th scope="col" data-i18n="activeGames.action">Действие</th></tr></thead><tbody id="active-games-rows"></tbody></table></div>
   </section>
+  <aside class="active-room-tooltip" id="active-room-tooltip" role="tooltip" aria-labelledby="active-room-tooltip-title" hidden>
+    <h2 id="active-room-tooltip-title" data-i18n="activeGames.settingsTitle">Настройки комнаты</h2>
+    <div id="active-room-tooltip-groups" class="active-room-tooltip-groups"></div>
+  </aside>
 
   <dialog id="computer-difficulty-modal" class="settings-modal computer-difficulty-modal" aria-labelledby="computer-difficulty-title" aria-describedby="computer-difficulty-help">
     <section class="settings-card">

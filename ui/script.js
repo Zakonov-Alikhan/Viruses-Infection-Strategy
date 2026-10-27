@@ -40,6 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
+import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
   createHistoryEntry,
@@ -90,6 +91,8 @@ const activeGamesPage = document.querySelector("#active-games-page");
 const activeGamesRows = document.querySelector("#active-games-rows");
 const activeGamesStatus = document.querySelector("#active-games-status");
 const activeGamesRefresh = document.querySelector("#active-games-refresh");
+const activeRoomTooltip = document.querySelector("#active-room-tooltip");
+const activeRoomTooltipGroups = document.querySelector("#active-room-tooltip-groups");
 const onlineRoomCloseButton = document.querySelector("#online-room-close");
 const onlineCreateRoomButton = document.querySelector("#online-create-room");
 const onlineBoardWidthInput = document.querySelector("#online-board-width");
@@ -1414,19 +1417,67 @@ function isCurrentOnlineEvent(event) {
 }
 
 let activeGamesRefreshTimer = null;
-let activeGamesOpenSettings = null;
-function positionActiveGamesSettings(details, row) {
-  const popover = details.querySelector(".active-games-settings-popover");
-  if (!popover || !details.open) return;
+let activeGamesOpenRow = null;
+function positionActiveRoomTooltip(row) {
+  if (!row || activeRoomTooltip.hidden) return;
   const rowRect = row.getBoundingClientRect();
-  const popoverRect = popover.getBoundingClientRect();
-  const width = Math.min(360, window.innerWidth - 32);
-  const left = Math.min(Math.max(16, rowRect.right - width), window.innerWidth - width - 16);
-  let top = rowRect.bottom + 8;
-  if (top + popoverRect.height > window.innerHeight - 12) top = Math.max(12, rowRect.top - popoverRect.height - 8);
-  popover.style.left = `${left}px`;
-  popover.style.top = `${top}px`;
+  const tooltipRect = activeRoomTooltip.getBoundingClientRect();
+  const margin = 12;
+  const left = Math.min(Math.max(margin, rowRect.left), window.innerWidth - tooltipRect.width - margin);
+  let top = rowRect.bottom - 1;
+  if (top + tooltipRect.height > window.innerHeight - margin) {
+    top = Math.max(margin, rowRect.top - tooltipRect.height + 1);
+  }
+  activeRoomTooltip.style.left = `${left}px`;
+  activeRoomTooltip.style.top = `${top}px`;
 }
+
+function closeActiveRoomTooltip() {
+  activeRoomTooltip.hidden = true;
+  activeGamesOpenRow = null;
+}
+
+function showActiveRoomTooltip(row, view) {
+  activeGamesOpenRow = { id: view.id, row };
+  activeRoomTooltipGroups.replaceChildren();
+  for (const [group, entries] of Object.entries(view.groups)) {
+    if (!entries.length) continue;
+    const section = document.createElement("section");
+    section.className = "active-room-tooltip-group";
+    const heading = document.createElement("h3");
+    heading.textContent = t(`activeGames.group.${group}`);
+    const list = document.createElement("dl");
+    for (const entry of entries) {
+      const label = document.createElement("dt");
+      label.textContent = t(entry.labelKey);
+      const value = document.createElement("dd");
+      value.textContent = entry.value;
+      list.append(label, value);
+    }
+    section.append(heading, list);
+    activeRoomTooltipGroups.append(section);
+  }
+  activeRoomTooltip.hidden = false;
+  requestAnimationFrame(() => positionActiveRoomTooltip(row));
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !activeRoomTooltip.hidden) closeActiveRoomTooltip();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!activeRoomTooltip.hidden && !activeRoomTooltip.contains(event.target)
+    && !event.target.closest?.("[data-room-settings]")) closeActiveRoomTooltip();
+});
+window.addEventListener("resize", () => {
+  if (activeGamesOpenRow) positionActiveRoomTooltip(activeGamesOpenRow.row);
+});
+window.addEventListener("scroll", () => {
+  if (activeGamesOpenRow) positionActiveRoomTooltip(activeGamesOpenRow.row);
+}, true);
+activeRoomTooltip.addEventListener("pointerleave", (event) => {
+  if (!activeGamesOpenRow?.row.contains(event.relatedTarget)) closeActiveRoomTooltip();
+});
+
 async function refreshActiveGames() {
   if (!activeGamesPage || activeGamesPage.hidden) return;
   activeGamesStatus.textContent = t("activeGames.loading");
@@ -1435,28 +1486,61 @@ async function refreshActiveGames() {
     if (!response.ok) throw new Error("room-catalog-unavailable");
     const payload = await response.json();
     const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
+    const previouslyOpenId = activeGamesOpenRow?.id;
+    closeActiveRoomTooltip();
     activeGamesRows.replaceChildren();
     if (rooms.length === 0) {
       activeGamesStatus.textContent = t("activeGames.empty");
       return;
     }
     activeGamesStatus.textContent = "";
-    rooms.forEach((room, index) => {
+    rooms.forEach((room) => {
+      const view = buildActiveRoomView(room, t);
       const tr = document.createElement("tr");
-      const cell = (text) => { const td = document.createElement("td"); td.textContent = text; return td; };
-      tr.append(cell(`#${index + 1}`));
-      tr.append(cell(t(room.visibility === "public" ? "activeGames.public" : "activeGames.private")));
-      tr.append(cell(`${room.players}/2 · ${t("activeGames.spectators", { count: room.observers || 0 })}`));
-      tr.append(cell(`${room.settings.width}×${room.settings.height}`));
-      tr.append(cell(room.settings.unlimitedTime ? t("clock.unlimited") : `${room.settings.clockMinutes}+${room.settings.incrementSeconds}`));
-      tr.append(cell(String(room.maxPlayers)));
+      tr.className = "active-games-row";
+      tr.tabIndex = 0;
+      tr.dataset.roomId = view.id;
+      tr.setAttribute("aria-describedby", "active-room-tooltip");
+      const cell = (className, text) => {
+        const td = document.createElement("td");
+        if (className) td.className = className;
+        td.textContent = text;
+        return td;
+      };
+      const statusCell = cell("", view.status);
+      const statusBadge = document.createElement("span");
+      statusBadge.className = `active-games-status-badge is-${room.status === "waiting" ? "waiting" : "active"}`;
+      statusBadge.textContent = view.status;
+      statusCell.replaceChildren(statusBadge);
+      tr.append(statusCell);
+      tr.append(cell("active-games-room-id", view.roomId));
+      const playersText = view.observerCount === null ? view.players
+        : `${view.players} · ${t("activeGames.spectators", { count: view.observerCount })}`;
+      tr.append(cell("", playersText));
+      tr.append(cell("", view.modeBoard));
+      tr.append(cell("", view.time));
+      tr.append(cell("", view.visibility));
+      const detailsCell = document.createElement("td");
+      const settingsButton = document.createElement("button");
+      settingsButton.type = "button";
+      settingsButton.className = "active-games-settings-button";
+      settingsButton.dataset.roomSettings = "true";
+      settingsButton.textContent = t("activeGames.settings");
+      settingsButton.setAttribute("aria-label", t("activeGames.settingsFor", { room: view.roomId }));
+      settingsButton.setAttribute("aria-controls", "active-room-tooltip");
+      settingsButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (activeGamesOpenRow?.id === view.id && !activeRoomTooltip.hidden) closeActiveRoomTooltip();
+        else showActiveRoomTooltip(tr, view);
+      });
+      detailsCell.append(settingsButton);
+      tr.append(detailsCell);
       const actionCell = document.createElement("td");
       const actions = document.createElement("div"); actions.className = "active-games-actions";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "button button-secondary";
-      const action = room.visibility !== "public" ? "manage"
-        : room.status === "waiting" ? "join" : "observe";
+      const action = view.actionKey;
       button.textContent = t(`activeGames.${action}`);
       button.disabled = room.status === "waiting" && room.players === 0;
       button.addEventListener("click", () => action === "join"
@@ -1464,59 +1548,18 @@ async function refreshActiveGames() {
         : observeCatalogRoom(room));
       actions.append(button);
       actionCell.append(actions);
-      const details = document.createElement("details");
-      details.className = "active-games-settings";
-      const summary = document.createElement("summary"); summary.textContent = t("activeGames.settings");
-      const popover = document.createElement("div");
-      popover.className = "active-games-settings-popover";
-      popover.setAttribute("role", "note");
-      const content = document.createElement("p");
-      const disabled = (room.settings.disabledItems || []).map((type) => EVENT_ITEM_DEFINITIONS[type] ? t(EVENT_ITEM_DEFINITIONS[type].nameKey) : type).join(", ") || t("settings.itemsNoneDisabled");
-      content.textContent = [
-        `${room.settings.width}×${room.settings.height}`,
-        `${room.settings.piecesPerTurn} ${t("turn.pieces")}`,
-        room.settings.unlimitedTime ? t("clock.unlimited") : `${room.settings.clockMinutes}+${room.settings.incrementSeconds}`,
-        t(`settings.spawnMode.${room.settings.itemSpawnMode}`),
-        t(room.settings.randomEvents ? "settings.randomEnabled" : "settings.randomDisabled"),
-        `${t("settings.itemsTitle")}: ${disabled}`,
-        room.settings.unlimitedItemLifetime ? t("settings.itemsUnlimited") : `${t("settings.itemLifetime")}: ${room.settings.itemLifetimeTurns} ${t("settings.itemLifetimeTurns")}`,
-        t(room.settings.wormholesEnabled ? "settings.wormholesEnabled" : "settings.randomDisabled")
-      ].join(" · ");
-      popover.append(content);
-      details.append(summary, popover);
-      let closeTimer = null;
-      const cancelClose = () => window.clearTimeout(closeTimer);
-      const scheduleClose = () => {
-        window.clearTimeout(closeTimer);
-        closeTimer = window.setTimeout(() => {
-          if (!details.matches(":hover") && !details.contains(document.activeElement)) {
-            details.open = false;
-            if (activeGamesOpenSettings === details) activeGamesOpenSettings = null;
-          }
-        }, 180);
-      };
-      tr.addEventListener("pointerenter", () => {
-        cancelClose();
-        if (activeGamesOpenSettings && activeGamesOpenSettings !== details) activeGamesOpenSettings.open = false;
-        activeGamesOpenSettings = details;
-        details.open = true;
-        positionActiveGamesSettings(details, tr);
-      });
-      tr.addEventListener("pointerleave", scheduleClose);
-      details.addEventListener("pointerenter", cancelClose);
-      details.addEventListener("pointerleave", scheduleClose);
-      tr.addEventListener("focusin", () => {
-        cancelClose();
-        if (activeGamesOpenSettings && activeGamesOpenSettings !== details) activeGamesOpenSettings.open = false;
-        activeGamesOpenSettings = details;
-        details.open = true;
-        positionActiveGamesSettings(details, tr);
-      });
-      tr.addEventListener("focusout", scheduleClose);
-      details.addEventListener("toggle", () => positionActiveGamesSettings(details, tr));
-      actionCell.append(details);
       tr.append(actionCell);
+      tr.addEventListener("pointerenter", () => showActiveRoomTooltip(tr, view));
+      tr.addEventListener("focusin", () => showActiveRoomTooltip(tr, view));
+      tr.addEventListener("pointerleave", (event) => {
+        if (!activeRoomTooltip.contains(event.relatedTarget) && !tr.contains(event.relatedTarget)
+          && !activeRoomTooltip.matches(":hover") && !activeRoomTooltip.contains(document.activeElement)) closeActiveRoomTooltip();
+      });
+      tr.addEventListener("focusout", (event) => {
+        if (!tr.contains(event.relatedTarget)) closeActiveRoomTooltip();
+      });
       activeGamesRows.append(tr);
+      if (previouslyOpenId === view.id) showActiveRoomTooltip(tr, view);
     });
   } catch {
     activeGamesStatus.textContent = t("activeGames.failed");

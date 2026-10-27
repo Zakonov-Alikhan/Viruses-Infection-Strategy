@@ -311,7 +311,7 @@ export class RoomManager {
         settings: Object.fromEntries([
           "width", "height", "piecesPerTurn", "clockMinutes", "incrementSeconds", "unlimitedTime",
           "randomEvents", "itemSpawnMode", "wormholesEnabled", "freeStartingPositions", "disabledItems",
-          "unlimitedItemLifetime", "itemLifetimeTurns"
+          "unlimitedItemLifetime", "itemLifetimeTurns", "animationsEnabled"
         ].filter((key) => Object.hasOwn(room.state.settings, key)).map((key) => [
           key, key === "disabledItems" ? [...room.state.settings[key]] : room.state.settings[key]
         ]))

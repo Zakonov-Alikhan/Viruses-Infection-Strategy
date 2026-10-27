@@ -120,7 +120,11 @@ test("room catalog omits invite codes and spectators require a public room or ad
   assert.equal(listing[0].visibility, "private");
   assert.equal(listing[0].players, 1);
   assert.equal(listing[0].settings.width, 10);
+  assert.equal(typeof listing[0].settings.animationsEnabled, "boolean");
   assert.equal(JSON.stringify(listing).includes(created.roomCode), false);
+  for (const secretKey of ["roomCode", "token", "reconnectToken", "adminSecret"]) {
+    assert.equal(JSON.stringify(listing).includes(secretKey), false);
+  }
   assert.equal(manager.attachObserver(listing[0].id, { send() {} }).error.code, "private-room");
 
   assert.equal(manager.setRoomVisibility(created.roomCode, true), true);
