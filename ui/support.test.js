@@ -23,5 +23,13 @@ test("support section has no hard-coded payment details and keeps a pending stat
   const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
   assert.match(html, /id="support-pending"/);
   assert.match(html, /id="support-copy-card"[^>]*hidden/);
+  assert.match(html, /id="support-open-button"[^>]*aria-controls="support-modal"/);
+  assert.match(html, /<dialog id="support-modal"/);
+  assert.match(html, /rel="icon" type="image\/svg\+xml" href="\/ui\/favicon\.svg/);
+  const css = await readFile(new URL("./style.css", import.meta.url), "utf8");
+  assert.match(css, /active-games-link:visited/);
   assert.doesNotMatch(html, /\b(?:\d[ -]*?){13,19}\b/);
+  const favicon = await readFile(new URL("./favicon.svg", import.meta.url), "utf8");
+  assert.match(favicon, /#c6f36b/i);
+  assert.match(favicon, /viewBox="0 0 64 64"/);
 });

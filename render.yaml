@@ -14,7 +14,7 @@ services:
       - key: VIRUSES_API_URL
         sync: false
       - key: SUPPORT_CARD_NUMBER
-        value: ""
+        value: "4002890022900199"
 
   - type: web
     name: viruses-multiplayer

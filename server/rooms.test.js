@@ -107,6 +107,8 @@ test("creates private rooms without exposing a final side until the second playe
   assert.equal(joined.side, "O");
   assert.equal("adminMode" in created.state.settings, false);
   assert.equal("adminMode" in joined.state.settings, false);
+  assert.deepEqual(created.state.settings.disabledItems, ["freePlacement"]);
+  assert.deepEqual(joined.state.settings.disabledItems, ["freePlacement"]);
   assert.equal(manager.roomCount, 1);
 });
 
@@ -317,7 +319,7 @@ test("randomly assigns X and O after the second player joins and retains token o
     manager.detachConnection(created.roomCode, expectedCreator, creatorConnection.connection);
     const resumed = manager.resumeRoom(created.roomCode, created.playerToken, () => {});
     assert.equal(resumed.side, expectedCreator);
-    assert.equal(resumed.state.settings.disabledItems.length, 0);
+    assert.deepEqual(resumed.state.settings.disabledItems, ["freePlacement"]);
   }
 });
 

@@ -9,7 +9,8 @@
   <meta property="og:description" content="Стратегическая игра для двух игроков." data-i18n-content="brand.tagline">
   <meta property="og:type" content="website">
   <title>Cascade Wars — стратегия для двух игроков</title>
-  <link rel="stylesheet" href="/ui/style.css?v=cascade-package1">
+  <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg?v=cascade-brand1">
+  <link rel="stylesheet" href="/ui/style.css?v=cascade-package2">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -21,6 +22,7 @@
         <span class="brand-wordmark"><span class="brand-cascade">CASCADE</span><span class="brand-wars">WARS</span></span>
       </a>
       <div class="menu-account-area">
+        <button class="support-header-button" id="support-open-button" type="button" aria-haspopup="dialog" aria-controls="support-modal"><span class="support-header-icon" aria-hidden="true">♡</span><span data-i18n="support.open">Поддержать проект</span></button>
         <label class="language-picker"><span class="visually-hidden" data-i18n="language">Язык</span><select id="language-select" aria-label="Язык" data-i18n-aria-label="language"><option value="ru">RU</option><option value="en">EN</option></select></label>
         <button class="account-chip is-guest" id="account-action" type="button" aria-haspopup="dialog" aria-controls="account-modal">
           <span class="account-avatar" aria-hidden="true">◉</span>
@@ -77,21 +79,6 @@
         </section>
       </div>
     </main>
-    <section class="support-card" aria-labelledby="support-title">
-      <div class="support-icon" aria-hidden="true">♡</div>
-      <div class="support-copy">
-        <h2 id="support-title" data-i18n="support.title">Поддержать Cascade Wars</h2>
-        <p data-i18n="support.description">Нравится Cascade Wars? Поддержите разработку проекта. Любая поддержка помогает развивать игру.</p>
-        <p class="support-voluntary" data-i18n="support.voluntary">Поддержка добровольная и не даёт игровых преимуществ.</p>
-      </div>
-      <div class="support-details" id="support-payment">
-        <span class="support-bank" id="support-bank" hidden>Freedom Bank</span>
-        <span class="support-card-number" id="support-card-number" dir="ltr" hidden></span>
-        <span class="support-pending" id="support-pending" data-i18n="support.pending">Реквизиты для поддержки будут добавлены позже</span>
-        <button class="button button-secondary support-copy-button" id="support-copy-card" type="button" hidden data-i18n="support.copy">Скопировать номер карты</button>
-        <span class="support-copy-status" id="support-copy-status" role="status" aria-live="polite" hidden></span>
-      </div>
-    </section>
     <footer class="menu-footer">
       <div class="footer-info">
         <section class="footer-group footer-contacts">
@@ -103,6 +90,29 @@
       <span class="menu-footer-mark" aria-hidden="true">CW / 01</span>
     </footer>
   </div>
+
+  <dialog id="support-modal" class="settings-modal support-modal" aria-labelledby="support-title">
+    <section class="settings-card support-card">
+      <header class="settings-header">
+        <div><p class="eyebrow" data-i18n="brand.name">Cascade Wars</p><h2 id="support-title" data-i18n="support.title">Поддержать Cascade Wars</h2></div>
+        <button id="support-modal-close" class="icon-button" type="button" aria-label="Закрыть" data-i18n-aria-label="support.close">×</button>
+      </header>
+      <div class="support-modal-content">
+        <div class="support-icon" aria-hidden="true">♡</div>
+        <div class="support-copy">
+          <p data-i18n="support.description">Нравится Cascade Wars? Поддержите разработку проекта. Любая поддержка помогает развивать игру.</p>
+          <p class="support-voluntary" data-i18n="support.voluntary">Поддержка добровольная и не даёт игровых преимуществ.</p>
+        </div>
+      </div>
+      <div class="support-details" id="support-payment">
+        <span class="support-bank" id="support-bank" hidden>Freedom Bank</span>
+        <span class="support-card-number" id="support-card-number" dir="ltr" hidden></span>
+        <span class="support-pending" id="support-pending" data-i18n="support.pending">Реквизиты для поддержки будут добавлены позже</span>
+        <button class="button button-primary support-copy-button" id="support-copy-card" type="button" hidden data-i18n="support.copy">Скопировать номер карты</button>
+        <span class="support-copy-status" id="support-copy-status" role="status" aria-live="polite" hidden></span>
+      </div>
+    </section>
+  </dialog>
 
   <dialog id="account-modal" class="settings-modal account-modal" aria-labelledby="account-modal-title">
     <section class="settings-card">
@@ -602,6 +612,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=cascade-package1"></script>
+  <script type="module" src="/ui/script.js?v=cascade-package2"></script>
 </body>
 </html>

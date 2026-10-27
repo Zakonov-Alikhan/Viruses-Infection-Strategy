@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   animationsEnabled: true,
   freeStartingPositions: true,
   adminMode: false,
-  disabledItems: Object.freeze([])
+  disabledItems: Object.freeze(["freePlacement"])
 });
 export const PLAYER_ROLES = Object.freeze({ PLAYER: "player", ADMIN: "admin" });
 export const PLAYER_PERMISSIONS = Object.freeze({ USE_OWN_ITEMS: "items:use-owned", USE_ANY_ITEM: "items:use-any" });

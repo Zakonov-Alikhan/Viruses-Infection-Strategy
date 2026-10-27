@@ -35,6 +35,7 @@ function makePlayingState(overrides = {}) {
     piecesPerTurn: 1,
     randomEvents: false,
     freeStartingPositions: false,
+    disabledItems: [],
     ...overrides
   }, () => 0);
 }
@@ -1007,6 +1008,7 @@ test("new games default to a 20×20 board and 3+10 clocks", () => {
   assert.equal(state.settings.height, 20);
   assert.equal(state.settings.clockMinutes, 3);
   assert.equal(state.settings.incrementSeconds, 10);
+  assert.deepEqual(state.settings.disabledItems, ["freePlacement"]);
 });
 
 test("field item lifetime is unlimited by default and decreases once per completed player turn", () => {

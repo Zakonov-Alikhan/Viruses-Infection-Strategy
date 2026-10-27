@@ -152,6 +152,8 @@ export default Object.freeze({ ...{
   "contact.supportTitle": "Поддержать проект",
   "contact.supportPending": "Реквизиты для денежной поддержки добавлю позже.",
   "brand.ogTitle": "Cascade Wars",
+  "support.open": "Поддержать проект",
+  "support.close": "Закрыть окно поддержки",
   "support.title": "Поддержать Cascade Wars",
   "support.description": "Нравится Cascade Wars? Поддержите разработку проекта. Любая поддержка помогает развивать игру.",
   "support.voluntary": "Поддержка добровольная и не даёт игровых преимуществ.",

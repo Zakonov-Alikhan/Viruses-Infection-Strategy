@@ -28,6 +28,7 @@ function makeState(overrides = {}) {
     piecesPerTurn: 3,
     randomEvents: false,
     freeStartingPositions: false,
+    disabledItems: [],
     ...overrides.settings
   };
   const initial = createGameState(settings, () => 0.75);

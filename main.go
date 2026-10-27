@@ -16,6 +16,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid account API proxy configuration: %v", err)
 	}
+	handler := newHTTPHandler(apiProxy)
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "3000"
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		log.Fatalf("Invalid PORT %q: expected a number from 1 to 65535", port)
+	}
+	address := net.JoinHostPort("0.0.0.0", port)
+	log.Printf("Web server listening on %s", address)
+	if err := http.ListenAndServe(address, logAPIRequests(handler)); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func newHTTPHandler(apiProxy http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	// Account API calls stay same-origin in the browser; only this fixed route
 	// is forwarded to the configured Node service.
@@ -30,20 +47,7 @@ func main() {
 		http.ServeFile(w, r, "ui/style.css") // Относительный путь
 	})
 	mux.HandleFunc("/runtime-config.js", serveRuntimeConfig)
-
-	port := strings.TrimSpace(os.Getenv("PORT"))
-	if port == "" {
-		port = "3000"
-	}
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
-		log.Fatalf("Invalid PORT %q: expected a number from 1 to 65535", port)
-	}
-	address := net.JoinHostPort("0.0.0.0", port)
-	log.Printf("Web server listening on %s", address)
-	if err := http.ListenAndServe(address, logAPIRequests(mux)); err != nil {
-		log.Fatal(err)
-	}
+	return mux
 }
 
 func serveRuntimeConfig(w http.ResponseWriter, r *http.Request) {

@@ -32,7 +32,7 @@ If GitHub access is not connected to Render, connect the repository from Render 
   - Render supplies `PORT`. The app listens on `0.0.0.0:$PORT`.
 
 `/runtime-config.js` exposes only the configured WebSocket URL to the browser and is sent with `Cache-Control: no-store`. Do not put credentials or tokens in this URL.
-`SUPPORT_CARD_NUMBER` is an optional public card number configured on the Go website service. Leave it unset until the owner supplies a real number; when set, runtime config publishes only its digit-only value (13–19 digits) for the support card. It is not a credential and is never used for payment processing.
+`SUPPORT_CARD_NUMBER` is an optional public card number configured in the Go website service's private Render Environment settings. When set, runtime config publishes only its digit-only value (13–19 digits) for the support card. Do not commit the value to `render.yaml` or source code. It is not a credential and is never used for payment processing.
 Account requests use relative `/api/...` paths on the Go site's origin. The Go server proxies those requests to `VIRUSES_API_URL`, so the browser never contacts the Node service's separate origin for accounts. The proxy target is fixed from server environment and cannot be supplied by a browser request.
 
 ## Node.js multiplayer service

@@ -73,6 +73,9 @@ const supportCardNumberElement = document.querySelector("#support-card-number");
 const supportPending = document.querySelector("#support-pending");
 const supportCopyButton = document.querySelector("#support-copy-card");
 const supportCopyStatus = document.querySelector("#support-copy-status");
+const supportModal = document.querySelector("#support-modal");
+const supportOpenButton = document.querySelector("#support-open-button");
+const supportModalCloseButton = document.querySelector("#support-modal-close");
 const supportCardNumber = isPublicSupportCardNumber(globalThis.VIRUSES_SUPPORT_CARD_NUMBER)
   ? globalThis.VIRUSES_SUPPORT_CARD_NUMBER
   : "";
@@ -87,7 +90,6 @@ const activeGamesPage = document.querySelector("#active-games-page");
 const activeGamesRows = document.querySelector("#active-games-rows");
 const activeGamesStatus = document.querySelector("#active-games-status");
 const activeGamesRefresh = document.querySelector("#active-games-refresh");
-const activeGamesLink = document.querySelector("#active-games-link");
 const onlineRoomCloseButton = document.querySelector("#online-room-close");
 const onlineCreateRoomButton = document.querySelector("#online-create-room");
 const onlineBoardWidthInput = document.querySelector("#online-board-width");
@@ -1412,6 +1414,19 @@ function isCurrentOnlineEvent(event) {
 }
 
 let activeGamesRefreshTimer = null;
+let activeGamesOpenSettings = null;
+function positionActiveGamesSettings(details, row) {
+  const popover = details.querySelector(".active-games-settings-popover");
+  if (!popover || !details.open) return;
+  const rowRect = row.getBoundingClientRect();
+  const popoverRect = popover.getBoundingClientRect();
+  const width = Math.min(360, window.innerWidth - 32);
+  const left = Math.min(Math.max(16, rowRect.right - width), window.innerWidth - width - 16);
+  let top = rowRect.bottom + 8;
+  if (top + popoverRect.height > window.innerHeight - 12) top = Math.max(12, rowRect.top - popoverRect.height - 8);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+}
 async function refreshActiveGames() {
   if (!activeGamesPage || activeGamesPage.hidden) return;
   activeGamesStatus.textContent = t("activeGames.loading");
@@ -1452,6 +1467,9 @@ async function refreshActiveGames() {
       const details = document.createElement("details");
       details.className = "active-games-settings";
       const summary = document.createElement("summary"); summary.textContent = t("activeGames.settings");
+      const popover = document.createElement("div");
+      popover.className = "active-games-settings-popover";
+      popover.setAttribute("role", "note");
       const content = document.createElement("p");
       const disabled = (room.settings.disabledItems || []).map((type) => EVENT_ITEM_DEFINITIONS[type] ? t(EVENT_ITEM_DEFINITIONS[type].nameKey) : type).join(", ") || t("settings.itemsNoneDisabled");
       content.textContent = [
@@ -1464,7 +1482,38 @@ async function refreshActiveGames() {
         room.settings.unlimitedItemLifetime ? t("settings.itemsUnlimited") : `${t("settings.itemLifetime")}: ${room.settings.itemLifetimeTurns} ${t("settings.itemLifetimeTurns")}`,
         t(room.settings.wormholesEnabled ? "settings.wormholesEnabled" : "settings.randomDisabled")
       ].join(" · ");
-      details.append(summary, content);
+      popover.append(content);
+      details.append(summary, popover);
+      let closeTimer = null;
+      const cancelClose = () => window.clearTimeout(closeTimer);
+      const scheduleClose = () => {
+        window.clearTimeout(closeTimer);
+        closeTimer = window.setTimeout(() => {
+          if (!details.matches(":hover") && !details.contains(document.activeElement)) {
+            details.open = false;
+            if (activeGamesOpenSettings === details) activeGamesOpenSettings = null;
+          }
+        }, 180);
+      };
+      tr.addEventListener("pointerenter", () => {
+        cancelClose();
+        if (activeGamesOpenSettings && activeGamesOpenSettings !== details) activeGamesOpenSettings.open = false;
+        activeGamesOpenSettings = details;
+        details.open = true;
+        positionActiveGamesSettings(details, tr);
+      });
+      tr.addEventListener("pointerleave", scheduleClose);
+      details.addEventListener("pointerenter", cancelClose);
+      details.addEventListener("pointerleave", scheduleClose);
+      tr.addEventListener("focusin", () => {
+        cancelClose();
+        if (activeGamesOpenSettings && activeGamesOpenSettings !== details) activeGamesOpenSettings.open = false;
+        activeGamesOpenSettings = details;
+        details.open = true;
+        positionActiveGamesSettings(details, tr);
+      });
+      tr.addEventListener("focusout", scheduleClose);
+      details.addEventListener("toggle", () => positionActiveGamesSettings(details, tr));
       actionCell.append(details);
       tr.append(actionCell);
       activeGamesRows.append(tr);
@@ -1476,11 +1525,9 @@ async function refreshActiveGames() {
 
 function showActiveGamesPage(show) {
   const menuContent = mainMenuScreen.querySelector(".menu-content");
-  const support = mainMenuScreen.querySelector(".support-card");
   const footer = mainMenuScreen.querySelector(".menu-footer");
   activeGamesPage.hidden = !show;
   menuContent.hidden = show;
-  support.hidden = show;
   footer.hidden = show;
   if (show) {
     if (activeGamesRefreshTimer !== null) window.clearInterval(activeGamesRefreshTimer);
@@ -3362,13 +3409,7 @@ unlimitedItemLifetimeToggle.addEventListener("change", () => {
 settingsButton.addEventListener("click", openSettings);
 localGameButton.addEventListener("click", openLocalGame);
 onlineGameButton.addEventListener("click", () => openOnlineRoom());
-activeGamesLink.addEventListener("click", (event) => {
-  event.preventDefault();
-  history.pushState({}, "", "/games");
-  showActiveGamesPage(true);
-});
 activeGamesRefresh.addEventListener("click", () => void refreshActiveGames());
-window.addEventListener("popstate", () => showActiveGamesPage(window.location.pathname === "/games"));
 onlineRoomCloseButton.addEventListener("click", () => onlineRoomModal.close());
 onlineCreateRoomButton.addEventListener("click", async () => {
   const roomSettings = collectOnlineRoomSettings();
@@ -3888,6 +3929,11 @@ demoBoard?.addEventListener("pointercancel", () => { demoSwipeStartX = null; });
 
 languageSelect.value = getLanguage();
 applyTranslations();
+supportOpenButton.addEventListener("click", () => supportModal.showModal());
+supportModalCloseButton.addEventListener("click", () => supportModal.close());
+supportModal.addEventListener("click", (event) => {
+  if (event.target === supportModal) supportModal.close();
+});
 supportBank.hidden = !supportCardNumber;
 supportCardNumberElement.hidden = !supportCardNumber;
 supportCardNumberElement.textContent = supportCardNumber.replace(/\B(?=(\d{4})+(?!\d))/g, " ");
