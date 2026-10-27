@@ -579,6 +579,57 @@ test("standard item spawning makes exactly one 30% check per completed turn", ()
   assert.equal(failed.eventItems.length, 0);
 });
 
+test("teleport is excluded from initial and first three rounds of every random spawn mode", () => {
+  const teleportOnly = EVENT_ITEMS.filter((type) => type !== "freePlacement");
+  const initial = createGameState({
+    ...DEFAULT_SETTINGS,
+    width: 10,
+    height: 10,
+    randomEvents: true,
+    freeStartingPositions: false,
+    disabledItems: teleportOnly
+  }, () => 0);
+  assert.equal(initial.roundNumber, 1);
+  assert.equal(initial.eventItems.some(({ type }) => type === "freePlacement"), false);
+
+  for (const itemSpawnMode of ["standard", "cascade", "adaptive", "hybrid"]) {
+    const state = {
+      ...roundBoundaryState({ itemSpawnMode, disabledItems: teleportOnly, wormholesEnabled: false }),
+      roundNumber: 3,
+      currentPlayer: "X",
+      piecesLeft: 1
+    };
+    const xTurn = playMove(state, 0, 1, () => 0);
+    assert.equal(xTurn.roundNumber, 3, `${itemSpawnMode}: X ending a turn must not finish the round`);
+    assert.equal(xTurn.eventItems.some(({ type }) => type === "freePlacement"), false, `${itemSpawnMode}: X must not spawn teleport during round 3`);
+
+    const values = itemSpawnMode === "cascade" ? [0, 0, 0, 1] : [0, 0, 0];
+    let calls = 0;
+    const completedThirdRound = playMove(xTurn, 9, 8, () => values[calls++] ?? 1);
+    assert.equal(completedThirdRound.roundNumber, 4, `${itemSpawnMode}: the round increments after O completes`);
+    assert.equal(completedThirdRound.eventItems.filter(({ type }) => type === "freePlacement").length, 1,
+      `${itemSpawnMode}: teleport returns to the normal spawn pool after both players finish three turns`);
+  }
+});
+
+test("random artifact cannot award teleport before both players complete three rounds", () => {
+  const allowed = new Set(["bomb", "freePlacement", "randomArtifact"]);
+  const state = {
+    ...roundBoundaryState({ disabledItems: EVENT_ITEMS.filter((type) => !allowed.has(type)) }),
+    roundNumber: 3,
+    currentPlayer: "X",
+    piecesLeft: 1,
+    eventItems: [{ id: 501, type: "randomArtifact", row: 0, col: 1 }]
+  };
+  const values = [0.75, 0.99];
+  let calls = 0;
+  const next = playMove(state, 0, 1, () => values[calls++] ?? 1);
+
+  assert.deepEqual(next.inventory.X.map(({ type }) => type), ["bomb"]);
+  assert.equal(next.inventory.X.some(({ type }) => type === "freePlacement"), false);
+  assert.equal(state.inventory.X.length, 0);
+});
+
 test("adaptive and hybrid item targets and probabilities clamp on small, typical and large maps", () => {
   assert.equal(getItemSpawnTarget({ width: 10, height: 10 }, "adaptive"), 4);
   assert.equal(getItemSpawnTarget({ width: 30, height: 30 }, "adaptive"), 8);

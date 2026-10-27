@@ -35,6 +35,7 @@ export const EVENT_ITEMS = Object.freeze([
 ]);
 export const ITEM_SPAWN_MODES = Object.freeze(["standard", "cascade", "adaptive", "hybrid"]);
 const RANDOM_ARTIFACT = "randomArtifact";
+const TELEPORT_PROTECTION_ROUNDS = 3;
 const EVENT_SPAWN_CHANCE = 0.3;
 const MAX_INVENTORY_ITEMS = 3;
 
@@ -211,7 +212,12 @@ function appendMessage(current, addition) {
 }
 
 function randomArtifactCandidates(state) {
-  return EVENT_ITEMS.filter((type) => type !== RANDOM_ARTIFACT && isItemEnabled(state, type));
+  return EVENT_ITEMS.filter((type) => type !== RANDOM_ARTIFACT && isItemEnabled(state, type)
+    && (type !== "freePlacement" || isTeleportSpawnAllowed(state)));
+}
+
+function isTeleportSpawnAllowed(state) {
+  return Number.isInteger(state.roundNumber) && state.roundNumber > TELEPORT_PROTECTION_ROUNDS;
 }
 
 function availableEventItemCells(state) {
@@ -230,7 +236,8 @@ function availableEventItemCells(state) {
 function spawnOneEventItem(state, random) {
   const hasRandomArtifactResult = randomArtifactCandidates(state).length > 0;
   const enabledItems = EVENT_ITEMS.filter((type) => isItemEnabled(state, type)
-    && (type !== RANDOM_ARTIFACT || hasRandomArtifactResult));
+    && (type !== RANDOM_ARTIFACT || hasRandomArtifactResult)
+    && (type !== "freePlacement" || isTeleportSpawnAllowed(state)));
   if (enabledItems.length === 0) return state;
 
   const available = availableEventItemCells(state);

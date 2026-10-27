@@ -79,6 +79,33 @@ test("server resolves a random artifact once and publishes the same valid reward
   assert.deepEqual(accepted.state.inventory.X, [{ id: 701, type: "bomb", row: 0, col: 8 }]);
 });
 
+test("authoritative multiplayer spawning unlocks teleport only after the third complete round", () => {
+  const settings = {
+    randomEvents: true,
+    itemSpawnMode: "standard",
+    wormholesEnabled: false,
+    disabledItems: EVENT_ITEMS.filter((type) => type !== "freePlacement")
+  };
+  const state = {
+    ...playingState(settings),
+    roundNumber: 3,
+    currentPlayer: "X",
+    piecesLeft: 1,
+    eventItems: []
+  };
+
+  const xTurn = processGameCommand(state, "X", { type: "place", row: 0, col: 8 }, { random: () => 0 });
+  assert.equal(xTurn.ok, true);
+  assert.equal(xTurn.state.roundNumber, 3);
+  assert.deepEqual(xTurn.state.eventItems, []);
+
+  const thirdRoundCompleted = processGameCommand(xTurn.state, "O", { type: "place", row: 9, col: 1 }, { random: () => 0 });
+  assert.equal(thirdRoundCompleted.ok, true);
+  assert.equal(thirdRoundCompleted.state.roundNumber, 4);
+  assert.deepEqual(thirdRoundCompleted.state.eventItems.map(({ type }) => type), ["freePlacement"]);
+  assert.deepEqual(state.eventItems, []);
+});
+
 test("server does not allow a player or admin tool to activate the collectible random artifact directly", () => {
   const state = playingState({ adminMode: true });
   const result = processGameCommand(state, "X", {

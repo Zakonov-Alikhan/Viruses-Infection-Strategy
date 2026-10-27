@@ -28,8 +28,8 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=cascade-package1";
-import { chooseComputerAction, applyComputerAction } from "./ai.js?v=random-artifact1";
+} from "./game.js?v=teleport-protection1";
+import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
 import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games4";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
