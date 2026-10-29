@@ -40,7 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
-import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio4";
+import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio5";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
@@ -1885,7 +1885,7 @@ function showOnlineRoom(message) {
   if (!onlineRoomModal.open) onlineRoomModal.showModal();
 }
 
-function enterOnlineGame(message) {
+function enterOnlineGame(message, { freshMatch = false } = {}) {
   const isNewOnlineSession = !onlineMode;
   if (Array.isArray(message.history)) moveHistory = message.history;
   else if (isNewOnlineSession) moveHistory = [];
@@ -1931,6 +1931,10 @@ function enterOnlineGame(message) {
     activeAreaEffect = null;
     remoteAim = null;
     clockRemaining = { X: 0, O: 0 };
+    if (freshMatch && !onlineObserverMode && state.phase === "playing") {
+      audioManager.play("game-start");
+      if (state.eventItems?.length) audioManager.play("item-spawn");
+    }
     render();
     startClock();
     if (state.phase === "finished") showResult();
@@ -2000,7 +2004,7 @@ function handleMultiplayerEvent(event) {
     return;
   }
   if (event.type === "room-ready") {
-    enterOnlineGame(event.room || event);
+    enterOnlineGame(event.room || event, { freshMatch: true });
     return;
   }
   if (event.type === "room-resumed" || event.type === "reconnected") {
@@ -2483,6 +2487,10 @@ function setupGame() {
   if (undoProposalModal.open) undoProposalModal.close();
   activeAreaEffect = null;
   state = createGameState(settings);
+  if (!trainingSession && state.phase === "playing") {
+    audioManager.play("game-start");
+    if (state.eventItems?.length) audioManager.play("item-spawn");
+  }
   const initialHistoryEntry = createHistoryEntry(null, state, ++localHistoryId);
   if (initialHistoryEntry) moveHistory = appendHistoryEntry(moveHistory, initialHistoryEntry);
   clockRemaining = {
@@ -2580,7 +2588,7 @@ function updateState(nextState, {
   if (onlineMode !== serverUpdate) return;
   if (historyViewId !== null && !serverUpdate) return;
   const previousState = state;
-  if (!undoRestore && previousState?.phase === "playing") {
+  if (!undoRestore) {
     for (const sound of getConfirmedAudioEvents(previousState, nextState)) audioManager.play(sound);
   }
   const nextItemIds = new Set(nextState.eventItems.map((item) => item.id));

@@ -41,6 +41,80 @@ test("confirmed state changes map placements, destruction, and item spawns to on
   assert.deepEqual(getConfirmedAudioEvents(next, structuredClone(next)), []);
 });
 
+test("every requested SFX resolves to an audio file already present in the project", async () => {
+  const required = [
+    "bomb-detonate", "shot-fire", "dirty-bomb", "teleport", "extra-turn", "shield-place",
+    "shield-break", "gangsta-shield", "wormhole", "exchange", "game-start"
+  ];
+  for (const name of required) {
+    assert.ok(SOUND_EFFECTS[name], `missing audio mapping for ${name}`);
+    const file = new URL(`./audio/${SOUND_EFFECTS[name]}`, import.meta.url);
+    assert.ok((await readFile(file)).length > 0, `missing or empty audio file for ${name}`);
+  }
+});
+
+test("confirmed ability transitions play action cues only after the effect changes state", () => {
+  const playing = { phase: "playing", currentPlayer: "X", board: [["X", "O"], ["", ""]], eventItems: [], protections: [], inventory: { X: [], O: [] } };
+  const event = (key, fields = {}) => ({ ...playing, ...fields, message: [{ key }] });
+  assert.deepEqual(getConfirmedAudioEvents(playing, event("message.bomb")), ["bomb-detonate"]);
+  assert.deepEqual(getConfirmedAudioEvents(playing, event("message.antiBomb", { board: [["X", "#"], ["#", "#"]] })), ["piece-destroy", "dirty-bomb"]);
+  assert.deepEqual(getConfirmedAudioEvents(playing, event("message.pointDestroy", { board: [["X", ""], ["", ""]] })), ["piece-destroy", "shot-fire"]);
+  assert.deepEqual(getConfirmedAudioEvents(playing, event("message.debris", { board: [["X", "O"], ["#", "#"]] })), ["dirty-bomb"]);
+  assert.deepEqual(getConfirmedAudioEvents(playing, event("message.exchange", { inventory: { X: [], O: [] } })), ["exchange"]);
+
+  const selectedTeleport = { ...playing, selectedAbility: 8, inventory: { X: [{ id: 8, type: "freePlacement" }], O: [] } };
+  assert.deepEqual(getConfirmedAudioEvents(playing, selectedTeleport), []);
+  assert.deepEqual(getConfirmedAudioEvents(selectedTeleport, event("message.freePlacementUsed", {
+    board: [["X", "O"], ["", "X"]], selectedAbility: null
+  })), ["piece-place", "teleport"]);
+});
+
+test("an extra-turn bonus is silent when queued and sounds when the turn actually starts", () => {
+  const before = {
+    phase: "playing", currentPlayer: "X", piecesLeft: 1, board: [["X"]], eventItems: [], protections: [],
+    inventory: { X: [], O: [] }, pendingExtraTurns: { X: [], O: [] }, message: []
+  };
+  const queued = { ...before, inventory: { X: [{ id: 1, type: "extraTurn" }], O: [] }, pendingExtraTurns: { X: [1], O: [] }, message: [{ key: "message.collected" }] };
+  assert.deepEqual(getConfirmedAudioEvents(before, queued), []);
+  const started = { ...queued, piecesLeft: 3, message: [{ key: "message.extraTurn" }] };
+  assert.deepEqual(getConfirmedAudioEvents(queued, started), ["extra-turn"]);
+});
+
+test("shield cues reflect protection installation and removal, including the permanent variant", () => {
+  const before = { phase: "playing", board: [["X"]], eventItems: [], protections: [], inventory: { X: [], O: [] } };
+  const shield = { row: 0, col: 0, owner: "X", permanent: false };
+  const gangster = { ...shield, permanent: true };
+  assert.deepEqual(getConfirmedAudioEvents(before, { ...before, protections: [shield] }), ["shield-place"]);
+  assert.deepEqual(getConfirmedAudioEvents(before, { ...before, protections: [gangster] }), ["gangsta-shield"]);
+  assert.deepEqual(getConfirmedAudioEvents({ ...before, protections: [shield] }, before), ["shield-break"]);
+});
+
+test("wormhole cue requires a successful remote-chain placement through an active pair", () => {
+  const previous = {
+    phase: "playing", currentPlayer: "X", piecesLeft: 2, eventItems: [], protections: [], inventory: { X: [], O: [] },
+    board: Array.from({ length: 5 }, () => Array(7).fill("")),
+    wormholePair: { endpoints: { orange: { row: 1, col: 1 }, blue: { row: 3, col: 5 } } }
+  };
+  previous.board[1][0] = "X";
+  previous.board[1][3] = "X";
+  const nextBoard = previous.board.map((row) => row.slice());
+  nextBoard[3][4] = "X";
+  assert.deepEqual(getConfirmedAudioEvents(previous, { ...previous, board: nextBoard }), ["piece-place", "wormhole"]);
+
+  const cancelledOrRejected = { ...previous, selectedAbility: 3, inventory: { X: [{ id: 3, type: "freePlacement" }], O: [] } };
+  assert.deepEqual(getConfirmedAudioEvents(cancelledOrRejected, { ...cancelledOrRejected }), []);
+  const ordinaryBoard = previous.board.map((row) => row.slice());
+  ordinaryBoard[1][4] = "X";
+  assert.deepEqual(getConfirmedAudioEvents(previous, { ...previous, board: ordinaryBoard }), ["piece-place"]);
+});
+
+test("match start cue fires only on transition into play, and duplicate snapshots stay silent", () => {
+  const setup = { phase: "setup-o", board: [["", ""]], eventItems: [], protections: [] };
+  const playing = { ...setup, phase: "playing" };
+  assert.deepEqual(getConfirmedAudioEvents(setup, playing), ["game-start"]);
+  assert.deepEqual(getConfirmedAudioEvents(playing, structuredClone(playing)), []);
+});
+
 test("global settings entry points and both persistent audio controls exist across site screens", async () => {
   const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
   assert.equal((html.match(/data-open-general-settings/g) || []).length, 3);
@@ -59,19 +133,24 @@ test("global settings entry points and both persistent audio controls exist acro
   assert.match(english, /"admin\.addWormholes": "Wormhole"/);
 });
 
-test("audio effects reuse prepared players and do not overlap the same effect", () => {
+test("audio effects reuse prepared players, overlap with independent voices, and respect mute and volume", () => {
   FakeAudio.instances = [];
   const manager = createAudioManager({ AudioCtor: FakeAudio, storage: new MemoryStorage() });
   assert.equal(FakeAudio.instances.length, Object.keys(SOUND_EFFECTS).length + 1);
   assert.equal(manager.play("piece-place"), true);
-  assert.equal(manager.play("piece-place"), false);
+  assert.equal(manager.play("piece-place"), true);
+  assert.equal(manager.play("piece-destroy"), true);
   const placeAudio = FakeAudio.instances.find((audio) => audio.src.endsWith("piece-place.mp3"));
   assert.equal(placeAudio.playCount, 1);
+  const concurrentPlaceAudio = FakeAudio.instances.filter((audio) => audio.src.endsWith("piece-place.mp3"))[1];
+  assert.equal(concurrentPlaceAudio.playCount, 1);
   assert.ok(placeAudio.volume < 0.35);
   manager.setVolume(0.2);
   assert.equal(placeAudio.volume, 0.2 * 0.48);
+  assert.equal(concurrentPlaceAudio.volume, 0.2 * 0.48);
   manager.setEnabled(false);
   assert.equal(placeAudio.paused, true);
+  assert.equal(concurrentPlaceAudio.paused, true);
 });
 
 test("effect mute and volume preferences persist and are respected", () => {

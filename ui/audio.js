@@ -4,7 +4,18 @@ export const SOUND_EFFECTS = Object.freeze({
   "item-spawn": "item-spawn.mp3",
   "timer-warning": "timer-warning.mp3",
   "game-win": "game-win.mp3",
-  "game-loss": "game-loss.mp3"
+  "game-loss": "game-loss.mp3",
+  "bomb-detonate": "bomb-detonate.mp3",
+  "shot-fire": "shot-fire.mp3",
+  "dirty-bomb": "dirty-bomb.mp3",
+  teleport: "teleport.mp3",
+  "extra-turn": "extra-turn.mp3",
+  "shield-place": "shield-place.mp3",
+  "shield-break": "shield-break.mp3",
+  "gangsta-shield": "gangsta-shield.mp3",
+  wormhole: "wormhole.mp3",
+  exchange: "exchange.mp3",
+  "game-start": "game-start.mp3"
 });
 
 export const BACKGROUND_TRACKS = Object.freeze([
@@ -13,23 +24,98 @@ export const BACKGROUND_TRACKS = Object.freeze([
 
 /** Derive one sound cue per confirmed state transition, not per render. */
 export function getConfirmedAudioEvents(previousState, nextState) {
-  if (previousState?.phase !== "playing" || !nextState?.board || !previousState.board) return [];
-  const events = [];
+  if (!previousState || !nextState?.board || !previousState.board) return [];
+  const events = new Set();
+  const previousMessageCounts = countMessageKeys(previousState.message);
+  const nextMessageCounts = countMessageKeys(nextState.message);
+  const hasNewMessage = (key) => (nextMessageCounts.get(key) || 0) > (previousMessageCounts.get(key) || 0);
+  const wasPlaying = previousState.phase === "playing";
+
+  if (previousState.phase !== "playing" && nextState.phase === "playing") events.add("game-start");
+
   let placedPiece = false;
   let destroyedPiece = false;
+  let debrisAppeared = false;
+  let portalMove = false;
+  const currentPlayer = previousState.currentPlayer;
+  const selectedItem = previousState.inventory?.[currentPlayer]
+    ?.find((item) => item.id === previousState.selectedAbility);
+  const freePlacementSelected = selectedItem?.type === "freePlacement"
+    || previousState.selectedAbility === "admin:freePlacement";
   for (let row = 0; row < nextState.board.length; row += 1) {
     for (let col = 0; col < nextState.board[row].length; col += 1) {
       const before = previousState.board[row]?.[col];
       const after = nextState.board[row][col];
-      if ((after === "X" || after === "O") && before !== after) placedPiece = true;
-      if ((before === "X" || before === "O") && before !== after) destroyedPiece = true;
+      if (wasPlaying && (after === "X" || after === "O") && before !== after) {
+        placedPiece = true;
+        if (previousState.phase === "playing" && !freePlacementSelected
+          && !hasAdjacentPiece(previousState.board, row, col, currentPlayer)
+          && isWormholeRoutedMove(previousState, row, col, currentPlayer)) portalMove = true;
+      }
+      if (wasPlaying && (before === "X" || before === "O") && before !== after) destroyedPiece = true;
+      if (wasPlaying && before !== "#" && after === "#") debrisAppeared = true;
     }
   }
-  if (placedPiece) events.push("piece-place");
-  if (destroyedPiece) events.push("piece-destroy");
+  if (placedPiece) events.add("piece-place");
+  if (destroyedPiece) events.add("piece-destroy");
+  if (portalMove) events.add("wormhole");
+  if (wasPlaying && (debrisAppeared || hasNewMessage("message.antiBomb") || hasNewMessage("message.debris"))) events.add("dirty-bomb");
+  if (wasPlaying && hasNewMessage("message.bomb")) events.add("bomb-detonate");
+  if (wasPlaying && hasNewMessage("message.pointDestroy")) events.add("shot-fire");
+  if (wasPlaying && hasNewMessage("message.freePlacementUsed")) events.add("teleport");
+  if (wasPlaying && hasNewMessage("message.extraTurn")) events.add("extra-turn");
+  if (wasPlaying && hasNewMessage("message.exchange")) events.add("exchange");
+
+  const previousProtections = new Set((previousState.protections || []).map(protectionKey));
+  const nextProtections = new Set((nextState.protections || []).map(protectionKey));
+  if (wasPlaying && (nextState.protections || []).some((protection) => !previousProtections.has(protectionKey(protection)))) {
+    if ((nextState.protections || []).some((protection) => !previousProtections.has(protectionKey(protection)) && protection.permanent)) {
+      events.add("gangsta-shield");
+    } else events.add("shield-place");
+  }
+  if (wasPlaying && (previousState.protections || []).some((protection) => !protection.permanent && !nextProtections.has(protectionKey(protection)))) {
+    events.add("shield-break");
+  }
+
   const previousItemIds = new Set((previousState.eventItems || []).map((item) => item.id));
-  if ((nextState.eventItems || []).some((item) => !previousItemIds.has(item.id))) events.push("item-spawn");
-  return events;
+  if ((nextState.eventItems || []).some((item) => !previousItemIds.has(item.id))) events.add("item-spawn");
+  return [...events];
+}
+
+function countMessageKeys(message) {
+  const entries = Array.isArray(message) ? message : message ? [message] : [];
+  const counts = new Map();
+  for (const entry of entries) {
+    if (typeof entry?.key === "string") counts.set(entry.key, (counts.get(entry.key) || 0) + 1);
+  }
+  return counts;
+}
+
+function protectionKey(protection) {
+  return `${protection.row},${protection.col},${protection.owner},${Boolean(protection.permanent)}`;
+}
+
+function hasAdjacentPiece(board, row, col, player) {
+  for (let dr = -1; dr <= 1; dr += 1) {
+    for (let dc = -1; dc <= 1; dc += 1) {
+      if ((dr || dc) && board[row + dr]?.[col + dc] === player) return true;
+    }
+  }
+  return false;
+}
+
+function isWormholeRoutedMove(state, row, col, player) {
+  const pair = state.wormholePair;
+  if (!pair?.endpoints || !Object.values(pair.endpoints).some(({ row: portalRow, col: portalCol }) =>
+    Math.abs(portalRow - row) <= 1 && Math.abs(portalCol - col) <= 1 && (portalRow !== row || portalCol !== col))) return false;
+  return Object.values(pair.endpoints).some(({ row: portalRow, col: portalCol }) => {
+    for (let dr = -1; dr <= 1; dr += 1) {
+      for (let dc = -1; dc <= 1; dc += 1) {
+        if ((dr || dc) && state.board[portalRow + dr]?.[portalCol + dc] === player) return true;
+      }
+    }
+    return false;
+  });
 }
 
 export function getGameResultSound(previousState, nextState, {
@@ -51,8 +137,20 @@ const EFFECT_GAIN = Object.freeze({
   "item-spawn": 0.78,
   "timer-warning": 0.62,
   "game-win": 0.72,
-  "game-loss": 0.72
+  "game-loss": 0.72,
+  "bomb-detonate": 0.7,
+  "shot-fire": 0.65,
+  "dirty-bomb": 0.76,
+  teleport: 0.62,
+  "extra-turn": 0.68,
+  "shield-place": 0.58,
+  "shield-break": 0.68,
+  "gangsta-shield": 0.62,
+  wormhole: 0.54,
+  exchange: 0.66,
+  "game-start": 0.58
 });
+const MAX_EFFECT_VOICES = 4;
 
 function getStorage() {
   try { return globalThis.localStorage; } catch { return null; }
@@ -119,7 +217,7 @@ export function createAudioManager({
 
   function prepare() {
     for (const [name, file] of Object.entries(SOUND_EFFECTS)) {
-      if (!effects.has(name)) effects.set(name, getAudio(file));
+      if (!effects.has(name)) effects.set(name, [getAudio(file)]);
     }
     if (!music) {
       music = getAudio(musicTracks[0] || "", "metadata");
@@ -210,8 +308,14 @@ export function createAudioManager({
   function play(name) {
     if (!preferences.enabled || preferences.volume <= 0 || !SOUND_EFFECTS[name]) return false;
     prepare();
-    const audio = effects.get(name);
-    if (!audio || audio.paused === false) return false;
+    const voices = effects.get(name);
+    if (!voices) return false;
+    let audio = voices.find((voice) => voice && voice.paused !== false);
+    if (!audio && voices.length < MAX_EFFECT_VOICES) {
+      audio = getAudio(SOUND_EFFECTS[name]);
+      if (audio) voices.push(audio);
+    }
+    if (!audio) return false;
     audio.volume = preferences.volume * EFFECT_GAIN[name];
     try { audio.currentTime = 0; } catch { /* Some browsers reject seeking before metadata loads. */ }
     const result = audio.play?.();
@@ -260,7 +364,7 @@ export function createAudioManager({
   function setEnabled(enabled) {
     preferences.enabled = Boolean(enabled);
     if (!preferences.enabled) {
-      for (const audio of effects.values()) audio?.pause?.();
+      for (const voices of effects.values()) for (const audio of voices) audio?.pause?.();
     }
     save();
   }
@@ -270,9 +374,9 @@ export function createAudioManager({
     if (!Number.isFinite(value)) return;
     preferences.volume = Math.max(0, Math.min(1, value));
     if (preferences.volume === 0) {
-      for (const audio of effects.values()) audio?.pause?.();
+      for (const voices of effects.values()) for (const audio of voices) audio?.pause?.();
     } else if (preferences.enabled) {
-      for (const [name, audio] of effects) {
+      for (const [name, voices] of effects) for (const audio of voices) {
         if (audio?.paused === false) audio.volume = preferences.volume * EFFECT_GAIN[name];
       }
     }
