@@ -44,6 +44,7 @@ export function getGameResultSound(previousState, nextState, {
 }
 
 const PREFERENCES_KEY = "cascade-wars-audio-v1";
+const MUSIC_SESSION_KEY = "cascade-wars-music-session-v1";
 const EFFECT_GAIN = Object.freeze({
   "piece-place": 0.48,
   "piece-destroy": 0.68,
@@ -74,6 +75,7 @@ function readPreferences(storage) {
 export function createAudioManager({
   AudioCtor = globalThis.Audio,
   storage = getStorage(),
+  sessionStorage = (() => { try { return globalThis.sessionStorage; } catch { return null; } })(),
   random = Math.random,
   basePath = "/ui/audio/",
   musicTracks = BACKGROUND_TRACKS
@@ -88,6 +90,21 @@ export function createAudioManager({
   let currentTrackIndex = null;
   let shuffledTracks = [];
   let lastTrack = null;
+  let restoredPosition = 0;
+
+  try {
+    const saved = JSON.parse(sessionStorage?.getItem(MUSIC_SESSION_KEY) || "null");
+    const savedTrackIndex = musicTracks.findIndex((track) => track === saved?.track);
+    if (savedTrackIndex >= 0) {
+      currentTrackIndex = savedTrackIndex;
+      restoredPosition = Number.isFinite(saved.position) && saved.position >= 0 ? saved.position : 0;
+      shuffledTracks = Array.isArray(saved.shuffledTracks)
+        ? saved.shuffledTracks.filter((index) => Number.isInteger(index) && index >= 0 && index < musicTracks.length)
+        : [];
+      lastTrack = Number.isInteger(saved.lastTrack) && saved.lastTrack >= 0 && saved.lastTrack < musicTracks.length
+        ? saved.lastTrack : savedTrackIndex;
+    }
+  } catch { /* A corrupt or unavailable session store should not prevent music playback. */ }
 
   const save = () => {
     try { storage?.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Storage can be unavailable in private browsing. */ }
@@ -108,7 +125,33 @@ export function createAudioManager({
       music = getAudio(musicTracks[0] || "", "metadata");
       if (music) music.addEventListener?.("ended", advanceMusic);
       if (music && !music.addEventListener) music.onended = advanceMusic;
+      if (music && currentTrackIndex !== null) {
+        music.src = basePath + encodeURIComponent(musicTracks[currentTrackIndex]);
+        const restorePosition = () => {
+          if (restoredPosition > 0 && music && Number.isFinite(music.duration)) {
+            try {
+              music.currentTime = restoredPosition < music.duration ? restoredPosition : 0;
+            } catch { /* Wait for another metadata event if needed. */ }
+            restoredPosition = 0;
+          }
+          if (musicActive && music?.paused && (!autoplayAttempted || unlocked)) playCurrentTrack();
+        };
+        music.addEventListener?.("loadedmetadata", restorePosition, { once: true });
+        restorePosition();
+      }
     }
+  }
+
+  function persistMusicSession() {
+    if (currentTrackIndex === null || !musicTracks[currentTrackIndex]) return;
+    try {
+      sessionStorage?.setItem(MUSIC_SESSION_KEY, JSON.stringify({
+        track: musicTracks[currentTrackIndex],
+        position: Number.isFinite(music?.currentTime) ? music.currentTime : restoredPosition,
+        shuffledTracks,
+        lastTrack
+      }));
+    } catch { /* Session persistence is best-effort; playback remains available. */ }
   }
 
   function refillTrackBag() {
@@ -130,11 +173,18 @@ export function createAudioManager({
     currentTrackIndex = index;
     music.src = basePath + encodeURIComponent(musicTracks[currentTrackIndex]);
     music.currentTime = 0;
+    restoredPosition = 0;
     playCurrentTrack();
+    persistMusicSession();
   }
 
   function playCurrentTrack() {
     if (!musicActive || !music || currentTrackIndex === null) return;
+    if (restoredPosition > 0) {
+      if (!Number.isFinite(music.duration)) return;
+      try { music.currentTime = restoredPosition < music.duration ? restoredPosition : 0; } catch { return; }
+      restoredPosition = 0;
+    }
     music.volume = preferences.musicVolume;
     if (!unlocked) autoplayAttempted = true;
     try {
@@ -195,6 +245,10 @@ export function createAudioManager({
     }
   }
 
+  if (typeof globalThis.addEventListener === "function") {
+    globalThis.addEventListener("pagehide", persistMusicSession);
+  }
+
   function setMusicVolume(volume) {
     const value = Number(volume);
     if (!Number.isFinite(value)) return;
@@ -235,6 +289,7 @@ export function createAudioManager({
     setVolume,
     observeTimer,
     resetTimerWarnings,
+    persistMusicSession,
     getPreferences: () => ({ ...preferences })
   };
 }

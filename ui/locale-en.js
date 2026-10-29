@@ -222,8 +222,14 @@ export default Object.freeze({ ...{
   "activeGames.observing": "Spectator mode: game actions are disabled.",
   "activeGames.adminTimeBoth": "+30 sec both", "activeGames.adminTimeX": "+30 sec player X", "activeGames.adminTimeO": "+30 sec player O",
   "activeGames.adminTimeAdded": "Administrator adjusted the clocks.",
-  "admin.addWormholes": "Add wormhole pair",
-  "admin.wormholeFirst": "Choose a second free cell for the pair."
+  "admin.addWormholes": "Wormhole",
+  "admin.wormholeFirst": "Choose a second free cell for the pair.",
+  "admin.wormholeLifetimeTitle": "Wormhole lifetime",
+  "admin.wormholeLifetimeHelp": "Choose how many complete rounds the pair will remain on the board.",
+  "admin.wormholeLifetimeLabel": "Complete rounds",
+  "admin.wormholeLifetimeUnit": "rounds",
+  "admin.wormholeLifetimeContinue": "Choose cells",
+  "menu.language": "Interface language"
 }, ...{
   "menu.duelLabel": "Two interacting bacterial colonies and moving nodes in the network background. Drag them to move.",
   "menu.dragHint": "Drag the colonies or network nodes",

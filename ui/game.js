@@ -408,7 +408,11 @@ export function placeEditorObject(state, player, object, { admin = false } = {})
   return state;
 }
 
-export function placeEditorWormholePair(state, player, first, second, { admin = false, random = Math.random } = {}) {
+export function placeEditorWormholePair(state, player, first, second, {
+  admin = false,
+  random = Math.random,
+  roundsRemaining: requestedRounds = null
+} = {}) {
   if (!state || state.phase !== "playing" || !["X", "O"].includes(player)
     || (!admin && !hasPermission(state, player, PLAYER_PERMISSIONS.USE_ANY_ITEM))
     || state.wormholePair || !first || !second
@@ -423,7 +427,8 @@ export function placeEditorWormholePair(state, player, first, second, { admin = 
     if (state.board[point.row][point.col] !== EMPTY_CELL || occupiedItems.has(key) || occupiedProtections.has(key)) return state;
   }
   const maxRounds = Math.max(3, Math.round(Math.sqrt(state.settings.width * state.settings.height)));
-  const roundsRemaining = 3 + randomIndex(random, maxRounds - 2);
+  if (requestedRounds !== null && (!Number.isInteger(requestedRounds) || requestedRounds < 3 || requestedRounds > maxRounds)) return state;
+  const roundsRemaining = requestedRounds ?? (3 + randomIndex(random, maxRounds - 2));
   return {
     ...state,
     wormholePair: {

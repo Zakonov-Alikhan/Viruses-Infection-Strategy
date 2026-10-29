@@ -488,6 +488,22 @@ test("authoritative board editor creates wormhole pairs only as one validated co
   assert.equal(state.wormholePair, null);
 });
 
+test("authoritative board editor validates and applies the configured wormhole lifetime", () => {
+  const state = createGameState({ ...DEFAULT_SETTINGS, width: 10, height: 10, randomEvents: false, freeStartingPositions: false });
+  const command = { type: "board-edit", object: {
+    kind: "wormhole-pair", first: { row: 4, col: 4 }, second: { row: 7, col: 7 }, roundsRemaining: 7
+  } };
+  const accepted = processGameCommand(state, "X", command, { authority: "admin", random: () => 0 });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.state.wormholePair.roundsRemaining, 7);
+  const invalid = processGameCommand(state, "X", {
+    ...command, object: { ...command.object, roundsRemaining: 11 }
+  }, { authority: "admin", random: () => 0 });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.error.code, "invalid-editor-object");
+  assert.equal(state.wormholePair, null);
+});
+
 test("board clear is admin-only, removes the complete cell contents, and rejects empty cells atomically", () => {
   const state = playingState();
   const board = state.board.map((row) => row.slice());

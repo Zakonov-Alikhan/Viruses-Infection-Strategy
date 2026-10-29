@@ -193,8 +193,14 @@ export default Object.freeze({ ...{
   "activeGames.observing": "Режим наблюдателя: игровые действия отключены.",
   "activeGames.adminTimeBoth": "+30 сек обоим", "activeGames.adminTimeX": "+30 сек игроку X", "activeGames.adminTimeO": "+30 сек игроку O",
   "activeGames.adminTimeAdded": "Администратор изменил часы.",
-  "admin.addWormholes": "Добавить червоточину",
-  "admin.wormholeFirst": "Выбери вторую свободную клетку для пары."
+  "admin.addWormholes": "Червоточина",
+  "admin.wormholeFirst": "Выбери вторую свободную клетку для пары.",
+  "admin.wormholeLifetimeTitle": "Срок жизни червоточины",
+  "admin.wormholeLifetimeHelp": "Укажи, сколько полных раундов пара будет оставаться на поле.",
+  "admin.wormholeLifetimeLabel": "Полных раундов",
+  "admin.wormholeLifetimeUnit": "раунда",
+  "admin.wormholeLifetimeContinue": "Выбрать клетки",
+  "menu.language": "Язык интерфейса"
 }, ...{
   "menu.duelLabel": "Две взаимодействующие бактериальные колонии и движущиеся узлы сетевого фона. Их можно перетаскивать.",
   "menu.dragHint": "Перетащите колонии или узлы сети",

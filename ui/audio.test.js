@@ -14,6 +14,8 @@ class FakeAudio {
   constructor(src) {
     this.src = src;
     this.paused = true;
+    this.currentTime = 0;
+    this.duration = 240;
     this.playCount = 0;
     this.listeners = new Map();
     FakeAudio.instances.push(this);
@@ -45,6 +47,16 @@ test("global settings entry points and both persistent audio controls exist acro
   assert.match(html, /id="sound-effects-volume"/);
   assert.match(html, /id="background-music-volume"/);
   assert.match(html, /aria-controls="menu-settings-modal"/);
+  assert.match(html, /id="menu-settings-modal"[\s\S]*?id="language-select"/);
+  assert.doesNotMatch(html, /class="language-picker"/);
+  assert.ok(html.indexOf('id="account-action"') < html.indexOf('id="menu-settings-button"'));
+  assert.ok(html.indexOf('id="active-games-refresh"') < html.indexOf('id="active-games-settings-button"'));
+  assert.ok(html.indexOf('id="return-menu-button"') < html.indexOf('id="game-global-settings-button"'));
+  assert.match(html, /id="wormhole-lifetime-modal"[\s\S]*?id="wormhole-lifetime-input"/);
+  const russian = await readFile(new URL("./locale-ru.js", import.meta.url), "utf8");
+  const english = await readFile(new URL("./locale-en.js", import.meta.url), "utf8");
+  assert.match(russian, /"admin\.addWormholes": "Червоточина"/);
+  assert.match(english, /"admin\.addWormholes": "Wormhole"/);
 });
 
 test("audio effects reuse prepared players and do not overlap the same effect", () => {
@@ -156,4 +168,30 @@ test("music autoplay is attempted on page activation and resumes the same track 
   manager.unlock();
   assert.equal(music.playCount, 2);
   assert.equal(music.src, selectedTrack);
+});
+
+test("music keeps the same track and playback position across a document navigation", () => {
+  FakeAudio.instances = [];
+  const session = new MemoryStorage();
+  const firstPage = createAudioManager({ AudioCtor: FakeAudio, storage: new MemoryStorage(), sessionStorage: session, random: () => 0 });
+  firstPage.setMusicActive(true);
+  firstPage.unlock();
+  const firstMusic = FakeAudio.instances.at(-1);
+  firstMusic.currentTime = 37.5;
+  firstPage.persistMusicSession();
+
+  FakeAudio.instances = [];
+  const nextPage = createAudioManager({ AudioCtor: FakeAudio, storage: new MemoryStorage(), sessionStorage: session, random: () => 0.99 });
+  nextPage.setMusicActive(true);
+  const resumedMusic = FakeAudio.instances.at(-1);
+  assert.equal(resumedMusic.src, firstMusic.src);
+  assert.equal(resumedMusic.currentTime, 37.5);
+  assert.equal(resumedMusic.playCount, 1);
+});
+
+test("first-party page links use client-side routing while music stays active", async () => {
+  const script = await readFile(new URL("./script.js", import.meta.url), "utf8");
+  assert.match(script, /audioManager\.setMusicActive\(true\)/);
+  assert.match(script, /window\.history\.pushState\(null, "", destination\.pathname\)/);
+  assert.match(script, /window\.addEventListener\("popstate"/);
 });

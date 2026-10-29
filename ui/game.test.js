@@ -985,6 +985,20 @@ test("administrator wormhole pair placement is atomic, neutral, and restricted t
   assert.equal(noPermission, noPermissionState);
 });
 
+test("administrator can set wormhole lifetime inside the board-size range", () => {
+  const state = makePlayingState({ width: 10, height: 10 });
+  const placed = placeEditorWormholePair(state, "X", { row: 4, col: 4 }, { row: 7, col: 7 }, {
+    admin: true, roundsRemaining: 7
+  });
+  assert.equal(placed.wormholePair.roundsRemaining, 7);
+  assert.equal(placeEditorWormholePair(state, "X", { row: 4, col: 4 }, { row: 7, col: 7 }, {
+    admin: true, roundsRemaining: 11
+  }), state);
+  assert.equal(placeEditorWormholePair(state, "X", { row: 4, col: 4 }, { row: 7, col: 7 }, {
+    admin: true, roundsRemaining: 2
+  }), state);
+});
+
 test("board editor clears a cell atomically, including an associated shield or wormhole pair", () => {
   const base = makePlayingState({ adminMode: true });
   const board = base.board.map((row) => row.slice());

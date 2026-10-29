@@ -55,7 +55,7 @@ function isCoordinate(row, col) {
   return Number.isInteger(row) && Number.isInteger(col) && row >= 0 && col >= 0;
 }
 
-function isValidEditorObject(object) {
+function isValidEditorObject(object, state) {
   if (!object || typeof object !== "object" || Array.isArray(object)) return false;
   if (object.kind === "clear") {
     return Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))
@@ -72,9 +72,12 @@ function isValidEditorObject(object) {
     const validPoint = (point) => point && typeof point === "object" && !Array.isArray(point)
       && Object.keys(point).length === 2 && Object.keys(point).every((key) => ["row", "col"].includes(key))
       && isCoordinate(point.row, point.col);
-    return Object.keys(object).length === 3
-      && Object.keys(object).every((key) => ["kind", "first", "second"].includes(key))
-      && validPoint(object.first) && validPoint(object.second);
+    const maxRounds = Math.max(3, Math.round(Math.sqrt(state.settings.width * state.settings.height)));
+    return Object.keys(object).every((key) => ["kind", "first", "second", "roundsRemaining"].includes(key))
+      && Object.keys(object).length >= 3 && Object.keys(object).length <= 4
+      && validPoint(object.first) && validPoint(object.second)
+      && (object.roundsRemaining === undefined
+        || (Number.isInteger(object.roundsRemaining) && object.roundsRemaining >= 3 && object.roundsRemaining <= maxRounds));
   }
   return object.kind === "blocked"
     && Object.keys(object).every((key) => ["kind", "row", "col"].includes(key))
@@ -123,9 +126,11 @@ export function processGameCommand(state, side, command, {
   if (command.type === "board-edit") {
     if (authority !== "admin") return failure(state, "admin-required");
     if (state.phase !== "playing") return failure(state, "wrong-phase");
-    if (!isValidEditorObject(command.object)) return failure(state, "invalid-editor-object");
+    if (!isValidEditorObject(command.object, state)) return failure(state, "invalid-editor-object");
     const next = command.object.kind === "wormhole-pair"
-      ? placeEditorWormholePair(state, side, command.object.first, command.object.second, { admin: true, random })
+      ? placeEditorWormholePair(state, side, command.object.first, command.object.second, {
+        admin: true, random, roundsRemaining: command.object.roundsRemaining ?? null
+      })
       : placeEditorObject(state, side, command.object, { admin: true });
     return next === state ? failure(state, "invalid-action") : { ok: true, state: next };
   }

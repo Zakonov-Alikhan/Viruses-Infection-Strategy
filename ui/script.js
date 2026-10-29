@@ -28,9 +28,9 @@ import {
   useBomb,
   useAntiBomb,
   usePointDestroy
-} from "./game.js?v=teleport-protection1";
+} from "./game.js?v=wormhole-admin-lifetime1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games6";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=admin-wormhole-lifetime1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -40,7 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
-import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio3";
+import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio4";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
@@ -233,6 +233,11 @@ const boardEditorTools = document.querySelector("#board-editor-tools");
 const boardEditorStatus = document.querySelector("#board-editor-status");
 const boardEditorCancel = document.querySelector("#board-editor-cancel");
 const boardEditorExit = document.querySelector("#board-editor-exit");
+const wormholeLifetimeModal = document.querySelector("#wormhole-lifetime-modal");
+const wormholeLifetimeForm = document.querySelector("#wormhole-lifetime-form");
+const wormholeLifetimeInput = document.querySelector("#wormhole-lifetime-input");
+const wormholeLifetimeClose = document.querySelector("#wormhole-lifetime-close");
+const wormholeLifetimeCancel = document.querySelector("#wormhole-lifetime-cancel");
 const adminAuthModal = document.querySelector("#admin-auth-modal");
 const adminAuthForm = document.querySelector("#admin-auth-form");
 const adminSecretInput = document.querySelector("#admin-secret-input");
@@ -391,6 +396,7 @@ let trainingSavedSettings = null;
 let boardEditorActive = false;
 let boardEditorTool = null;
 let boardEditorFirstWormholeCell = null;
+let selectedWormholeLifetime = null;
 let boardEditorMessageKey = null;
 let computerOpponent = { enabled: false, difficulty: "easy" };
 let onlineMode = false;
@@ -461,7 +467,7 @@ function transitionScreens(showGame) {
 
 function syncBackgroundMusic() {
   if (!activeGamesPage) return;
-  audioManager.setMusicActive(activeGamesPage.hidden && (!mainMenuScreen.hidden || !gameScreen.hidden));
+  audioManager.setMusicActive(true);
 }
 
 function syncAudioSettingsControls() {
@@ -795,7 +801,18 @@ function renderInventories(displayState = state) {
     wormholeButton.classList.toggle("is-selected", boardEditorTool?.kind === "wormhole-pair");
     wormholeButton.disabled = Boolean(state.wormholePair) || !adminToolsReady || isComputerControlledTurn()
       || (onlineMode && (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated));
-    wormholeButton.textContent = t("admin.addWormholes");
+    const wormholeIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    wormholeIcon.setAttribute("viewBox", "0 0 24 24");
+    wormholeIcon.setAttribute("aria-hidden", "true");
+    wormholeIcon.classList.add("admin-wormhole-icon");
+    const outerRing = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    outerRing.setAttribute("cx", "12"); outerRing.setAttribute("cy", "12"); outerRing.setAttribute("r", "8.5");
+    const innerRing = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    innerRing.setAttribute("cx", "12"); innerRing.setAttribute("cy", "12"); innerRing.setAttribute("r", "4.5");
+    const vortex = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    vortex.setAttribute("d", "M15.5 8.5c-2.1-1.7-5.3-.5-5.5 2-.2 2.1 2.2 3.7 4 2.6");
+    wormholeIcon.append(outerRing, innerRing, vortex);
+    wormholeButton.append(wormholeIcon, document.createTextNode(t("admin.addWormholes")));
     boardEditorTools.appendChild(wormholeButton);
 
     const clearButton = document.createElement("button");
@@ -1656,6 +1673,38 @@ function showActiveGamesPage(show) {
   }
 }
 
+function showRoute(pathname) {
+  showActiveGamesPage(pathname === "/games");
+  if (pathname !== "/games") {
+    if (screenTransitionTimer !== null) window.clearTimeout(screenTransitionTimer);
+    screenTransitionTimer = null;
+    gameScreen.hidden = true;
+    gameScreen.inert = true;
+    mainMenuScreen.hidden = false;
+    mainMenuScreen.inert = false;
+  }
+  syncBackgroundMusic();
+}
+
+document.addEventListener("click", (event) => {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
+    || event.shiftKey || event.altKey) return;
+  const link = event.target.closest?.("a[href]");
+  if (!link || link.target || link.hasAttribute("download")) return;
+  const destination = new URL(link.href, window.location.href);
+  if (destination.origin !== window.location.origin
+    || !["/", "/games"].includes(destination.pathname)
+    || destination.search || destination.hash) return;
+  event.preventDefault();
+  if (destination.pathname !== window.location.pathname) {
+    window.history.pushState(null, "", destination.pathname);
+  }
+  showRoute(destination.pathname);
+  window.scrollTo({ top: 0, behavior: "auto" });
+});
+
+window.addEventListener("popstate", () => showRoute(window.location.pathname));
+
 async function observeCatalogRoom(room) {
   let secret;
   if (room.visibility !== "public") {
@@ -1684,6 +1733,7 @@ function clearOnlinePresentation() {
   onlineRoomCode = null;
   onlineRoomId = null;
   boardEditorFirstWormholeCell = null;
+  selectedWormholeLifetime = null;
   onlineConnected = false;
   onlineAdminAuthenticated = false;
   pendingBoardEdit = false;
@@ -2681,7 +2731,10 @@ function placeBoardEditorObject(row, col) {
     if (boardEditorFirstWormholeCell.row === row && boardEditorFirstWormholeCell.col === col) return;
   }
   const object = boardEditorTool.kind === "wormhole-pair"
-    ? { kind: "wormhole-pair", first: boardEditorFirstWormholeCell, second: { row, col } }
+    ? {
+      kind: "wormhole-pair", first: boardEditorFirstWormholeCell, second: { row, col },
+      roundsRemaining: selectedWormholeLifetime
+    }
     : { ...boardEditorTool, row, col };
   if (onlineMode) {
     if (!onlineConnected || !onlineAdminAuthenticated || onlineCommandPending) return;
@@ -2695,16 +2748,20 @@ function placeBoardEditorObject(row, col) {
       boardEditorStatus.textContent = t(boardEditorMessageKey);
     }
     if (boardEditorTool.kind === "wormhole-pair") boardEditorFirstWormholeCell = null;
+    if (boardEditorTool.kind === "wormhole-pair") selectedWormholeLifetime = null;
     return;
   }
   const nextState = boardEditorTool.kind === "wormhole-pair"
-    ? placeEditorWormholePair(state, state.currentPlayer, object.first, object.second, { admin: true })
+    ? placeEditorWormholePair(state, state.currentPlayer, object.first, object.second, {
+      admin: true, roundsRemaining: selectedWormholeLifetime
+    })
     : placeEditorObject(state, state.currentPlayer, object);
   if (nextState === state) {
     boardEditorStatus.textContent = t("admin.editorInvalid");
     return;
   }
   boardEditorFirstWormholeCell = null;
+  selectedWormholeLifetime = null;
   boardEditorMessageKey = "admin.editorPlaced";
   boardEditorStatus.textContent = t(boardEditorMessageKey);
   updateState(nextState, {
@@ -4183,16 +4240,44 @@ boardEditorTools.addEventListener("click", (event) => {
   if (historyViewId !== null || !button || !boardEditorActive
     || (onlineMode ? (!onlineConnected || onlineCommandPending || !onlineAdminAuthenticated)
       : !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM))) return;
+  if (button.dataset.editorKind === "wormhole-pair") {
+    const maxRounds = Math.max(3, Math.round(Math.sqrt(state.settings.width * state.settings.height)));
+    wormholeLifetimeInput.min = "3";
+    wormholeLifetimeInput.max = String(maxRounds);
+    wormholeLifetimeInput.value = String(Math.min(maxRounds, Math.max(3, selectedWormholeLifetime || 3)));
+    wormholeLifetimeModal.showModal();
+    return;
+  }
   boardEditorTool = button.dataset.editorKind === "item"
     ? { kind: "item", itemType: button.dataset.itemType }
     : { kind: button.dataset.editorKind };
   boardEditorMessageKey = null;
   boardEditorFirstWormholeCell = null;
+  selectedWormholeLifetime = null;
   render();
 });
+wormholeLifetimeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!state || state.phase !== "playing" || state.wormholePair || isComputerControlledTurn()
+    || (onlineMode ? (!onlineConnected || !onlineAdminAuthenticated || onlineCommandPending)
+      : !hasPermission(state, state.currentPlayer, PLAYER_PERMISSIONS.USE_ANY_ITEM))
+    || !wormholeLifetimeForm.reportValidity()) return;
+  const rounds = wormholeLifetimeInput.valueAsNumber;
+  const maxRounds = Math.max(3, Math.round(Math.sqrt(state.settings.width * state.settings.height)));
+  if (!Number.isInteger(rounds) || rounds < 3 || rounds > maxRounds) return;
+  selectedWormholeLifetime = rounds;
+  boardEditorTool = { kind: "wormhole-pair" };
+  boardEditorFirstWormholeCell = null;
+  boardEditorMessageKey = null;
+  wormholeLifetimeModal.close();
+  render();
+});
+wormholeLifetimeClose.addEventListener("click", () => wormholeLifetimeModal.close());
+wormholeLifetimeCancel.addEventListener("click", () => wormholeLifetimeModal.close());
 boardEditorCancel.addEventListener("click", () => {
   boardEditorTool = null;
   boardEditorFirstWormholeCell = null;
+  selectedWormholeLifetime = null;
   boardEditorMessageKey = null;
   render();
 });
@@ -4200,6 +4285,7 @@ boardEditorExit.addEventListener("click", () => {
   boardEditorActive = false;
   boardEditorTool = null;
   boardEditorFirstWormholeCell = null;
+  selectedWormholeLifetime = null;
   boardEditorMessageKey = null;
   render();
 });
