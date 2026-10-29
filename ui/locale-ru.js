@@ -305,5 +305,8 @@ export default Object.freeze({ ...{
   "online.error.room-joining": "Подключение к комнате ещё выполняется. Подождите немного.",
   "account.guestHeader": "Войти / Регистрация",
   "account.guestDetail": "Рейтинг и профиль",
-  "account.headerRating": "Рейтинг {rating}"
+  "account.headerRating": "Рейтинг {rating}",
+  "audio.effects": "Звуковые эффекты",
+  "audio.effectsHelp": "Звуки ходов, предметов и результата партии",
+  "audio.volume": "Громкость эффектов"
 } });

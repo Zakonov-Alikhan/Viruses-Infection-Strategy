@@ -1,0 +1,202 @@
+export const SOUND_EFFECTS = Object.freeze({
+  "piece-place": "piece-place.mp3",
+  "piece-destroy": "piece-destroy.mp3",
+  "item-spawn": "item-spawn.mp3",
+  "timer-warning": "timer-warning.mp3",
+  "game-win": "game-win.mp3",
+  "game-loss": "game-loss.mp3"
+});
+
+export const BACKGROUND_TRACKS = Object.freeze([
+  "ost-01.mp3", "ost-02.mp3", "ost-03.mp3", "ost-04.mp3", "ost-05.mp3", "ost-06.mp3"
+]);
+
+/** Derive one sound cue per confirmed state transition, not per render. */
+export function getConfirmedAudioEvents(previousState, nextState) {
+  if (previousState?.phase !== "playing" || !nextState?.board || !previousState.board) return [];
+  const events = [];
+  let placedPiece = false;
+  let destroyedPiece = false;
+  for (let row = 0; row < nextState.board.length; row += 1) {
+    for (let col = 0; col < nextState.board[row].length; col += 1) {
+      const before = previousState.board[row]?.[col];
+      const after = nextState.board[row][col];
+      if ((after === "X" || after === "O") && before !== after) placedPiece = true;
+      if ((before === "X" || before === "O") && before !== after) destroyedPiece = true;
+    }
+  }
+  if (placedPiece) events.push("piece-place");
+  if (destroyedPiece) events.push("piece-destroy");
+  const previousItemIds = new Set((previousState.eventItems || []).map((item) => item.id));
+  if ((nextState.eventItems || []).some((item) => !previousItemIds.has(item.id))) events.push("item-spawn");
+  return events;
+}
+
+const PREFERENCES_KEY = "cascade-wars-audio-v1";
+const EFFECT_GAIN = Object.freeze({
+  "piece-place": 0.48,
+  "piece-destroy": 0.68,
+  "item-spawn": 0.78,
+  "timer-warning": 0.62,
+  "game-win": 0.72,
+  "game-loss": 0.72
+});
+
+function getStorage() {
+  try { return globalThis.localStorage; } catch { return null; }
+}
+
+function readPreferences(storage) {
+  try {
+    const saved = JSON.parse(storage?.getItem(PREFERENCES_KEY) || "null");
+    return {
+      enabled: saved?.enabled !== false,
+      volume: Number.isFinite(saved?.volume) ? Math.max(0, Math.min(1, saved.volume)) : 0.35
+    };
+  } catch {
+    return { enabled: true, volume: 0.35 };
+  }
+}
+
+/** A single shared set of audio elements; event playback is safe to call from confirmed state transitions. */
+export function createAudioManager({
+  AudioCtor = globalThis.Audio,
+  storage = getStorage(),
+  random = Math.random,
+  basePath = "/ui/audio/",
+  musicTracks = BACKGROUND_TRACKS
+} = {}) {
+  const preferences = readPreferences(storage);
+  const effects = new Map();
+  const warningTimers = new Map();
+  let music = null;
+  let unlocked = false;
+  let musicActive = false;
+  let shuffledTracks = [];
+  let lastTrack = null;
+
+  const save = () => {
+    try { storage?.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Storage can be unavailable in private browsing. */ }
+  };
+
+  function getAudio(file, preload = "auto") {
+    if (typeof AudioCtor !== "function") return null;
+    const audio = new AudioCtor(basePath + encodeURIComponent(file));
+    audio.preload = preload;
+    return audio;
+  }
+
+  function prepare() {
+    for (const [name, file] of Object.entries(SOUND_EFFECTS)) {
+      if (!effects.has(name)) effects.set(name, getAudio(file));
+    }
+    if (!music) {
+      music = getAudio(musicTracks[0] || "", "metadata");
+      if (music) music.addEventListener?.("ended", advanceMusic);
+      if (music && !music.addEventListener) music.onended = advanceMusic;
+    }
+  }
+
+  function refillTrackBag() {
+    shuffledTracks = musicTracks.map((_, index) => index);
+    for (let index = shuffledTracks.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.min(index, Math.floor(random() * (index + 1)));
+      [shuffledTracks[index], shuffledTracks[swapIndex]] = [shuffledTracks[swapIndex], shuffledTracks[index]];
+    }
+    if (shuffledTracks.length > 1 && shuffledTracks.at(-1) === lastTrack) {
+      [shuffledTracks[0], shuffledTracks[shuffledTracks.length - 1]] = [shuffledTracks.at(-1), shuffledTracks[0]];
+    }
+  }
+
+  function startNextTrack() {
+    if (!musicActive || !unlocked || !music || musicTracks.length === 0) return;
+    if (shuffledTracks.length === 0) refillTrackBag();
+    const index = shuffledTracks.pop();
+    lastTrack = index;
+    music.src = basePath + encodeURIComponent(musicTracks[index]);
+    music.volume = 0.18;
+    music.currentTime = 0;
+    const result = music.play?.();
+    result?.catch?.(() => {});
+  }
+
+  function advanceMusic() {
+    if (musicActive) startNextTrack();
+  }
+
+  function unlock() {
+    prepare();
+    unlocked = true;
+    startNextTrack();
+  }
+
+  function play(name) {
+    if (!preferences.enabled || preferences.volume <= 0 || !SOUND_EFFECTS[name]) return false;
+    prepare();
+    const audio = effects.get(name);
+    if (!audio || audio.paused === false) return false;
+    audio.volume = preferences.volume * EFFECT_GAIN[name];
+    try { audio.currentTime = 0; } catch { /* Some browsers reject seeking before metadata loads. */ }
+    const result = audio.play?.();
+    result?.catch?.(() => {});
+    return true;
+  }
+
+  function observeTimer(sessionId, side, remainingMs, active) {
+    const key = `${sessionId}:${side}`;
+    const previous = warningTimers.get(key);
+    warningTimers.set(key, remainingMs);
+    if (active && Number.isFinite(previous) && previous > 10_000 && remainingMs <= 10_000 && remainingMs > 0) {
+      play("timer-warning");
+    }
+  }
+
+  function resetTimerWarnings(sessionId) {
+    for (const key of warningTimers.keys()) {
+      if (!key.startsWith(`${sessionId}:`)) warningTimers.delete(key);
+    }
+  }
+
+  function setMusicActive(active) {
+    musicActive = Boolean(active);
+    prepare();
+    if (!musicActive && music && !music.paused) music.pause();
+    else if (musicActive && unlocked && music?.paused) startNextTrack();
+  }
+
+  function setEnabled(enabled) {
+    preferences.enabled = Boolean(enabled);
+    if (!preferences.enabled) {
+      for (const audio of effects.values()) audio?.pause?.();
+    }
+    save();
+  }
+
+  function setVolume(volume) {
+    const value = Number(volume);
+    if (!Number.isFinite(value)) return;
+    preferences.volume = Math.max(0, Math.min(1, value));
+    if (preferences.volume === 0) {
+      for (const audio of effects.values()) audio?.pause?.();
+    } else if (preferences.enabled) {
+      for (const [name, audio] of effects) {
+        if (audio?.paused === false) audio.volume = preferences.volume * EFFECT_GAIN[name];
+      }
+    }
+    save();
+  }
+
+  prepare();
+  return {
+    play,
+    unlock,
+    setMusicActive,
+    setEnabled,
+    setVolume,
+    observeTimer,
+    resetTimerWarnings,
+    getPreferences: () => ({ ...preferences })
+  };
+}
+
+export const audioManager = createAudioManager();

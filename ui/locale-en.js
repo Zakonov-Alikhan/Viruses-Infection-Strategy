@@ -334,5 +334,8 @@ export default Object.freeze({ ...{
   "online.error.room-joining": "The room connection is still being established. Please wait.",
   "account.guestHeader": "Sign in / Register",
   "account.guestDetail": "Rating and profile",
-  "account.headerRating": "Rating {rating}"
+  "account.headerRating": "Rating {rating}",
+  "audio.effects": "Sound effects",
+  "audio.effectsHelp": "Sounds for moves, items, and game results",
+  "audio.volume": "Effects volume"
 } });

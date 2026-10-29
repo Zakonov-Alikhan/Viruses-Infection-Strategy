@@ -261,6 +261,9 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .return-menu-button { min-height: 38px; }
 .menu-settings-modal { max-width: min(500px, calc(100vw - 24px)); }
 .menu-animation-setting { margin-top: 12px; }
+.audio-volume-control { display: grid; grid-template-columns: 1fr minmax(110px, 1.2fr) auto; align-items: center; gap: 12px; margin: 14px 2px 4px; color: var(--muted); font-size: .9rem; }
+.audio-volume-control input[type="range"] { width: 100%; accent-color: var(--accent, #5edac0); }
+.audio-volume-control output { min-width: 3.2em; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
 .menu-settings-modal .settings-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
 
 .tutorial-panel { display: grid; gap: 11px; }

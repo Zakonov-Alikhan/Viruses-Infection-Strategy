@@ -30,7 +30,7 @@ import {
   usePointDestroy
 } from "./game.js?v=teleport-protection1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games4";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games5";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -40,6 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
+import { audioManager, getConfirmedAudioEvents } from "./audio.js?v=audio1";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
@@ -137,6 +138,9 @@ const menuSettingsModal = document.querySelector("#menu-settings-modal");
 const menuSettingsCloseButton = document.querySelector("#menu-settings-close");
 const menuSettingsDoneButton = document.querySelector("#menu-settings-done");
 const menuAnimationsToggle = document.querySelector("#menu-animations-toggle");
+const soundEffectsToggle = document.querySelector("#sound-effects-toggle");
+const soundEffectsVolume = document.querySelector("#sound-effects-volume");
+const soundEffectsVolumeValue = document.querySelector("#sound-effects-volume-value");
 const menuNotice = document.querySelector("#menu-notice");
 const accountActionButton = document.querySelector("#account-action");
 const accountModal = document.querySelector("#account-modal");
@@ -436,6 +440,7 @@ function transitionScreens(showGame) {
   if (!shouldAnimate) {
     outgoing.hidden = true;
     outgoing.inert = false;
+    syncBackgroundMusic();
     return;
   }
   outgoing.inert = true;
@@ -448,8 +453,33 @@ function transitionScreens(showGame) {
     target.classList.remove("screen-entering");
     outgoing.classList.remove("screen-exiting");
     screenTransitionTimer = null;
+    syncBackgroundMusic();
   }, SCREEN_TRANSITION_MS);
 }
+
+function syncBackgroundMusic() {
+  if (!activeGamesPage) return;
+  audioManager.setMusicActive(activeGamesPage.hidden && (!mainMenuScreen.hidden || !gameScreen.hidden));
+}
+
+function syncAudioSettingsControls() {
+  const preferences = audioManager.getPreferences();
+  soundEffectsToggle.checked = preferences.enabled;
+  soundEffectsVolume.value = String(Math.round(preferences.volume * 100));
+  soundEffectsVolumeValue.value = `${soundEffectsVolume.value}%`;
+  soundEffectsVolumeValue.textContent = soundEffectsVolume.value;
+}
+
+document.addEventListener("pointerdown", () => {
+  audioManager.unlock();
+  syncBackgroundMusic();
+}, { once: true, capture: true });
+document.addEventListener("keydown", () => {
+  audioManager.unlock();
+  syncBackgroundMusic();
+}, { once: true, capture: true });
+syncAudioSettingsControls();
+syncBackgroundMusic();
 
 document.documentElement.dataset.gameAnimations = settings.animationsEnabled ? "on" : "off";
 
@@ -463,6 +493,7 @@ function beginGameSession() {
   invalidateComputerAction();
   gameSessionId += 1;
   expiringItems.clear();
+  audioManager.resetTimerWarnings(gameSessionId);
 }
 
 function isComputerControlledTurn() {
@@ -607,6 +638,10 @@ function renderClock() {
     : t("clock.summary", { minutes: settings.clockMinutes, seconds: settings.incrementSeconds });
   const xActive = state && state.phase === "playing" && state.currentPlayer === "X";
   const oActive = state && state.phase === "playing" && state.currentPlayer === "O";
+  if (state?.phase === "playing" && !settings.unlimitedTime) {
+    audioManager.observeTimer(gameSessionId, "X", shownClock("X"), xActive);
+    audioManager.observeTimer(gameSessionId, "O", shownClock("O"), oActive);
+  }
   clockPlayerX.classList.toggle("clock-active", xActive);
   clockPlayerO.classList.toggle("clock-active", oActive);
   clockPlayerOName.textContent = t(computerOpponent.enabled ? "computer.player" : "player.o");
@@ -1603,6 +1638,7 @@ function showActiveGamesPage(show) {
   mainMenuScreen.hidden = show;
   mainMenuScreen.inert = show;
   activeGamesPage.hidden = !show;
+  syncBackgroundMusic();
   activeGamesPage.inert = !show;
   if (show) {
     if (activeGamesRefreshTimer !== null) window.clearInterval(activeGamesRefreshTimer);
@@ -2353,6 +2389,7 @@ function advanceTraining() {
 
 function openMenuSettings() {
   menuAnimationsToggle.checked = settings.animationsEnabled;
+  syncAudioSettingsControls();
   menuSettingsModal.showModal();
   menuSettingsDoneButton.focus();
 }
@@ -2487,6 +2524,9 @@ function updateState(nextState, {
   if (onlineMode !== serverUpdate) return;
   if (historyViewId !== null && !serverUpdate) return;
   const previousState = state;
+  if (!undoRestore && previousState?.phase === "playing") {
+    for (const sound of getConfirmedAudioEvents(previousState, nextState)) audioManager.play(sound);
+  }
   const nextItemIds = new Set(nextState.eventItems.map((item) => item.id));
   if (previousState?.settings && !nextState.settings.unlimitedItemLifetime) {
     for (const item of previousState.eventItems) {
@@ -2533,6 +2573,11 @@ function updateState(nextState, {
     localUndoHistory.record(previousState, nextState, clockRemaining, incrementAppliedMs);
   }
   const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
+  if (gameJustEnded && !undoRestore) {
+    if (onlineMode && onlineSide) audioManager.play(nextState.winner === onlineSide ? "game-win" : "game-loss");
+    else if (computerOpponent.enabled) audioManager.play(nextState.winner === "X" ? "game-win" : "game-loss");
+    else if (!onlineObserverMode) audioManager.play("game-win");
+  }
   const inventoryExchangeConfirmed = !onlineMode
     && nextState.message?.key === "message.exchange"
     && previousState.inventory !== nextState.inventory;
@@ -3590,6 +3635,12 @@ returnMenuButton.addEventListener("click", returnToMainMenu);
 menuSettingsButton.addEventListener("click", openMenuSettings);
 menuSettingsCloseButton.addEventListener("click", () => menuSettingsModal.close());
 menuSettingsDoneButton.addEventListener("click", saveMenuSettings);
+soundEffectsToggle.addEventListener("change", () => audioManager.setEnabled(soundEffectsToggle.checked));
+soundEffectsVolume.addEventListener("input", () => {
+  audioManager.setVolume(Number(soundEffectsVolume.value) / 100);
+  soundEffectsVolumeValue.value = `${soundEffectsVolume.value}%`;
+  soundEffectsVolumeValue.textContent = soundEffectsVolumeValue.value;
+});
 function accountErrorMessage(error) {
   const code = error instanceof Error ? error.message : "network";
   const key = `account.error.${code}`;
