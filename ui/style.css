@@ -810,6 +810,9 @@ dialog[open]::backdrop { background-color: rgba(5,12,14,.78); }
 .menu-hero { display: block; width: 100%; max-width: none; grid-column: auto; grid-row: auto; order: initial; }
 .menu-duel-frame { width: 100%; height: 200px; margin: 0; overflow: visible; border-radius: 20px; background: radial-gradient(ellipse at 50% 50%, rgba(30,58,54,.25), transparent 72%); }
 .menu-duel { touch-action: auto; }
+@media (hover: none) and (pointer: coarse) {
+  #menu-duel { pointer-events: auto; touch-action: none; cursor: grab; }
+}
 .duel-label { bottom: 4px; font-size: 9px; }
 .duel-label-x { left: 7%; }
 .duel-label-o { right: 7%; }

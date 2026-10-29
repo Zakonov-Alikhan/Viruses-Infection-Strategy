@@ -20,6 +20,9 @@ test("active games use a real reloadable /games route and preserve link focus st
   assert.match(script, /buildActiveRoomView\(room, t\)/);
   assert.match(script, /fetch\("\/api\/rooms"/);
   assert.match(script, /mainMenuScreen\.hidden = show/);
+  assert.match(script, /function showActiveGamesPage\(show\)[\s\S]*?syncMenuAmbient\(\);/);
+  assert.match(script, /function syncMenuAmbient\(\)[\s\S]*?if \(menuAnimationFrame !== null\) return;/);
+  assert.match(script, /document\.addEventListener\("visibilitychange",[\s\S]*?if \(!document\.hidden\) syncMenuAmbient\(\)/);
   assert.match(css, /\.active-room-tooltip\[hidden\]/);
   assert.match(css, /\.active-games-row:hover > td/);
   assert.match(css, /\.active-games-row:focus-visible/);

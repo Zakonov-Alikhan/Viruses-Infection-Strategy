@@ -41,6 +41,7 @@ import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
 import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio5";
+import { constrainDuelPosition, createDuelDragState, releaseDuelBody, stepDuelPhysics, updateDuelDragState } from "./duel-physics.js?v=duel-physics1";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
@@ -381,10 +382,12 @@ let menuAnimationLastFrame = 0;
 let ambientNodes = [];
 let duelPositions = { X: null, O: null };
 let duelDragPlayer = null;
+let duelDragPointerId = null;
+let duelDragRect = null;
 let duelLastTime = 0;
 let duelPhysicsLastTime = null;
-let duelDragPoint = null;
 let duelDragTarget = null;
+let duelDragState = null;
 let duelDragAngle = 0;
 let ambientDragNode = null;
 let ambientDragPoint = null;
@@ -1137,22 +1140,19 @@ function drawDuelScene(time = 0) {
   for (const [player, fallback] of Object.entries(defaults)) {
     if (!duelPositions[player]) {
       duelPositions[player] = { ...fallback, vx: 0, vy: 0, phase: player === "X" ? 0.4 : 2.1 };
-      continue;
     }
+  }
+  stepDuelPhysics(duelPositions, {
+    width,
+    height,
+    radius,
+    elapsedSeconds: elapsed,
+    timeMilliseconds: time,
+    capturedPlayer: duelDragPlayer,
+    dragTarget: duelDragTarget
+  });
+  for (const player of ["X", "O"]) {
     const body = duelPositions[player];
-    if (elapsed > 0 && duelDragPlayer === player && duelDragTarget) {
-      const follow = 1 - Math.exp(-elapsed * 7.5);
-      body.x += (duelDragTarget.x - body.x) * follow;
-      body.y += (duelDragTarget.y - body.y) * follow;
-    } else if (elapsed > 0) {
-      body.vx += Math.sin(time * 0.00043 + body.phase) * 0.018 * elapsed;
-      body.vy += Math.cos(time * 0.00037 + body.phase * 1.3) * 0.018 * elapsed;
-      const damping = Math.pow(0.91, elapsed);
-      body.vx *= damping;
-      body.vy *= damping;
-      body.x += body.vx * elapsed;
-      body.y += body.vy * elapsed;
-    }
     const constrained = constrainDuelPosition(body.x, body.y, width, height, radius);
     if (constrained.x !== body.x || constrained.y !== body.y) {
       body.vx *= -0.72;
@@ -1232,17 +1232,6 @@ function drawDuelScene(time = 0) {
   drawVirusSystem(menuDuelContext, left.x, left.y, radius, "x", time, 0.2, dragState("X"));
   drawVirusSystem(menuDuelContext, right.x, right.y, radius, "o", time, 1.15, dragState("O"));
   drawSymbioticBacteria(menuDuelContext, contactX, contactY, radius * 0.58, time);
-}
-
-function constrainDuelPosition(x, y, width, height, radius) {
-  const padding = radius * 1.42;
-  const rx = Math.max(1, width / 2 - padding) / width;
-  const ry = Math.max(1, height / 2 - padding) / height;
-  const dx = (x - 0.5) / rx;
-  const dy = (y - 0.5) / ry;
-  const distance = Math.hypot(dx, dy);
-  if (distance <= 1) return { x, y };
-  return { x: 0.5 + dx / distance * rx, y: 0.5 + dy / distance * ry };
 }
 
 function drawSymbioticBacteria(context, x, y, radius, time) {
@@ -1325,14 +1314,14 @@ function drawSymbioticBacteria(context, x, y, radius, time) {
   context.restore();
 }
 
-function getDuelPointer(event) {
-  const rect = menuDuelCanvas.getBoundingClientRect();
-  return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height };
+function getDuelPointer(event, rect) {
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height, time: event.timeStamp };
 }
 
 menuDuelCanvas.addEventListener("pointerdown", (event) => {
-  if (menuDuelCanvas.closest(".main-menu-screen").hidden || event.pointerType !== "mouse") return;
-  const point = getDuelPointer(event);
+  if (menuDuelCanvas.closest(".main-menu-screen").hidden || (event.pointerType === "mouse" && event.button !== 0)) return;
+  const rect = menuDuelCanvas.getBoundingClientRect();
+  const point = getDuelPointer(event, rect);
   const scale = Math.min(point.width / 500, point.height / 330, 1.15);
   const radius = Math.max(35, 51 * scale);
   const time = duelLastTime;
@@ -1347,47 +1336,59 @@ menuDuelCanvas.addEventListener("pointerdown", (event) => {
       point.y - (duelPositions[player]?.y ?? defaults[player].y) * point.height)
   })).sort((a, b) => a.distance - b.distance);
   if (candidates[0].distance > radius * 1.45) return;
-  duelDragPlayer = candidates[0].player;
-  const body = duelPositions[duelDragPlayer];
+  const player = candidates[0].player;
+  const body = duelPositions[player];
+  try { menuDuelCanvas.setPointerCapture(event.pointerId); } catch { return; }
+  duelDragPlayer = player;
+  duelDragPointerId = event.pointerId;
+  duelDragRect = rect;
+  duelDragState = createDuelDragState(body, point, event.pointerId, point.width, point.height);
   duelDragTarget = { x: body.x, y: body.y };
-  duelDragPoint = { x: point.x, y: point.y, time: event.timeStamp,
-    offsetX: body.x - point.x / point.width, offsetY: body.y - point.y / point.height };
-  menuDuelCanvas.setPointerCapture(event.pointerId);
   menuDuelCanvas.classList.add("is-dragging");
   event.preventDefault();
 });
 menuDuelCanvas.addEventListener("pointermove", (event) => {
-  if (!duelDragPlayer) return;
-  const point = getDuelPointer(event);
+  if (!duelDragPlayer || event.pointerId !== duelDragPointerId || !duelDragState) return;
+  const point = getDuelPointer(event, duelDragRect);
   const body = duelPositions[duelDragPlayer];
-  const elapsed = Math.max(1, event.timeStamp - duelDragPoint.time) / 1000;
-  duelDragTarget = constrainDuelPosition(
-    point.x / point.width + duelDragPoint.offsetX,
-    point.y / point.height + duelDragPoint.offsetY,
-    point.width,
-    point.height,
-    Math.max(35, 51 * Math.min(point.width / 500, point.height / 330, 1.15))
-  );
-  const deltaX = point.x - duelDragPoint.x;
-  const deltaY = point.y - duelDragPoint.y;
-  body.vx = Math.max(-0.5, Math.min(0.5, deltaX / point.width / elapsed));
-  body.vy = Math.max(-0.5, Math.min(0.5, deltaY / point.height / elapsed));
+  const previousDrag = duelDragState;
+  const { target, drag } = updateDuelDragState(previousDrag, point, point.width, point.height,
+    Math.max(35, 51 * Math.min(point.width / 500, point.height / 330, 1.15)));
+  duelDragState = drag;
+  duelDragTarget = target;
+  body.vx = drag.vx;
+  body.vy = drag.vy;
+  const deltaX = point.x - previousDrag.lastX;
+  const deltaY = point.y - previousDrag.lastY;
   if (Math.hypot(deltaX, deltaY) > 0.75) {
     const targetAngle = Math.atan2(deltaY, deltaX);
     const angleDelta = Math.atan2(Math.sin(targetAngle - duelDragAngle), Math.cos(targetAngle - duelDragAngle));
     duelDragAngle += angleDelta * 0.16;
   }
-  duelDragPoint = { ...duelDragPoint, x: point.x, y: point.y, time: event.timeStamp };
   scheduleMenuDragRender();
 });
-const endDuelDrag = () => {
+const endDuelDrag = (event) => {
+  if (!duelDragPlayer || (event?.pointerId !== undefined && event.pointerId !== duelDragPointerId)) return;
+  if (event?.type === "pointerup" && duelDragState) {
+    const point = getDuelPointer(event, duelDragRect);
+    const { target, drag } = updateDuelDragState(duelDragState, point, point.width, point.height,
+      Math.max(35, 51 * Math.min(point.width / 500, point.height / 330, 1.15)));
+    duelDragTarget = target;
+    duelDragState = drag;
+  }
+  const body = duelPositions[duelDragPlayer];
+  releaseDuelBody(body, duelDragTarget, duelDragState);
   duelDragPlayer = null;
-  duelDragPoint = null;
+  duelDragPointerId = null;
+  duelDragRect = null;
+  duelDragState = null;
   duelDragTarget = null;
   menuDuelCanvas.classList.remove("is-dragging");
+  scheduleMenuDragRender();
 };
 menuDuelCanvas.addEventListener("pointerup", endDuelDrag);
 menuDuelCanvas.addEventListener("pointercancel", endDuelDrag);
+menuDuelCanvas.addEventListener("lostpointercapture", endDuelDrag);
 
 function resizeDuelCanvas() {
   if (!menuDuelContext) return;
@@ -1399,7 +1400,7 @@ function resizeDuelCanvas() {
     menuDuelCanvas.height = height;
     menuDuelContext.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
-  drawDuelScene();
+  drawDuelScene(duelLastTime);
 }
 
 function resizeMenuAmbient() {
@@ -1430,19 +1431,26 @@ function resizeMenuAmbient() {
 }
 
 function syncMenuAmbient() {
-  if (menuAnimationFrame !== null) cancelAnimationFrame(menuAnimationFrame);
-  menuAnimationFrame = null;
   if (mainMenuScreen.hidden || !settings.animationsEnabled || reduceMotionQuery.matches) {
+    if (menuAnimationFrame !== null) cancelAnimationFrame(menuAnimationFrame);
+    menuAnimationFrame = null;
+    menuAnimationLastFrame = 0;
     drawMenuAmbient();
-    drawDuelScene();
+    drawDuelScene(duelLastTime);
+    duelPhysicsLastTime = null;
     return;
   }
+  if (menuAnimationFrame !== null) return;
+  menuAnimationLastFrame = 0;
+  duelPhysicsLastTime = null;
 
   const animate = (timestamp) => {
     if (mainMenuScreen.hidden || !settings.animationsEnabled || reduceMotionQuery.matches) {
       menuAnimationFrame = null;
+      menuAnimationLastFrame = 0;
       drawMenuAmbient();
-      drawDuelScene();
+      drawDuelScene(duelLastTime);
+      duelPhysicsLastTime = null;
       return;
     }
     const frameInterval = duelDragPlayer || ambientDragNode ? 16 : 42;
@@ -1663,6 +1671,7 @@ function showActiveGamesPage(show) {
   activeGamesPage.hidden = !show;
   syncBackgroundMusic();
   activeGamesPage.inert = !show;
+  syncMenuAmbient();
   if (show) {
     if (activeGamesRefreshTimer !== null) window.clearInterval(activeGamesRefreshTimer);
     void refreshActiveGames();
@@ -4329,7 +4338,6 @@ adminAuthModal.addEventListener("close", () => {
 startButton.addEventListener("click", setupGame);
 resizeMenuAmbient();
 resizeDuelCanvas();
-syncMenuAmbient();
 window.addEventListener("resize", resizeMenuAmbient);
 window.addEventListener("resize", resizeDuelCanvas);
 document.addEventListener("visibilitychange", () => {
@@ -4337,6 +4345,8 @@ document.addEventListener("visibilitychange", () => {
   else if (menuAnimationFrame !== null) {
     cancelAnimationFrame(menuAnimationFrame);
     menuAnimationFrame = null;
+    menuAnimationLastFrame = 0;
+    duelPhysicsLastTime = null;
   }
 });
 if (typeof ResizeObserver === "function") {
@@ -4347,6 +4357,7 @@ if (typeof ResizeObserver === "function") {
   window.addEventListener("resize", syncBoardGeometry);
 }
 if (window.location.pathname === "/games") showActiveGamesPage(true);
+else syncMenuAmbient();
 const inviteUrl = new URL(window.location.href);
 const inviteCode = inviteUrl.searchParams.get("room");
 if (inviteCode) {
