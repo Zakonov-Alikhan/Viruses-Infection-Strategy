@@ -51,10 +51,11 @@ function readPreferences(storage) {
     const saved = JSON.parse(storage?.getItem(PREFERENCES_KEY) || "null");
     return {
       enabled: saved?.enabled !== false,
-      volume: Number.isFinite(saved?.volume) ? Math.max(0, Math.min(1, saved.volume)) : 0.35
+      volume: Number.isFinite(saved?.volume) ? Math.max(0, Math.min(1, saved.volume)) : 0.35,
+      musicVolume: Number.isFinite(saved?.musicVolume) ? Math.max(0, Math.min(1, saved.musicVolume)) : 0.18
     };
   } catch {
-    return { enabled: true, volume: 0.35 };
+    return { enabled: true, volume: 0.35, musicVolume: 0.18 };
   }
 }
 
@@ -72,6 +73,8 @@ export function createAudioManager({
   let music = null;
   let unlocked = false;
   let musicActive = false;
+  let autoplayAttempted = false;
+  let currentTrackIndex = null;
   let shuffledTracks = [];
   let lastTrack = null;
 
@@ -109,15 +112,27 @@ export function createAudioManager({
   }
 
   function startNextTrack() {
-    if (!musicActive || !unlocked || !music || musicTracks.length === 0) return;
+    if (!musicActive || !music || musicTracks.length === 0) return;
     if (shuffledTracks.length === 0) refillTrackBag();
     const index = shuffledTracks.pop();
     lastTrack = index;
-    music.src = basePath + encodeURIComponent(musicTracks[index]);
-    music.volume = 0.18;
+    currentTrackIndex = index;
+    music.src = basePath + encodeURIComponent(musicTracks[currentTrackIndex]);
     music.currentTime = 0;
-    const result = music.play?.();
-    result?.catch?.(() => {});
+    playCurrentTrack();
+  }
+
+  function playCurrentTrack() {
+    if (!musicActive || !music || currentTrackIndex === null) return;
+    music.volume = preferences.musicVolume;
+    if (!unlocked) autoplayAttempted = true;
+    try {
+      const result = music.play?.();
+      result?.then?.(() => { autoplayAttempted = false; }).catch?.(() => { autoplayAttempted = true; });
+      if (!result?.then) autoplayAttempted = false;
+    } catch {
+      autoplayAttempted = true;
+    }
   }
 
   function advanceMusic() {
@@ -127,7 +142,8 @@ export function createAudioManager({
   function unlock() {
     prepare();
     unlocked = true;
-    startNextTrack();
+    if (currentTrackIndex !== null && music?.paused) playCurrentTrack();
+    else if (currentTrackIndex === null) startNextTrack();
   }
 
   function play(name) {
@@ -161,7 +177,18 @@ export function createAudioManager({
     musicActive = Boolean(active);
     prepare();
     if (!musicActive && music && !music.paused) music.pause();
-    else if (musicActive && unlocked && music?.paused) startNextTrack();
+    else if (musicActive && music?.paused && (!autoplayAttempted || unlocked)) {
+      if (currentTrackIndex === null) startNextTrack();
+      else playCurrentTrack();
+    }
+  }
+
+  function setMusicVolume(volume) {
+    const value = Number(volume);
+    if (!Number.isFinite(value)) return;
+    preferences.musicVolume = Math.max(0, Math.min(1, value));
+    if (music) music.volume = preferences.musicVolume;
+    save();
   }
 
   function setEnabled(enabled) {
@@ -191,6 +218,7 @@ export function createAudioManager({
     play,
     unlock,
     setMusicActive,
+    setMusicVolume,
     setEnabled,
     setVolume,
     observeTimer,

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createAudioManager, getConfirmedAudioEvents, SOUND_EFFECTS } from "./audio.js";
 
 class MemoryStorage {
@@ -38,6 +39,14 @@ test("confirmed state changes map placements, destruction, and item spawns to on
   assert.deepEqual(getConfirmedAudioEvents(next, structuredClone(next)), []);
 });
 
+test("global settings entry points and both persistent audio controls exist across site screens", async () => {
+  const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
+  assert.equal((html.match(/data-open-general-settings/g) || []).length, 3);
+  assert.match(html, /id="sound-effects-volume"/);
+  assert.match(html, /id="background-music-volume"/);
+  assert.match(html, /aria-controls="menu-settings-modal"/);
+});
+
 test("audio effects reuse prepared players and do not overlap the same effect", () => {
   FakeAudio.instances = [];
   const manager = createAudioManager({ AudioCtor: FakeAudio, storage: new MemoryStorage() });
@@ -58,10 +67,11 @@ test("effect mute and volume preferences persist and are respected", () => {
   const storage = new MemoryStorage();
   const manager = createAudioManager({ AudioCtor: FakeAudio, storage });
   manager.setVolume(0.6);
+  manager.setMusicVolume(0.3);
   manager.setEnabled(false);
   assert.equal(manager.play("item-spawn"), false);
   const restored = createAudioManager({ AudioCtor: FakeAudio, storage });
-  assert.deepEqual(restored.getPreferences(), { enabled: false, volume: 0.6 });
+  assert.deepEqual(restored.getPreferences(), { enabled: false, volume: 0.6, musicVolume: 0.3 });
   restored.setEnabled(true);
   assert.equal(restored.play("item-spawn"), true);
   const itemAudio = FakeAudio.instances.filter((audio) => audio.src.endsWith("item-spawn.mp3")).at(-1);
@@ -96,10 +106,33 @@ test("background tracks are shuffled and continue after the current track ends",
   manager.unlock();
   const music = FakeAudio.instances.at(-1);
   assert.equal(music.playCount, 1);
+  manager.setMusicVolume(0.42);
+  assert.equal(music.volume, 0.42);
   const firstTrack = music.src;
   music.end();
   assert.equal(music.playCount, 2);
   assert.notEqual(music.src, firstTrack);
   manager.setMusicActive(false);
   assert.equal(music.paused, true);
+});
+
+test("music autoplay is attempted on page activation and resumes the same track after a browser block", async () => {
+  FakeAudio.instances = [];
+  class AutoplayBlockedAudio extends FakeAudio {
+    play() {
+      this.paused = true;
+      this.playCount += 1;
+      return Promise.reject(new Error("NotAllowedError"));
+    }
+  }
+  const manager = createAudioManager({ AudioCtor: AutoplayBlockedAudio, storage: new MemoryStorage(), random: () => 0 });
+  manager.setMusicActive(true);
+  const music = FakeAudio.instances.at(-1);
+  const selectedTrack = music.src;
+  assert.equal(music.playCount, 1);
+  await Promise.resolve();
+  await Promise.resolve();
+  manager.unlock();
+  assert.equal(music.playCount, 2);
+  assert.equal(music.src, selectedTrack);
 });

@@ -308,5 +308,6 @@ export default Object.freeze({ ...{
   "account.headerRating": "Рейтинг {rating}",
   "audio.effects": "Звуковые эффекты",
   "audio.effectsHelp": "Звуки ходов, предметов и результата партии",
-  "audio.volume": "Громкость эффектов"
+  "audio.volume": "Громкость эффектов",
+  "audio.musicVolume": "Громкость музыки"
 } });

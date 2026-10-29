@@ -337,5 +337,6 @@ export default Object.freeze({ ...{
   "account.headerRating": "Rating {rating}",
   "audio.effects": "Sound effects",
   "audio.effectsHelp": "Sounds for moves, items, and game results",
-  "audio.volume": "Effects volume"
+  "audio.volume": "Effects volume",
+  "audio.musicVolume": "Music volume"
 } });

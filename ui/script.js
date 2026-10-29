@@ -30,7 +30,7 @@ import {
   usePointDestroy
 } from "./game.js?v=teleport-protection1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games5";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=active-games6";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -40,7 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
-import { audioManager, getConfirmedAudioEvents } from "./audio.js?v=audio1";
+import { audioManager, getConfirmedAudioEvents } from "./audio.js?v=audio2";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
@@ -133,7 +133,6 @@ const computerDifficultyModal = document.querySelector("#computer-difficulty-mod
 const computerDifficultyCancelButton = document.querySelector("#computer-difficulty-cancel");
 const trainingButton = document.querySelector("#training-mode-button");
 const returnMenuButton = document.querySelector("#return-menu-button");
-const menuSettingsButton = document.querySelector("#menu-settings-button");
 const menuSettingsModal = document.querySelector("#menu-settings-modal");
 const menuSettingsCloseButton = document.querySelector("#menu-settings-close");
 const menuSettingsDoneButton = document.querySelector("#menu-settings-done");
@@ -141,6 +140,9 @@ const menuAnimationsToggle = document.querySelector("#menu-animations-toggle");
 const soundEffectsToggle = document.querySelector("#sound-effects-toggle");
 const soundEffectsVolume = document.querySelector("#sound-effects-volume");
 const soundEffectsVolumeValue = document.querySelector("#sound-effects-volume-value");
+const backgroundMusicVolume = document.querySelector("#background-music-volume");
+const backgroundMusicVolumeValue = document.querySelector("#background-music-volume-value");
+const globalSettingsTriggers = document.querySelectorAll("[data-open-general-settings]");
 const menuNotice = document.querySelector("#menu-notice");
 const accountActionButton = document.querySelector("#account-action");
 const accountModal = document.querySelector("#account-modal");
@@ -468,6 +470,9 @@ function syncAudioSettingsControls() {
   soundEffectsVolume.value = String(Math.round(preferences.volume * 100));
   soundEffectsVolumeValue.value = `${soundEffectsVolume.value}%`;
   soundEffectsVolumeValue.textContent = soundEffectsVolume.value;
+  backgroundMusicVolume.value = String(Math.round(preferences.musicVolume * 100));
+  backgroundMusicVolumeValue.value = `${backgroundMusicVolume.value}%`;
+  backgroundMusicVolumeValue.textContent = backgroundMusicVolumeValue.value;
 }
 
 document.addEventListener("pointerdown", () => {
@@ -3632,7 +3637,6 @@ computerDifficultyCancelButton.addEventListener("click", () => computerDifficult
 trainingButton.addEventListener("click", () => startTraining(0));
  tutorialAction.addEventListener("click", advanceTraining);
 returnMenuButton.addEventListener("click", returnToMainMenu);
-menuSettingsButton.addEventListener("click", openMenuSettings);
 menuSettingsCloseButton.addEventListener("click", () => menuSettingsModal.close());
 menuSettingsDoneButton.addEventListener("click", saveMenuSettings);
 soundEffectsToggle.addEventListener("change", () => audioManager.setEnabled(soundEffectsToggle.checked));
@@ -3641,6 +3645,12 @@ soundEffectsVolume.addEventListener("input", () => {
   soundEffectsVolumeValue.value = `${soundEffectsVolume.value}%`;
   soundEffectsVolumeValue.textContent = soundEffectsVolumeValue.value;
 });
+backgroundMusicVolume.addEventListener("input", () => {
+  audioManager.setMusicVolume(Number(backgroundMusicVolume.value) / 100);
+  backgroundMusicVolumeValue.value = `${backgroundMusicVolume.value}%`;
+  backgroundMusicVolumeValue.textContent = backgroundMusicVolumeValue.value;
+});
+for (const button of globalSettingsTriggers) button.addEventListener("click", openMenuSettings);
 function accountErrorMessage(error) {
   const code = error instanceof Error ? error.message : "network";
   const key = `account.error.${code}`;
