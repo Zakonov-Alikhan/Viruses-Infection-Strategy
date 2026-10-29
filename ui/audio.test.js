@@ -69,6 +69,19 @@ test("confirmed ability transitions play action cues only after the effect chang
   })), ["piece-place", "teleport"]);
 });
 
+test("ordinary piece deaths that create dead cells never play the dirty bomb sound", () => {
+  const previous = {
+    phase: "playing", currentPlayer: "X", board: [["X", "O"], ["O", ""]],
+    eventItems: [], protections: [], inventory: { X: [], O: [] }, message: []
+  };
+  const afterChainReaction = {
+    ...previous,
+    board: [["X", "#"], ["#", ""]],
+    message: [{ key: "message.destroyed", params: { count: 2 } }]
+  };
+  assert.deepEqual(getConfirmedAudioEvents(previous, afterChainReaction), ["piece-destroy"]);
+});
+
 test("an extra-turn bonus is silent when queued and sounds when the turn actually starts", () => {
   const before = {
     phase: "playing", currentPlayer: "X", piecesLeft: 1, board: [["X"]], eventItems: [], protections: [],

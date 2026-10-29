@@ -35,7 +35,6 @@ export function getConfirmedAudioEvents(previousState, nextState) {
 
   let placedPiece = false;
   let destroyedPiece = false;
-  let debrisAppeared = false;
   let portalMove = false;
   const currentPlayer = previousState.currentPlayer;
   const selectedItem = previousState.inventory?.[currentPlayer]
@@ -53,13 +52,12 @@ export function getConfirmedAudioEvents(previousState, nextState) {
           && isWormholeRoutedMove(previousState, row, col, currentPlayer)) portalMove = true;
       }
       if (wasPlaying && (before === "X" || before === "O") && before !== after) destroyedPiece = true;
-      if (wasPlaying && before !== "#" && after === "#") debrisAppeared = true;
     }
   }
   if (placedPiece) events.add("piece-place");
   if (destroyedPiece) events.add("piece-destroy");
   if (portalMove) events.add("wormhole");
-  if (wasPlaying && (debrisAppeared || hasNewMessage("message.antiBomb") || hasNewMessage("message.debris"))) events.add("dirty-bomb");
+  if (wasPlaying && (hasNewMessage("message.antiBomb") || hasNewMessage("message.debris"))) events.add("dirty-bomb");
   if (wasPlaying && hasNewMessage("message.bomb")) events.add("bomb-detonate");
   if (wasPlaying && hasNewMessage("message.pointDestroy")) events.add("shot-fire");
   if (wasPlaying && hasNewMessage("message.freePlacementUsed")) events.add("teleport");

@@ -40,7 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
-import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio5";
+import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio6";
 import { constrainDuelPosition, createDuelDragState, releaseDuelBody, stepDuelPhysics, updateDuelDragState } from "./duel-physics.js?v=duel-physics1";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
