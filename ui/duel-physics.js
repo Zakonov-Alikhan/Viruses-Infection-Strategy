@@ -1,6 +1,9 @@
 const PLAYER_IDS = ["X", "O"];
 
 export function constrainDuelPosition(x, y, width, height, radius) {
+  if (!(width > 0) || !(height > 0) || !(radius >= 0)) {
+    return { x: clamp(Number.isFinite(x) ? x : 0.5, 0, 1), y: clamp(Number.isFinite(y) ? y : 0.5, 0, 1) };
+  }
   const padding = radius * 1.42;
   const rx = Math.max(1, width / 2 - padding) / width;
   const ry = Math.max(1, height / 2 - padding) / height;
@@ -66,6 +69,7 @@ export function stepDuelPhysics(bodies, {
   capturedPlayer = null,
   dragTarget = null
 }) {
+  if (!(width > 0) || !(height > 0) || !(radius > 0)) return;
   const dt = clamp(elapsedSeconds || 0, 0, 0.05);
   for (const player of PLAYER_IDS) {
     const body = bodies[player];
@@ -100,6 +104,7 @@ export function resolveDuelCollision(first, second, {
   capturedPlayer = null,
   restitution = 0.18
 }) {
+  if (!(width > 0) || !(height > 0) || !(radius > 0)) return false;
   let dx = (second.x - first.x) * width;
   let dy = (second.y - first.y) * height;
   let distance = Math.hypot(dx, dy);

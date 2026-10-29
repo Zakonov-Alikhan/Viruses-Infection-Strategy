@@ -80,3 +80,13 @@ test("drag targets remain inside the scene boundary even at extreme pointer posi
   assert.ok(moved.target.x >= 0 && moved.target.x <= 1);
   assert.ok(moved.target.y >= 0 && moved.target.y <= 1);
 });
+
+test("hidden zero-sized canvas frames do not corrupt bacteria positions", () => {
+  const bodies = pair({ separation: 0 });
+  const before = structuredClone(bodies);
+  stepDuelPhysics(bodies, {
+    width: 0, height: 0, radius: 42, elapsedSeconds: 0.05, timeMilliseconds: 5000
+  });
+  assert.deepEqual(bodies, before);
+  assert.deepEqual(resolveDuelCollision(bodies.X, bodies.O, { width: 0, height: 0, radius: 42 }), false);
+});

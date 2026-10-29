@@ -1126,6 +1126,12 @@ function drawDuelScene(time = 0) {
   if (!menuDuelContext) return;
   const width = menuDuelCanvas.clientWidth;
   const height = menuDuelCanvas.clientHeight;
+  // The menu canvas is observed while its parent is hidden on other routes.
+  // Never feed zero-sized layout dimensions into normalized physics.
+  if (width <= 0 || height <= 0) {
+    duelPhysicsLastTime = null;
+    return;
+  }
   menuDuelContext.clearRect(0, 0, width, height);
   const scale = Math.min(width / 500, height / 330, 1.15);
   const radius = Math.max(35, 51 * scale);
@@ -1138,7 +1144,9 @@ function drawDuelScene(time = 0) {
   const elapsed = duelPhysicsLastTime === null ? 0 : Math.min(0.06, Math.max(0, time - duelPhysicsLastTime) / 1000);
   duelPhysicsLastTime = time;
   for (const [player, fallback] of Object.entries(defaults)) {
-    if (!duelPositions[player]) {
+    if (!duelPositions[player]
+      || !Number.isFinite(duelPositions[player].x)
+      || !Number.isFinite(duelPositions[player].y)) {
       duelPositions[player] = { ...fallback, vx: 0, vy: 0, phase: player === "X" ? 0.4 : 2.1 };
     }
   }
@@ -1404,16 +1412,17 @@ function resizeDuelCanvas() {
 }
 
 function resizeMenuAmbient() {
-  if (!menuCanvasContext) return;
+  if (!menuCanvasContext || mainMenuScreen.hidden) return;
+  const logicalWidth = menuCanvas.clientWidth;
+  const logicalHeight = menuCanvas.clientHeight;
+  if (logicalWidth <= 0 || logicalHeight <= 0) return;
   const ratio = Math.min(window.devicePixelRatio || 1, 1.35);
-  const width = Math.max(1, Math.round(menuCanvas.clientWidth * ratio));
-  const height = Math.max(1, Math.round(menuCanvas.clientHeight * ratio));
+  const width = Math.round(logicalWidth * ratio);
+  const height = Math.round(logicalHeight * ratio);
   if (menuCanvas.width === width && menuCanvas.height === height) return;
   menuCanvas.width = width;
   menuCanvas.height = height;
   menuCanvasContext.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const logicalWidth = menuCanvas.clientWidth;
-  const logicalHeight = menuCanvas.clientHeight;
   const count = Math.min(44, Math.max(22, Math.round((logicalWidth * logicalHeight) / 34000)));
   ambientNodes = Array.from({ length: count }, () => ({
     x: Math.random() * logicalWidth,
@@ -1441,6 +1450,7 @@ function syncMenuAmbient() {
     return;
   }
   if (menuAnimationFrame !== null) return;
+  resizeMenuAmbient();
   menuAnimationLastFrame = 0;
   duelPhysicsLastTime = null;
 
@@ -1671,6 +1681,7 @@ function showActiveGamesPage(show) {
   activeGamesPage.hidden = !show;
   syncBackgroundMusic();
   activeGamesPage.inert = !show;
+  if (!show) resizeMenuAmbient();
   syncMenuAmbient();
   if (show) {
     if (activeGamesRefreshTimer !== null) window.clearInterval(activeGamesRefreshTimer);
