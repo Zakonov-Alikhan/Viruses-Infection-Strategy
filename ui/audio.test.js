@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createAudioManager, getConfirmedAudioEvents, SOUND_EFFECTS } from "./audio.js";
+import { createAudioManager, getConfirmedAudioEvents, getGameResultSound, SOUND_EFFECTS } from "./audio.js";
 
 class MemoryStorage {
   values = new Map();
@@ -91,6 +91,27 @@ test("critical timer cue fires once when an active clock crosses ten seconds", (
   manager.observeTimer(2, "X", 10_001, true);
   manager.observeTimer(2, "X", 10_000, true);
   assert.equal(warningAudio.playCount, 2);
+});
+
+test("critical timer cue also fires once for a clock snapshot first observed inside the warning zone", () => {
+  FakeAudio.instances = [];
+  const manager = createAudioManager({ AudioCtor: FakeAudio, storage: new MemoryStorage() });
+  manager.observeTimer("reconnect", "O", 8_500, true);
+  manager.observeTimer("reconnect", "O", 8_400, true);
+  const warningAudio = FakeAudio.instances.find((audio) => audio.src.endsWith("timer-warning.mp3"));
+  assert.equal(warningAudio.playCount, 1);
+});
+
+test("win and loss cues follow the local player perspective and ignore spectator results", () => {
+  const playing = { phase: "playing" };
+  const won = { phase: "finished", winner: "X" };
+  const lost = { phase: "finished", winner: "O" };
+  assert.equal(getGameResultSound(playing, won, { computerOpponent: true }), "game-win");
+  assert.equal(getGameResultSound(playing, lost, { computerOpponent: true }), "game-loss");
+  assert.equal(getGameResultSound(playing, lost, { onlineMode: true, onlineSide: "O" }), "game-win");
+  assert.equal(getGameResultSound(playing, won, { onlineMode: true, onlineSide: "O" }), "game-loss");
+  assert.equal(getGameResultSound(playing, won, { observerMode: true }), null);
+  assert.equal(getGameResultSound(won, won, { computerOpponent: true }), null);
 });
 
 test("background tracks are shuffled and continue after the current track ends", () => {

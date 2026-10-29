@@ -40,7 +40,7 @@ import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
 import { copySupportCardNumber, isPublicSupportCardNumber } from "./support.js?v=support-card1";
-import { audioManager, getConfirmedAudioEvents } from "./audio.js?v=audio2";
+import { audioManager, getConfirmedAudioEvents, getGameResultSound } from "./audio.js?v=audio3";
 import { buildActiveRoomView } from "./active-games.js?v=games-directory1";
 import {
   appendHistoryEntry,
@@ -833,6 +833,7 @@ function advanceClock(now = performance.now()) {
   stopClock();
   const previousState = state;
   state = flagFall(state);
+  playGameResultSound(previousState, state);
   invalidateComputerAction();
   render();
   if (previousState.phase !== "finished" && state.phase === "finished") showResult();
@@ -2578,11 +2579,7 @@ function updateState(nextState, {
     localUndoHistory.record(previousState, nextState, clockRemaining, incrementAppliedMs);
   }
   const gameJustEnded = previousState.phase !== "finished" && nextState.phase === "finished";
-  if (gameJustEnded && !undoRestore) {
-    if (onlineMode && onlineSide) audioManager.play(nextState.winner === onlineSide ? "game-win" : "game-loss");
-    else if (computerOpponent.enabled) audioManager.play(nextState.winner === "X" ? "game-win" : "game-loss");
-    else if (!onlineObserverMode) audioManager.play("game-win");
-  }
+  if (gameJustEnded && !undoRestore) playGameResultSound(previousState, nextState);
   const inventoryExchangeConfirmed = !onlineMode
     && nextState.message?.key === "message.exchange"
     && previousState.inventory !== nextState.inventory;
@@ -2647,6 +2644,16 @@ function updateState(nextState, {
   if (inventoryExchangeConfirmed && state.settings.animationsEnabled) playInventoryExchangeAnimation();
   if (gameJustEnded && historyViewId === null) showResult();
   else if (!onlineMode) scheduleComputerAction();
+}
+
+function playGameResultSound(previousState, nextState) {
+  const sound = getGameResultSound(previousState, nextState, {
+    onlineMode,
+    onlineSide,
+    computerOpponent: computerOpponent.enabled,
+    observerMode: onlineObserverMode
+  });
+  if (sound) audioManager.play(sound);
 }
 
 function playInventoryExchangeAnimation() {

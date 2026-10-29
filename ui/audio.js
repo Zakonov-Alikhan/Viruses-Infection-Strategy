@@ -32,6 +32,17 @@ export function getConfirmedAudioEvents(previousState, nextState) {
   return events;
 }
 
+export function getGameResultSound(previousState, nextState, {
+  onlineMode = false,
+  onlineSide = null,
+  computerOpponent = false,
+  observerMode = false
+} = {}) {
+  if (previousState?.phase === "finished" || nextState?.phase !== "finished" || !nextState.winner || observerMode) return null;
+  const perspective = onlineMode ? onlineSide : computerOpponent ? "X" : null;
+  return perspective ? (nextState.winner === perspective ? "game-win" : "game-loss") : "game-win";
+}
+
 const PREFERENCES_KEY = "cascade-wars-audio-v1";
 const EFFECT_GAIN = Object.freeze({
   "piece-place": 0.48,
@@ -162,7 +173,8 @@ export function createAudioManager({
     const key = `${sessionId}:${side}`;
     const previous = warningTimers.get(key);
     warningTimers.set(key, remainingMs);
-    if (active && Number.isFinite(previous) && previous > 10_000 && remainingMs <= 10_000 && remainingMs > 0) {
+    if (active && remainingMs <= 10_000 && remainingMs > 0
+      && (previous === undefined || previous > 10_000)) {
       play("timer-warning");
     }
   }
