@@ -70,7 +70,9 @@ export async function submitAccountCredentials({
 export class AccountsClient {
   constructor({ baseUrl = resolveAccountApiBase(), fetchImpl = globalThis.fetch } = {}) {
     this.baseUrl = baseUrl;
-    this.fetchImpl = fetchImpl;
+    // Native browser fetch requires Window/Worker as its receiver. Calling an
+    // unbound copy as an AccountsClient method fails before sending a request.
+    this.fetchImpl = fetchImpl.bind(globalThis);
     logAccountDiagnostic("client-configured", {
       baseUrl: diagnosticUrl(baseUrl),
       origin: globalThis.location?.origin || "<unknown>",
@@ -104,13 +106,21 @@ export class AccountsClient {
       throw error;
     }
     logAccountDiagnostic("fetch-response", { url: diagnosticUrl(requestUrl), method, status: response.status });
+    const httpErrorCode = {
+      401: "invalid-credentials",
+      409: "username-taken",
+      429: "rate-limited",
+      502: "account-service-unavailable",
+      503: "account-service-unavailable",
+      504: "account-service-unavailable"
+    }[response.status] || "server-error";
     let result;
     try { result = await response.json(); }
     catch {
       logAccountDiagnostic("response-json-error", { url: diagnosticUrl(requestUrl), status: response.status });
-      throw new Error("server-error");
+      throw new Error(response.ok ? "server-error" : httpErrorCode);
     }
-    if (!response.ok) throw new Error(result?.error || "server-error");
+    if (!response.ok) throw new Error(result?.error || httpErrorCode);
     return result;
   }
 

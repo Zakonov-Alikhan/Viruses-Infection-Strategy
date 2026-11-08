@@ -34,6 +34,39 @@ test("account requests include cookies and the custom same-origin verification h
   assert.equal(new URL(calls[0].url).search, "");
 });
 
+test("account fetch uses the browser global receiver for login, registration, and profile requests", async () => {
+  const calls = [];
+  const client = new AccountsClient({
+    fetchImpl: async function (url, options) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      calls.push({ url, method: options.method });
+      return { ok: true, status: 200, json: async () => ({ account: null, entries: [] }) };
+    }
+  });
+  await client.login("Alice", "a-long-test-password");
+  await client.register("Alice", "a-long-test-password");
+  await client.me();
+  await client.leaderboard();
+  await client.logout();
+  assert.deepEqual(calls, [
+    { url: "/api/auth/login", method: "POST" },
+    { url: "/api/auth/register", method: "POST" },
+    { url: "/api/me", method: "GET" },
+    { url: "/api/leaderboard", method: "GET" },
+    { url: "/api/auth/logout", method: "POST" }
+  ]);
+});
+
+test("non-JSON HTTP errors keep their HTTP meaning instead of becoming a network error", async () => {
+  for (const [status, code] of [[401, "invalid-credentials"], [409, "username-taken"], [429, "rate-limited"], [502, "account-service-unavailable"], [503, "account-service-unavailable"]]) {
+    const client = new AccountsClient({ fetchImpl: async () => ({
+      ok: false, status,
+      json: async () => { throw new SyntaxError("Not JSON"); }
+    }) });
+    await assert.rejects(client.login("Alice", "a-long-test-password"), new RegExp(code));
+  }
+});
+
 test("account client uses the existing routes through a relative same-origin API base", async () => {
   const calls = [];
   const client = new AccountsClient({
@@ -143,7 +176,7 @@ test("auth tabs are non-submitting controls and exactly one constrained form is 
   assert.equal((auth.match(/name="password"[^>]*minlength="10"[^>]*required/g) || []).length, 2);
   assert.match(script, /accountLoginForm\.addEventListener\("submit"/);
   assert.match(script, /accountRegisterForm\.addEventListener\("submit"/);
-  assert.match(html, /script\.js\?v=cascade-package13/);
+  assert.match(html, /script\.js\?v=cascade-package14/);
   assert.doesNotMatch(html, /script\.js\?v=account-entry1/);
 });
 
