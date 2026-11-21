@@ -493,6 +493,8 @@ test("online settings restart and rematch require the second player's approval",
 });
 
 test("WebSocket address defaults are local-only and secure on HTTPS origins", () => {
+  assert.equal(resolveMultiplayerUrl({ configuredUrl: "/ws", location: { protocol: "https:", host: "game.example" } }), "wss://game.example/ws");
+  assert.equal(resolveMultiplayerUrl({ configuredUrl: "/ws", location: { protocol: "http:", host: "127.0.0.1:3000" } }), "ws://127.0.0.1:3000/ws");
   assert.equal(MULTIPLAYER_CONFIG.localWebSocketUrl, "ws://127.0.0.1:3001/ws");
   assert.equal(resolveMultiplayerUrl({ location: { hostname: "localhost" } }), MULTIPLAYER_CONFIG.localWebSocketUrl);
   assert.equal(resolveMultiplayerUrl({ location: { hostname: "game.example", protocol: "https:", host: "game.example" } }), "wss://game.example/ws");

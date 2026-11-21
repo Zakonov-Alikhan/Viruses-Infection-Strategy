@@ -36,7 +36,7 @@ func TestRuntimeConfigIncludesOnlyValidPublicSupportCardNumber(t *testing.T) {
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `window.VIRUSES_SUPPORT_CARD_NUMBER = "1234567890123456";`) {
 		t.Fatalf("valid public card number was not exposed in runtime config: %d %s", response.Code, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `window.VIRUSES_MULTIPLAYER_URL = "";`) {
+	if !strings.Contains(response.Body.String(), `window.VIRUSES_MULTIPLAYER_URL = "/ws";`) {
 		t.Fatalf("WebSocket runtime config was not preserved: %s", response.Body.String())
 	}
 }

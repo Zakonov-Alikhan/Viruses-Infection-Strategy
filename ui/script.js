@@ -30,11 +30,11 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-admin-lifetime1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=room-recovery2";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-rating3";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
-import { MultiplayerClient } from "./multiplayer.js?v=room-recovery2";
+import { MultiplayerClient } from "./multiplayer.js?v=account-rating3";
 import { AccountsClient, logAccountDiagnostic, submitAccountCredentials } from "./accounts.js?v=account-fetch3";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
@@ -162,6 +162,7 @@ const leaderboardStatus = document.querySelector("#leaderboard-status");
 const accountsClient = new AccountsClient();
 let currentAccount = null;
 let accountSubmitting = false;
+let accountRefreshVersion = 0;
 const menuCanvas = document.querySelector("#menu-ambient");
 const menuCanvasContext = menuCanvas.getContext("2d");
 const menuDuelCanvas = document.querySelector("#menu-duel");
@@ -2015,6 +2016,7 @@ function handleMultiplayerEvent(event) {
   }
   if (event.type === "rating-updated" && onlineMode && isCurrentOnlineEvent(event)) {
     void refreshAccount();
+    void refreshLeaderboard();
     return;
   }
   if (event.type === "admin-authenticated" && onlineMode && isCurrentOnlineEvent(event)) {
@@ -2242,7 +2244,7 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
-  if (["reconnect-failed", "room-closed", "session-replaced"].includes(event.type)) {
+  if (["reconnect-failed", "room-closed", "session-replaced", "account-session-ended"].includes(event.type)) {
     onlineConnected = false;
     onlineAdminAuthenticated = false;
     boardEditorActive = false;
@@ -2255,7 +2257,7 @@ function handleMultiplayerEvent(event) {
     onlineUndoPending = false;
     incomingUndoProposal = null;
     if (undoProposalModal.open && !localUndoConfirmation) undoProposalModal.close();
-    onlineStatusError = event.type === "session-replaced" ? "session-replaced" : event.code || event.reason;
+    onlineStatusError = ["session-replaced", "account-session-ended"].includes(event.type) ? event.type : event.code || event.reason;
     onlineGameStatus.textContent = onlineErrorMessage(onlineStatusError);
     onlineGameStatus.hidden = false;
     if (onlineMode) render();
@@ -3781,10 +3783,16 @@ function renderAccount(account) {
 }
 
 async function refreshAccount() {
+  const version = ++accountRefreshVersion;
   try {
-    renderAccount((await accountsClient.me()).account);
+    const result = await accountsClient.me();
+    if (version !== accountRefreshVersion) return;
+    renderAccount(result.account);
   } catch (error) {
-    renderAccount(null);
+    if (version !== accountRefreshVersion) return;
+    // A temporary API failure does not invalidate the HttpOnly session.
+    // Only a confirmed /me response with account:null signs the profile out.
+    if (!currentAccount) renderAccount(null);
     accountStatus.textContent = accountErrorMessage(error);
     accountStatus.classList.add("account-status-error");
   }
@@ -3837,6 +3845,7 @@ async function submitAccountForm(event, method) {
     return;
   }
   const form = event.currentTarget;
+  accountRefreshVersion += 1;
   const data = new FormData(form);
   const submit = form.querySelector('button[type="submit"]');
   const errorElement = form.querySelector(".account-form-error");
@@ -3858,6 +3867,10 @@ async function submitAccountForm(event, method) {
       submit.textContent = t(loading ? `account.loading.${method}` : `account.${method}`);
     },
     onSuccess(result) {
+      accountRefreshVersion += 1;
+      // A handshake cannot acquire a new cookie after login. Reconnect with
+      // the confirmed account before creating or rejoining a room.
+      multiplayerClient.disconnect({ preserveSession: true });
       logAccountDiagnostic("ui-profile-updated", { method, authenticated: Boolean(result?.account) });
       renderAccount(result.account);
       form.reset();
@@ -3903,8 +3916,10 @@ accountAuthTabs.addEventListener("keydown", (event) => {
   accountAuthTabs.querySelector(`[data-account-tab="${next}"]`).focus();
 });
 document.querySelector("#account-logout").addEventListener("click", async () => {
+  accountRefreshVersion += 1;
   try {
     await accountsClient.logout();
+    multiplayerClient.disconnect({ preserveSession: true });
     renderAccount(null);
     accountStatus.textContent = t("account.loggedOut");
   } catch (error) {

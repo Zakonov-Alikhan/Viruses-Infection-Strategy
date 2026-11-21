@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { RoomManager } from "./rooms.js";
 import { clearSessionCookie, readSessionCookie, sessionCookie } from "./accounts.js";
@@ -195,6 +195,16 @@ export function createMultiplayerServer({
   let heartbeatTimer = null;
   let closing = false;
 
+  function endAccountConnections(token) {
+    if (!token) return;
+    const hash = createHash("sha256").update(token).digest("hex");
+    for (const socket of webSocketServer.clients) {
+      if (socket.accountSessionHash !== hash) continue;
+      safeJsonSend(socket, { type: "account-session-ended" });
+      socket.close(4003, "account-session-ended");
+    }
+  }
+
   async function handleAccountApi(request, response) {
     const origin = request.headers.origin;
     const allowOrigin = typeof origin === "string" && allowedOrigins?.has(origin);
@@ -230,6 +240,7 @@ export function createMultiplayerServer({
       }
       if (pathName === "/api/auth/logout") {
         if (token) await accountStore.deleteSession(token);
+        endAccountConnections(token);
         return sendJson(response, 200, { ok: true }, { ...corsHeaders, "set-cookie": clearSessionCookie() });
       }
       if (pathName !== "/api/auth/register" && pathName !== "/api/auth/login") {
@@ -253,6 +264,7 @@ export function createMultiplayerServer({
         if (!account) return sendJson(response, 401, { error: "invalid-credentials" }, corsHeaders);
       }
       if (token) await accountStore.deleteSession(token);
+      endAccountConnections(token);
       const freshToken = await accountStore.createSession(account.id);
       const safeAccount = await accountStore.getSession(freshToken);
       return sendJson(response, registering ? 201 : 200, { account: safeAccount }, {
@@ -301,6 +313,9 @@ export function createMultiplayerServer({
 
   webSocketServer.on("connection", (socket, request, identity = null) => {
     socket.on("error", () => {});
+    const sessionToken = readSessionCookie(request.headers.cookie);
+    socket.accountSessionHash = identity && sessionToken
+      ? createHash("sha256").update(sessionToken).digest("hex") : null;
     socket.isAlive = true;
     socket.on("pong", () => { socket.isAlive = true; });
     const clientAddress = getClientAddress(request, trustProxy);

@@ -136,7 +136,8 @@
         </form>
         <form id="account-register-form" class="account-form" role="tabpanel" aria-labelledby="account-register-tab" hidden>
           <label for="account-register-username" data-i18n="account.username">Имя пользователя</label>
-          <input id="account-register-username" name="username" type="text" minlength="3" maxlength="24" autocomplete="username" required>
+          <input id="account-register-username" name="username" type="text" minlength="3" maxlength="24" autocomplete="username" aria-describedby="account-username-help" required>
+          <small id="account-username-help" data-i18n="account.usernameHelp">3–24 латинских буквы, цифры или подчёркивания.</small>
           <label for="account-register-password" data-i18n="account.password">Пароль</label>
           <input id="account-register-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
           <small data-i18n="account.passwordHelp">Не менее 10 символов. Используйте уникальный пароль.</small>
@@ -678,6 +679,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=cascade-package15"></script>
+  <script type="module" src="/ui/script.js?v=cascade-package16"></script>
 </body>
 </html>

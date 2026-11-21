@@ -48,6 +48,7 @@ test("username validation, Elo formula, and HttpOnly cookie helpers are stable",
   assert.equal(calculateElo(1600, 1200), 3);
   assert.match(sessionCookie("x".repeat(43), { secure: true }), /HttpOnly/);
   assert.match(sessionCookie("x".repeat(43), { secure: true }), /Secure/);
+  assert.match(sessionCookie("x".repeat(43), { secure: true }), /SameSite=Lax/);
   assert.equal(readSessionCookie(`other=x; cw_session=${"x".repeat(43)}`), "x".repeat(43));
   assert.match(clearSessionCookie({ secure: true }), /Max-Age=0/);
 });
@@ -180,6 +181,9 @@ test("PostgreSQL stores account, session, and one atomic Elo result across store
   const schema = `cw_test_${randomUUID().replaceAll("-", "")}`;
   await adminPool.query(`CREATE SCHEMA ${schema}`);
   const pool = new Pool({ connectionString: databaseUrl, max: 3, options: `-c search_path=${schema}` });
+  // Explicit SET also supports isolated PostgreSQL-compatible test servers
+  // which do not apply startup `options` (the application does not need this).
+  pool.on("connect", client => { void client.query(`SET search_path TO ${schema}`); });
   try {
     const store = new AccountStore({ pool });
     await store.initialize();
@@ -208,6 +212,68 @@ test("PostgreSQL stores account, session, and one atomic Elo result across store
     ]);
     assert.equal((await restartedStore.getById(a.id)).wins, 2);
     assert.equal((await restartedStore.getById(b.id)).wins, 1);
+
+    // Exercise the actual HTTP and WebSocket handlers with real SQL, password
+    // hashing and sessions, instead of a permissive fake account store.
+    const server = createMultiplayerServer({ host: "127.0.0.1", port: 0, cleanupIntervalMs: 0,
+      allowedOrigins: new Set([ORIGIN]), accountStore: store });
+    const address = await server.listen();
+    const base = `http://127.0.0.1:${address.port}`;
+    const sockets = [];
+    const post = (path, body, cookie = "") => fetch(`${base}/api/auth/${path}`, {
+      method: "POST", headers: { origin: ORIGIN, "content-type": "application/json", "x-cw-request": "1", cookie },
+      body: JSON.stringify(body)
+    });
+    const open = async cookie => {
+      const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: ORIGIN, headers: { cookie } });
+      sockets.push(socket);
+      await new Promise((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+      const messages = [];
+      socket.on("message", raw => messages.push(JSON.parse(raw.toString())));
+      return { socket, send: m => socket.send(JSON.stringify(m)), async next(type) {
+        for (let i = 0; i < 200; i += 1) {
+          const index = messages.findIndex(m => m.type === type);
+          if (index >= 0) return messages.splice(index, 1)[0];
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        throw new Error(`Missing ${type}`);
+      } };
+    };
+    try {
+      const cookies = [], ids = [];
+      for (const username of ["HttpPlayerA", "HttpPlayerB"]) {
+        const response = await post("register", { username, password: "temporary-test-password" });
+        assert.equal(response.status, 201);
+        cookies.push(response.headers.get("set-cookie").split(";")[0]);
+        ids.push((await response.json()).account.id);
+      }
+      const host = await open(cookies[0]);
+      const guest = await open(cookies[1]);
+      host.send({ type: "create-room", settings: { freeStartingPositions: false, randomEvents: false, unlimitedTime: true } });
+      const room = await host.next("room-created");
+      guest.send({ type: "join-room", code: room.roomCode });
+      await guest.next("room-joined");
+      await host.next("room-ready");
+      host.send({ type: "command", command: { type: "resign" } });
+      await host.next("rating-updated");
+      await guest.next("rating-updated");
+      assert.equal((await restartedStore.getById(ids[0])).rating, 1184);
+      assert.equal((await restartedStore.getById(ids[1])).rating, 1216);
+      host.send({ type: "command", command: { type: "resign" } });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal((await restartedStore.getById(ids[1])).wins, 1);
+      assert.equal((await post("login", { username: "HttpPlayerA", password: "wrong-password" })).status, 401);
+      const closed = new Promise(resolve => host.socket.once("close", resolve));
+      assert.equal((await post("logout", {}, cookies[0])).status, 200);
+      await closed;
+      assert.equal(await store.getSession(cookies[0].split("=")[1]), null);
+      const login = await post("login", { username: "HttpPlayerA", password: "temporary-test-password" });
+      assert.equal(login.status, 200);
+      assert.equal((await login.json()).account.rating, 1184);
+    } finally {
+      for (const socket of sockets) socket.terminate();
+      await server.close();
+    }
   } finally {
     await pool.end();
     await adminPool.query(`DROP SCHEMA ${schema} CASCADE`);

@@ -16,7 +16,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid account API proxy configuration: %v", err)
 	}
-	handler := newHTTPHandler(apiProxy)
+	webSocketProxy, err := newWebSocketProxyFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid WebSocket proxy configuration: %v", err)
+	}
+	handler := newHTTPHandler(apiProxy, webSocketProxy)
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "3000"
@@ -32,11 +36,14 @@ func main() {
 	}
 }
 
-func newHTTPHandler(apiProxy http.Handler) http.Handler {
+func newHTTPHandler(apiProxy http.Handler, webSocketProxies ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	// Account API calls stay same-origin in the browser; only this fixed route
 	// is forwarded to the configured Node service.
 	mux.Handle("/api/", apiProxy)
+	if len(webSocketProxies) > 0 {
+		mux.Handle("/ws", webSocketProxies[0])
+	}
 	// каждый раз, когда идёт обращение начинается с "/ui", "ui" убирается, и по оставшемуся пути ищется соответствующий файл.
 	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.Dir("ui"))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +67,8 @@ func serveRuntimeConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	encodedURL, err := json.Marshal(webSocketURL)
+	// The upstream address belongs to the Go proxy, never to browser auth.
+	encodedURL, err := json.Marshal("/ws")
 	if err != nil {
 		http.Error(w, "Could not create runtime configuration", http.StatusInternalServerError)
 		return

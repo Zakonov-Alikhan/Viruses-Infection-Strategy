@@ -27,11 +27,11 @@ export function calculateElo(ratingA, ratingB) {
 }
 
 export function sessionCookie(token, { secure = process.env.NODE_ENV === "production" } = {}) {
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=${secure ? "None" : "Lax"}; Max-Age=${SESSION_TTL_SECONDS}${secure ? "; Secure" : ""}`;
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure ? "; Secure" : ""}`;
 }
 
 export function clearSessionCookie({ secure = process.env.NODE_ENV === "production" } = {}) {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=${secure ? "None" : "Lax"}; Max-Age=0${secure ? "; Secure" : ""}`;
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
 export function readSessionCookie(header = "") {

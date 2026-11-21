@@ -269,6 +269,57 @@ test("rated room binds distinct account identities and reports only the server w
   manager.stopAllClocks();
 });
 
+test("rated admission rejects missing rating data without consuming the second seat", () => {
+  const manager = makeManager();
+  const created = manager.createRoom(undefined, { accountId: "a" });
+  assert.equal(manager.joinRoom(created.roomCode, { accountId: "b", ratingsByAccount: {} }).error.code, "rating-service-unavailable");
+  assert.equal(manager.rooms.get(created.roomCode).seats.O, null);
+  assert.equal(manager.rooms.get(created.roomCode).status, "waiting");
+});
+
+test("rematch waits for rating persistence, then snapshots the updated ratings", async () => {
+  let completeWrite;
+  const written = new Promise(resolve => { completeWrite = resolve; });
+  let ratingsRead = 0;
+  const manager = makeManager({
+    settings: { ...TEST_SETTINGS, freeStartingPositions: false },
+    onMatchFinished: () => written,
+    onMatchStarted: async () => { ratingsRead += 1; return { a: 1184, b: 1216 }; }
+  });
+  const room = manager.createRoom(undefined, { accountId: "a" });
+  manager.joinRoom(room.roomCode, { accountId: "b", ratingsByAccount: { a: 1200, b: 1200 } });
+  manager.attachConnection(room.roomCode, "X", () => {});
+  manager.attachConnection(room.roomCode, "O", () => {});
+  await manager.submitCommand(room.roomCode, "X", { type: "resign" });
+  const before = manager.rooms.get(room.roomCode).matchId;
+  const offer = await manager.proposeRestart(room.roomCode, "X", "rematch");
+  const vote = manager.voteRestart(room.roomCode, "O", offer.proposalId, true);
+  await Promise.resolve();
+  assert.equal(ratingsRead, 0);
+  assert.equal(manager.rooms.get(room.roomCode).matchId, before);
+  completeWrite({ recorded: true });
+  assert.equal((await vote).accepted, true);
+  assert.deepEqual(manager.rooms.get(room.roomCode).startRatings, { a: 1184, b: 1216 });
+  assert.notEqual(manager.rooms.get(room.roomCode).matchId, before);
+});
+
+test("failed rating persistence cannot be discarded by a rematch", async () => {
+  const manager = makeManager({
+    settings: { ...TEST_SETTINGS, freeStartingPositions: false },
+    onMatchFinished: async () => { throw new Error("temporary database failure"); }
+  });
+  const room = manager.createRoom(undefined, { accountId: "a" });
+  manager.joinRoom(room.roomCode, { accountId: "b", ratingsByAccount: { a: 1200, b: 1200 } });
+  manager.attachConnection(room.roomCode, "X", () => {});
+  manager.attachConnection(room.roomCode, "O", () => {});
+  await manager.submitCommand(room.roomCode, "X", { type: "resign" });
+  const before = manager.rooms.get(room.roomCode).matchId;
+  const offer = await manager.proposeRestart(room.roomCode, "X", "rematch");
+  assert.equal((await manager.voteRestart(room.roomCode, "O", offer.proposalId, true)).error.code, "rating-service-unavailable");
+  assert.equal(manager.rooms.get(room.roomCode).matchId, before);
+  assert.equal(manager.rooms.get(room.roomCode).ratingRecorded, false);
+});
+
 test("room history contains only confirmed commands and is shared with each player's view", async () => {
   const manager = makeManager();
   const room = manager.createRoom();

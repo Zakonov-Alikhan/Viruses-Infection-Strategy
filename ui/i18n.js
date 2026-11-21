@@ -1,5 +1,5 @@
-import ruLocale from "./locale-ru.js?v=room-recovery2";
-import enLocale from "./locale-en.js?v=room-recovery2";
+import ruLocale from "./locale-ru.js?v=account-rating3";
+import enLocale from "./locale-en.js?v=account-rating3";
 
 const dictionaries = Object.freeze({ ru: ruLocale, en: enLocale });
 const supportedLanguages = Object.keys(dictionaries);

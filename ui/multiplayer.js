@@ -14,7 +14,13 @@ export function resolveMultiplayerUrl({
   configuredUrl = globalThis.VIRUSES_MULTIPLAYER_URL,
   location = globalThis.location
 } = {}) {
-  if (typeof configuredUrl === "string" && configuredUrl.trim()) return configuredUrl.trim();
+  if (typeof configuredUrl === "string" && configuredUrl.trim()) {
+    if (configuredUrl.trim() === "/ws" && location) {
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${location.host}/ws`;
+    }
+    return configuredUrl.trim();
+  }
   if (!location) return MULTIPLAYER_CONFIG.localWebSocketUrl;
   if (["localhost", "127.0.0.1"].includes(location.hostname)) {
     return MULTIPLAYER_CONFIG.localWebSocketUrl;
@@ -397,6 +403,8 @@ export class MultiplayerClient {
       // A newer tab owns this seat. Do not reconnect in a loop or erase its
       // shared browser credentials when this old tab is later closed.
       this.session = null;
+      this.disconnect({ preserveSession: true });
+    } else if (message.type === "account-session-ended") {
       this.disconnect({ preserveSession: true });
     } else if (["room-ready", "room-resumed", "state"].includes(message.type)) {
       this.#updateSavedSide(message);

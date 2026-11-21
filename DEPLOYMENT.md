@@ -2,7 +2,7 @@
 
 The repository includes a Render Blueprint in `render.yaml`. It defines two Web Services and one PostgreSQL database, all on Render's **Free** plan in the same region. Both web services use the `codex/online-multiplayer` branch:
 
-1. `viruses-infection-strategy` (Go), serving the browser client and runtime configuration.
+1. `viruses-infection-strategy` (Go), serving the browser client, runtime configuration, HTTP API proxy and WebSocket proxy.
 2. `viruses-multiplayer` (Node.js), serving `/health` and WebSocket upgrades at `/ws`.
 3. `viruses-accounts-db` (PostgreSQL), backing account sessions and ratings.
 
@@ -31,9 +31,9 @@ If GitHub access is not connected to Render, connect the repository from Render 
   - `VIRUSES_API_URL` = `https://viruses-multiplayer.onrender.com` (verified with the Node service's `/health`; set the HTTPS origin only, without `/api`)
   - Render supplies `PORT`. The app listens on `0.0.0.0:$PORT`.
 
-`/runtime-config.js` exposes only the configured WebSocket URL to the browser and is sent with `Cache-Control: no-store`. Do not put credentials or tokens in this URL.
+`/runtime-config.js` gives the browser the relative WebSocket path `/ws` and is sent with `Cache-Control: no-store`. `VIRUSES_MULTIPLAYER_URL` remains the Go proxy's server-side upstream address. Do not put credentials or tokens in either URL.
 `SUPPORT_CARD_NUMBER` is a public display value configured on the Go website service and supplied by this Blueprint. Runtime config publishes only its digit-only value (13–19 digits) for the support card. If the service already exists, sync the Blueprint or set this variable in the Go service's Environment settings, then verify `/runtime-config.js`. Do not place the value in application JavaScript, URLs, logs, or analytics. It is not a credential and is never used for payment processing.
-Account requests use relative `/api/...` paths on the Go site's origin. The Go server proxies those requests to `VIRUSES_API_URL`, so the browser never contacts the Node service's separate origin for accounts. The proxy target is fixed from server environment and cannot be supplied by a browser request.
+Account requests use relative `/api/...` paths and the game WebSocket uses `/ws`, both on the Go site's origin. Go forwards the original Origin and account cookie to Node, which validates them. Both proxy targets are fixed by server environment; clients cannot override them. This lets the same HttpOnly cookie authenticate the profile and the player's room seat, even when Go and Node have unrelated Render hostnames.
 
 ## Node.js multiplayer service
 
@@ -54,9 +54,11 @@ Use exact web origins in `MULTIPLAYER_ALLOWED_ORIGINS`, comma-separated if you h
 
 The Node service also serves account endpoints at `/api`. Requests reach it through the Go service's same-origin `/api/` proxy, which preserves the original `Origin` header so the Node API's existing allow-list and request verification remain active. No database credential or API URL is exposed to the browser.
 
-For custom domains, serve the Go site and Node API/WebSocket under the same registrable domain (for example, `play.example.com` and `api.example.com`); unrelated sites can have their cross-site cookies blocked by browser privacy settings.
+For a custom domain, add the Go site's new origin to the Node allow-list. The browser still connects only to the Go origin, so no shared cookie domain or third-party-cookie permission is needed.
 
-Routes are `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/me`, and `GET /api/leaderboard`. Mutating requests require the browser's JSON request header and an allow-listed Origin. Sessions use a 30-day HttpOnly cookie; only its SHA-256 digest is stored. Passwords use Node's scrypt password KDF (N=32768, r=8, p=1, 64-byte derived key) with a random 16-byte salt. Elo starts at 1200 with K=32 and is committed with the match result in one PostgreSQL transaction.
+Routes are `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/me`, and `GET /api/leaderboard`. Mutating requests require the browser's JSON request header and an allow-listed Origin. Sessions use a 30-day HttpOnly, SameSite=Lax cookie (Secure in production); only its SHA-256 digest is stored. Passwords use Node's scrypt password KDF (N=32768, r=8, p=1, 64-byte derived key) with a random 16-byte salt. Logout and session rotation close the old session's authenticated sockets. The UI also opens a fresh handshake after login.
+
+Elo starts at 1200 with K=32. Both players must be signed into distinct accounts before joining the match; guest/local/AI games do not change ratings. The server winner determines equal positive/negative rating updates, committed with the unique match ID in one PostgreSQL transaction. Duplicate finish commands cannot apply it twice. A rematch waits for the previous rating write, then reads the updated starting ratings. Signing in during an existing guest match does not retroactively make it rated.
 
 The Blueprint provisions `viruses-accounts-db` on Free and supplies its private connection string to the Node service. The service applies the repeatable schema in `server/migrations/001_accounts_ratings.sql` at startup. If `DATABASE_URL` is absent, guests and online rooms still work, while account/profile/leaderboard API requests return `503 accounts-unavailable`.
 
@@ -74,15 +76,18 @@ After Render assigns both hostnames, configure:
 
 Use exact Render hostnames, without angle brackets. The allowed Origin must not include a path or trailing slash. Keep `NODE_ENV=production`, `MULTIPLAYER_HOST=0.0.0.0`, and `MULTIPLAYER_TRUST_PROXY=true`; do not disable Origin checks. Save the variables and redeploy both services.
 
-For local development, run the Node service on port 3001 and set `VIRUSES_API_URL=http://127.0.0.1:3001` in the Go process environment before starting it. For example, in PowerShell: `$env:VIRUSES_API_URL = 'http://127.0.0.1:3001'; go run .`. Keep the Node allowed Origin set to `http://127.0.0.1:3000` (its default when not in production). The WebSocket URL remains configured independently and is not routed through the HTTP API proxy.
+For local development, run Node on port 3001 and set `VIRUSES_API_URL=http://127.0.0.1:3001` in the Go process environment. If `VIRUSES_MULTIPLAYER_URL` is unset, Go uses this same existing Node service's `/ws`; an explicit WebSocket upstream takes precedence. For example: `$env:VIRUSES_API_URL = 'http://127.0.0.1:3001'; go run .`. Keep the Node allowed Origin set to `http://127.0.0.1:3000` (a development default). Use the same hostname consistently in the browser; localhost and 127.0.0.1 have separate cookies.
+
+SQL integration tests require `TEST_DATABASE_URL` pointing exclusively to an isolated PostgreSQL database whose name includes `test`. The tests create/drop their own schema and exercise registration, password verification, cookie sessions, WebSocket seat identity, rating transactions and duplicate protection. Never point this variable at production. The browser flow can be checked against a temporary local database; no production test accounts are required.
 
 ## Verify the deployment
 
 1. Open `https://<Go hostname>/` and confirm the game loads.
-2. Open `https://<Go hostname>/runtime-config.js`; it should contain the public `wss://<Node hostname>/ws` address and no secret.
+2. Open `https://<Go hostname>/runtime-config.js`; the WebSocket value should be `/ws`, with no upstream host or secret.
 3. Open `https://<Node hostname>/health`; expect HTTP 200.
 4. Create a private room in one browser and join from a second browser or device using its invitation code.
-5. Confirm the browser Network panel shows a successful WebSocket upgrade to `wss://<Node hostname>/ws`; make moves in both directions and confirm the server clocks update and a timeout ends the game.
+5. Confirm Network shows a successful WebSocket upgrade to `wss://<Go hostname>/ws`; make moves in both directions and confirm the server clocks update and a timeout ends the game.
+6. With two authorized test accounts in an isolated local environment, finish a match and confirm one rating rises and the other falls, the leaderboard updates, and logout/login retains the result. Repeating a finish command must not award it twice.
 
 The Go and Node services both use Render's `PORT` and bind to `0.0.0.0`. Render routes public HTTP and WebSocket traffic through the service's configured port. The Node app uses the same HTTP server for `/health` and WebSocket upgrades.
 

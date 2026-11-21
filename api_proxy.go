@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const defaultAPIUnavailableBody = `{"error":"accounts-unavailable"}`
+const defaultAPIUnavailableBody = `{"error":"account-service-unavailable"}`
 
 func parseAPIOrigin(raw string) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
@@ -28,7 +28,7 @@ func parseAPIOrigin(raw string) (*url.URL, error) {
 	return target, nil
 }
 
-func newAPIProxy(target *url.URL) http.Handler {
+func newUpstreamProxy(target *url.URL) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	director := proxy.Director
 	proxy.Director = func(request *http.Request) {
@@ -62,6 +62,11 @@ func newAPIProxy(target *url.URL) http.Handler {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(defaultAPIUnavailableBody))
 	}
+	return proxy
+}
+
+func newAPIProxy(target *url.URL) http.Handler {
+	proxy := newUpstreamProxy(target)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)

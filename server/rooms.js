@@ -197,6 +197,10 @@ export class RoomManager {
     if (!room) return failure("room-not-found");
     if (room.status !== "waiting" || room.seats.O) return failure("room-full");
     if (accountId && room.seats.X.accountId === accountId) return failure("same-account");
+    if (accountId && room.seats.X.accountId
+      && ![accountId, room.seats.X.accountId].every(id => Number.isFinite(ratingsByAccount[id]))) {
+      return failure("rating-service-unavailable");
+    }
 
     const token = this.playerTokenFactory();
     const joinedAt = this.now();
@@ -440,9 +444,23 @@ export class RoomManager {
         return failure("wrong-phase");
       }
 
+      // Finish the previous rating transaction before taking the rematch's
+      // starting ratings. A failed write stays retryable in the old match.
+      if (proposal.kind === "rematch" && this.#hasPendingRatedResult(room)) {
+        this.#recordFinishedMatch(room);
+        await room.ratingPromise;
+        if (this.#hasPendingRatedResult(room)) return failure("rating-service-unavailable");
+      }
+      if (room.restartProposal !== proposal) return failure("restart-proposal-expired");
       if (this.onMatchStarted) {
         try {
-          room.startRatings = await this.onMatchStarted(this.getParticipantAccountIds(room.code));
+          const accountIds = this.getParticipantAccountIds(room.code);
+          const ratings = await this.onMatchStarted(accountIds);
+          if (accountIds.length === 2 && !accountIds.every(id => Number.isFinite(ratings[id]))) {
+            return failure("rating-service-unavailable");
+          }
+          if (room.restartProposal !== proposal) return failure("restart-proposal-expired");
+          room.startRatings = ratings;
         } catch {
           return failure("rating-service-unavailable");
         }
@@ -810,15 +828,16 @@ export class RoomManager {
     const loserId = room.seats[loserSide]?.accountId;
     if (!winnerId || !loserId) return;
     const matchId = room.matchId;
+    const ratingsAtStart = { ...room.startRatings };
     const ratingPromise = Promise.resolve().then(() => this.onMatchFinished({
       matchId,
       winnerId,
       loserId,
-      ratingsAtStart: room.startRatings
+      ratingsAtStart
     })).then((result) => {
       if (room.matchId === matchId) {
-        room.ratingRecorded = true;
         if (result?.recorded || result?.reason === "already-recorded") {
+          room.ratingRecorded = true;
           this.#broadcastEphemeral(room, { type: "rating-updated", roomCode: room.code });
         }
       }
