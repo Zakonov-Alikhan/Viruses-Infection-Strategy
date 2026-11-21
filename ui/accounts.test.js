@@ -58,12 +58,117 @@ test("account fetch uses the browser global receiver for login, registration, an
 });
 
 test("non-JSON HTTP errors keep their HTTP meaning instead of becoming a network error", async () => {
-  for (const [status, code] of [[401, "invalid-credentials"], [409, "username-taken"], [429, "rate-limited"], [502, "account-service-unavailable"], [503, "account-service-unavailable"]]) {
+  for (const [status, code] of [[401, "invalid-credentials"], [409, "username-taken"], [429, "account-service-unavailable"], [502, "account-service-unavailable"], [503, "account-service-unavailable"]]) {
     const client = new AccountsClient({ fetchImpl: async () => ({
       ok: false, status,
       json: async () => { throw new SyntaxError("Not JSON"); }
     }) });
     await assert.rejects(client.login("Alice", "a-long-test-password"), new RegExp(code));
+  }
+});
+
+test("Render hibernation responses are distinct from account attempt limits on every account route", async () => {
+  for (const action of ["me", "leaderboard", "login", "register"]) {
+    let calls = 0;
+    const client = new AccountsClient({ fetchImpl: async () => {
+      calls += 1;
+      return new Response("Too Many Requests\n", {
+        status: 429, headers: { "x-render-routing": "hibernate-rate-limited", "content-type": "text/plain" }
+      });
+    } });
+    await assert.rejects(client[action]("Alice", "a-long-test-password"), /^Error: account-service-starting$/);
+    assert.equal(calls, 1);
+  }
+});
+
+test("hosting HTML 429 is unavailable while the API's JSON 429 remains an attempt limit", async () => {
+  const responses = [
+    [new Response("<!doctype html><title>Just a moment</title>", { status: 429 }), "account-service-unavailable"],
+    [Response.json({ error: "rate-limited" }, { status: 429 }), "rate-limited"]
+  ];
+  for (const [response, code] of responses) {
+    const client = new AccountsClient({ fetchImpl: async () => response });
+    await assert.rejects(client.register("Alice", "a-long-test-password"), new RegExp(`^Error: ${code}$`));
+  }
+});
+
+test("invalid form credentials never spend an API attempt and can be corrected for either form", async () => {
+  for (const method of ["login", "register"]) {
+    const calls = [], errors = [], loading = [];
+    const client = new AccountsClient({ fetchImpl: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return Response.json({ account: { username: "Alice", rating: 1200 } });
+    } });
+    const options = {
+      event: { preventDefault() {} }, client, method,
+      onError: error => errors.push(error.message), onLoading: value => loading.push(value)
+    };
+    for (const [username, password, code] of [
+      ["player@example.com", "a-long-test-password", "invalid-username"],
+      ["a", "a-long-test-password", "invalid-username"],
+      ["Игрок", "a-long-test-password", "invalid-username"],
+      ["Alice", "short", "invalid-password-length"]
+    ]) {
+      assert.equal(await submitAccountCredentials({ ...options, username, password }), false);
+      assert.equal(errors.at(-1), code);
+      assert.equal(calls.length, 0);
+      assert.equal(loading.at(-1), false);
+    }
+    assert.equal(await submitAccountCredentials({ ...options, username: " Alice ", password: "a-long-test-password" }), true);
+    assert.deepEqual(calls, [{ url: `/api/auth/${method}`, body: { username: "Alice", password: "a-long-test-password" } }]);
+  }
+});
+
+test("a form can retry after a hosting failure without an automatic duplicate POST", async () => {
+  for (const method of ["login", "register"]) {
+    let calls = 0;
+    const errors = [], loading = [];
+    const client = new AccountsClient({ fetchImpl: async () => ++calls === 1
+      ? new Response("Too Many Requests", { status: 429, headers: { "x-render-routing": "hibernate-rate-limited" } })
+      : Response.json({ account: { username: "Alice", rating: 1200 } }) });
+    const options = {
+      event: { preventDefault() {} }, client, method, username: "Alice", password: "a-long-test-password",
+      onError: error => errors.push(error.message), onLoading: value => loading.push(value)
+    };
+    assert.equal(await submitAccountCredentials(options), false);
+    assert.equal(calls, 1);
+    assert.equal(await submitAccountCredentials(options), true);
+    assert.equal(calls, 2);
+    assert.deepEqual(errors, ["account-service-starting"]);
+    assert.deepEqual(loading, [true, false, true, false]);
+  }
+});
+
+test("overlapping profile and leaderboard reads share requests and failures allow a fresh read", async () => {
+  const calls = [], resolvers = [];
+  const client = new AccountsClient({ fetchImpl: url => new Promise(resolve => { calls.push(url); resolvers.push(resolve); }) });
+  const reads = [client.me(), client.me(), client.leaderboard(), client.leaderboard()];
+  assert.deepEqual(calls, ["/api/me", "/api/leaderboard"]);
+  resolvers[0](Response.json({ account: null }));
+  resolvers[1](new Response("Unavailable", { status: 503 }));
+  const results = await Promise.allSettled(reads);
+  assert.deepEqual(results.map(result => result.status), ["fulfilled", "fulfilled", "rejected", "rejected"]);
+  const retry = client.leaderboard();
+  assert.equal(calls.length, 3);
+  resolvers[2](Response.json({ entries: [] }));
+  assert.deepEqual(await retry, { entries: [] });
+});
+
+test("changing an account session never reuses a pending read from the previous session", async () => {
+  for (const method of ["login", "register", "logout"]) {
+    const resolvers = [];
+    const client = new AccountsClient({ fetchImpl: url => url.endsWith("/me")
+      ? new Promise(resolve => resolvers.push(resolve))
+      : Promise.resolve(Response.json({ account: { username: "Alice" } })) });
+    const stale = client.me();
+    await client[method]("Alice", "a-long-test-password");
+    const fresh = client.me();
+    assert.equal(resolvers.length, 2);
+    resolvers[0](Response.json({ account: null }));
+    await stale;
+    assert.equal(client.me(), fresh);
+    resolvers[1](Response.json({ account: { username: "Alice" } }));
+    assert.equal((await fresh).account.username, "Alice");
   }
 });
 
@@ -176,7 +281,7 @@ test("auth tabs are non-submitting controls and exactly one constrained form is 
   assert.equal((auth.match(/name="password"[^>]*minlength="10"[^>]*required/g) || []).length, 2);
   assert.match(script, /accountLoginForm\.addEventListener\("submit"/);
   assert.match(script, /accountRegisterForm\.addEventListener\("submit"/);
-  assert.match(html, /script\.js\?v=cascade-package16/);
+  assert.match(html, /script\.js\?v=cascade-package17/);
   assert.doesNotMatch(html, /script\.js\?v=account-entry1/);
 });
 
@@ -186,7 +291,7 @@ test("auth tabs, loading labels, and server error messages are localized in Russ
     assert.ok(locale["account.registerTab"]);
     assert.ok(locale["account.loading.login"]);
     assert.ok(locale["account.loading.register"]);
-    for (const code of ["invalid-credentials", "username-taken", "rate-limited", "accounts-unavailable", "network", "invalid-request"]) {
+    for (const code of ["invalid-credentials", "username-taken", "rate-limited", "accounts-unavailable", "network", "invalid-request", "invalid-username", "invalid-password-length", "account-service-starting"]) {
       assert.ok(locale[`account.error.${code}`]);
     }
   }

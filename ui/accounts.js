@@ -49,8 +49,13 @@ export async function submitAccountCredentials({
   if (!["login", "register"].includes(method)) throw new TypeError("Unsupported account action");
   onLoading(true);
   try {
+    const normalizedUsername = typeof username === "string" ? username.trim() : "";
+    if (!/^[A-Za-z0-9_]{3,24}$/.test(normalizedUsername)) throw new Error("invalid-username");
+    if (typeof password !== "string" || password.length < 10 || password.length > 128) {
+      throw new Error("invalid-password-length");
+    }
     logAccountDiagnostic("client-result-await", { method });
-    const result = await client[method](username, password);
+    const result = await client[method](normalizedUsername, password);
     logAccountDiagnostic("ui-result-success", { method });
     onSuccess(result);
     return true;
@@ -68,6 +73,8 @@ export async function submitAccountCredentials({
 }
 
 export class AccountsClient {
+  #pendingReads = new Map();
+
   constructor({ baseUrl = resolveAccountApiBase(), fetchImpl = globalThis.fetch } = {}) {
     this.baseUrl = baseUrl;
     // Native browser fetch requires Window/Worker as its receiver. Calling an
@@ -106,10 +113,14 @@ export class AccountsClient {
       throw error;
     }
     logAccountDiagnostic("fetch-response", { url: diagnosticUrl(requestUrl), method, status: response.status });
-    const httpErrorCode = {
+    // Render's sleeping-service limit is not a failed-password limit. Its
+    // response can be plain text or HTML, even for GET /me and /leaderboard.
+    const serviceStarting = response.status === 429
+      && response.headers?.get("x-render-routing") === "hibernate-rate-limited";
+    const httpErrorCode = serviceStarting ? "account-service-starting" : {
       401: "invalid-credentials",
       409: "username-taken",
-      429: "rate-limited",
+      429: "account-service-unavailable",
       502: "account-service-unavailable",
       503: "account-service-unavailable",
       504: "account-service-unavailable"
@@ -120,19 +131,38 @@ export class AccountsClient {
       logAccountDiagnostic("response-json-error", { url: diagnosticUrl(requestUrl), status: response.status });
       throw new Error(response.ok ? "server-error" : httpErrorCode);
     }
-    if (!response.ok) throw new Error(result?.error || httpErrorCode);
+    if (!response.ok) throw new Error(serviceStarting ? httpErrorCode : result?.error || httpErrorCode);
     return result;
   }
 
-  me() { return this.#request("/me"); }
-  leaderboard() { return this.#request("/leaderboard"); }
+  #read(path) {
+    let pending = this.#pendingReads.get(path);
+    if (!pending) {
+      pending = this.#request(path).finally(() => {
+        if (this.#pendingReads.get(path) === pending) this.#pendingReads.delete(path);
+      });
+      this.#pendingReads.set(path, pending);
+    }
+    return pending;
+  }
+
+  async #changeSession(path, body) {
+    const result = await this.#request(path, { method: "POST", body });
+    // An in-flight read from the previous session must not be reused after
+    // login/logout. Existing UI version checks discard its eventual result.
+    this.#pendingReads.clear();
+    return result;
+  }
+
+  me() { return this.#read("/me"); }
+  leaderboard() { return this.#read("/leaderboard"); }
   register(username, password) {
     logAccountDiagnostic("client-method", { method: "register" });
-    return this.#request("/auth/register", { method: "POST", body: { username, password } });
+    return this.#changeSession("/auth/register", { username, password });
   }
   login(username, password) {
     logAccountDiagnostic("client-method", { method: "login" });
-    return this.#request("/auth/login", { method: "POST", body: { username, password } });
+    return this.#changeSession("/auth/login", { username, password });
   }
-  logout() { return this.#request("/auth/logout", { method: "POST", body: {} }); }
+  logout() { return this.#changeSession("/auth/logout", {}); }
 }

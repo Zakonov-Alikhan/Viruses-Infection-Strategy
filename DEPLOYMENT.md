@@ -80,6 +80,12 @@ For local development, run Node on port 3001 and set `VIRUSES_API_URL=http://127
 
 SQL integration tests require `TEST_DATABASE_URL` pointing exclusively to an isolated PostgreSQL database whose name includes `test`. The tests create/drop their own schema and exercise registration, password verification, cookie sessions, WebSocket seat identity, rating transactions and duplicate protection. Never point this variable at production. The browser flow can be checked against a temporary local database; no production test accounts are required.
 
+### Account errors during a Free service wake-up
+
+On 2026-11-22 a public `GET /api/me` returned HTTP 429, `Content-Type: text/plain` and `X-Render-Routing: hibernate-rate-limited`. This is a Render routing response, not the Node API's login/register attempt limiter (that limiter returns JSON `{"error":"rate-limited"}` and does not apply to GET `/api/me` or `/api/leaderboard`). A hosting HTML challenge or non-JSON 429 must not be described as too many password attempts. The client reports the explicit hibernation response as a service wake-up and other non-JSON 429 responses as temporary service unavailability. Overlapping reads share a request; credential POSTs are never retried automatically.
+
+Free service sleep is a hosting constraint, not an authentication failure. Wait for service startup and retry once; if it persists, inspect both existing services' Events/logs and workspace usage in Render Dashboard, using the response's `Rndr-Id` when contacting Render support. Do not disable Origin checks, delete accounts, or raise password-attempt limits to address this response. No paid resource or plan change is made by these code changes. See [Free service spin-down behavior](https://render.com/docs/free#spinning-down-on-idle).
+
 ## Verify the deployment
 
 1. Open `https://<Go hostname>/` and confirm the game loads.

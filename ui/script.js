@@ -30,12 +30,12 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-admin-lifetime1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-rating3";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-availability4";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
-import { MultiplayerClient } from "./multiplayer.js?v=account-rating3";
-import { AccountsClient, logAccountDiagnostic, submitAccountCredentials } from "./accounts.js?v=account-fetch3";
+import { MultiplayerClient } from "./multiplayer.js?v=account-availability4";
+import { AccountsClient, logAccountDiagnostic, submitAccountCredentials } from "./accounts.js?v=account-availability4";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
 import { getItemCategory, getItemCategoryLocalizationKey } from "./item-categories.js?v=visual-polish1";
