@@ -90,6 +90,8 @@ export default Object.freeze({ ...{
   "online.error.not-in-room": "Сначала создай комнату или подключись по коду.",
   "online.error.not-connected": "Нет активного соединения с сервером.",
   "online.error.seat-already-connected": "Это место уже подключено в другой вкладке.",
+  "online.error.session-replaced": "Комната открыта в другой вкладке. Продолжайте игру там или вернитесь по коду здесь.",
+  "online.leave": "Покинуть комнату",
   "online.error.invalid-resume-token": "Не удалось подтвердить сохранённую сессию.",
   "online.error.reconnect-expired": "Время на переподключение истекло. Создай новую комнату.",
   "online.error.room-not-ready": "Дождись подключения второго игрока.",

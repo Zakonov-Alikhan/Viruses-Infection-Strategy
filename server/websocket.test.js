@@ -581,3 +581,67 @@ test("does not broadcast reconnect tokens to the other room participant", async 
   assert.equal(JSON.stringify(readyForX).includes(created.playerToken), false);
   assert.equal(JSON.stringify(readyForX).includes(joined.playerToken), false);
 });
+
+test("real sockets can resume repeatedly, replace a still-open tab, and continue the same match", async (t) => {
+  const { server, address, roomManager } = await makeTestServer();
+  const peers = [];
+  t.after(async () => { await Promise.all(peers.map(p => p.close())); await server.close(); });
+  const host = await openPeer(address); peers.push(host);
+  host.send({ type: "create-room" });
+  const created = await host.next("room-created");
+  const guest = await openPeer(address); peers.push(guest);
+  guest.send({ type: "join-room", code: created.roomCode });
+  await guest.next("room-joined"); await host.next("room-ready");
+  const reload = await openPeer(address); peers.push(reload);
+  reload.send({ type: "resume-room", code: created.roomCode, playerToken: created.playerToken, replaceExisting: true, requestId: "resume-1" });
+  assert.equal((await reload.next("room-resumed")).side, "X");
+  await host.next("session-replaced");
+  reload.send({ type: "resume-room", code: created.roomCode, playerToken: created.playerToken, requestId: "resume-2" });
+  assert.equal((await reload.next("room-resumed")).requestId, "resume-2");
+  reload.send({ type: "command", command: { type: "choose-start", row: 1, col: 1 } });
+  assert.equal((await reload.next("state")).state.phase, "setup-o");
+  assert.equal((await guest.next("state")).state.phase, "setup-o");
+  assert.equal(roomManager.getSnapshot(created.roomCode, "X").state.phase, "setup-o");
+  const legacy = await openPeer(address); peers.push(legacy);
+  legacy.send({ type: "resume-room", code: created.roomCode, playerToken: created.playerToken });
+  assert.equal((await legacy.next("server-error")).code, "seat-already-connected");
+  assert.equal(roomManager.getSnapshot(created.roomCode, "X").state.phase, "setup-o");
+});
+
+test("heartbeat drops a silently dead transport and leaves its seat available for authenticated resume", async (t) => {
+  const { server, address, roomManager } = await makeTestServer({ heartbeatIntervalMs: 20 });
+  t.after(() => server.close());
+  const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: "http://localhost:3000", autoPong: false });
+  await new Promise((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+  const peer = new Peer(socket);
+  peer.send({ type: "create-room" });
+  const room = await peer.next("room-created");
+  await new Promise(resolve => socket.once("close", resolve));
+  assert.equal(roomManager.resumeRoom(room.roomCode, room.playerToken, () => {}).ok, true);
+});
+
+test("disconnecting while account lookup is pending does not crash or consume the second seat", async (t) => {
+  let releaseRatings, enteredLookup;
+  const lookupStarted = new Promise(resolve => { enteredLookup = resolve; });
+  const ratings = new Promise(resolve => { releaseRatings = resolve; });
+  const { server, address, roomManager } = await makeTestServer({ accountStore: {
+    getRatings() { enteredLookup(); return ratings; }
+  } });
+  const peers = [];
+  t.after(async () => { releaseRatings({}); await Promise.all(peers.map(p => p.close())); await server.close(); });
+  const host = await openPeer(address); peers.push(host);
+  host.send({ type: "create-room" });
+  const room = await host.next("room-created");
+  roomManager.rooms.get(room.roomCode).seats.X.accountId = "creator-account";
+  const guest = await openPeer(address); peers.push(guest);
+  guest.send({ type: "join-room", code: room.roomCode });
+  await lookupStarted;
+  await guest.close();
+  releaseRatings({});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(roomManager.rooms.get(room.roomCode).status, "waiting");
+  assert.equal(roomManager.rooms.get(room.roomCode).seats.O, null);
+  const retry = await openPeer(address); peers.push(retry);
+  retry.send({ type: "join-room", code: room.roomCode });
+  assert.equal((await retry.next("room-joined")).side, "O");
+});

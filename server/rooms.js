@@ -249,7 +249,7 @@ export class RoomManager {
     return { ok: true, connection };
   }
 
-  resumeRoom(rawCode, playerToken, send, { accountId = null } = {}) {
+  resumeRoom(rawCode, playerToken, send, { accountId = null, connection = null, replaceExisting = true } = {}) {
     const code = normalizeCode(rawCode);
     const room = this.rooms.get(code);
     if (!room) return failure("room-not-found");
@@ -264,12 +264,22 @@ export class RoomManager {
     if (!side) return failure("invalid-resume-token");
 
     const seat = room.seats[side];
-    if ((seat.accountId ?? null) !== accountId) return failure("account-mismatch");
-    if (seat.connection) return failure("seat-already-connected");
-    if (seat.disconnectedAt === null) return failure("seat-not-disconnected");
-    if (this.now() - seat.disconnectedAt >= this.reconnectGraceMs) return failure("reconnect-expired");
+    if (seat.accountId && seat.accountId !== accountId) return failure("account-mismatch");
+    if (typeof send !== "function") return failure("invalid-connection");
+    // A refresh can arrive before the previous socket's close event. Only the
+    // private seat token (and the same account) can replace that connection.
+    if (connection && seat.connection === connection) {
+      return { ...this.getSnapshot(code, side), seatKey: side, connection };
+    }
+    if (seat.connection && !replaceExisting) return failure("seat-already-connected");
+    if (!seat.connection && this.now() - seat.disconnectedAt >= this.reconnectGraceMs) return failure("reconnect-expired");
+    const previous = seat.connection;
+    if (previous) this.detachConnection(code, side, previous);
     const attached = this.attachConnection(code, side, send);
     if (!attached.ok) return attached;
+    if (previous) {
+      try { previous.send({ type: "session-replaced", roomCode: code }); } catch { /* The old transport may already be gone. */ }
+    }
     return {
       ok: true,
       roomCode: code,
@@ -359,6 +369,11 @@ export class RoomManager {
     this.#cancelRestartProposal(room, "player-disconnected");
     this.#cancelUndoProposal(room, "player-disconnected");
     return true;
+  }
+
+  isCurrentConnection(rawCode, connection) {
+    const room = this.rooms.get(normalizeCode(rawCode));
+    return Boolean(connection && room?.seats[connection.side]?.connection === connection);
   }
 
   proposeRestart(rawCode, side, kind, requestedSettings = undefined) {
@@ -602,7 +617,7 @@ export class RoomManager {
     return true;
   }
 
-  submitCommand(rawCode, side, command, { isAdmin = false, adminObserverId = null } = {}) {
+  submitCommand(rawCode, side, command, { isAdmin = false, adminObserverId = null, connection = null } = {}) {
     const room = this.rooms.get(normalizeCode(rawCode));
     if (!room) return Promise.resolve(failure("room-not-found"));
     if (!SIDES.includes(side) && !adminObserverId) return Promise.resolve(failure("invalid-player"));
@@ -611,6 +626,7 @@ export class RoomManager {
 
     const operation = room.queue.then(() => {
       if (this.rooms.get(room.code) !== room) return failure("room-not-found");
+      if (connection && room.seats[side]?.connection !== connection) return failure("session-replaced");
       if (room.status !== "active") return failure("room-not-ready");
       if (!room.seats[side]?.connection
         && !(isAdmin && adminObserverId && room.observers.get(adminObserverId)?.isAdmin)) return failure("player-disconnected");

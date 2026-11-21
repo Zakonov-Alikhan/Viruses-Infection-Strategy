@@ -84,8 +84,127 @@ async function makeFixture(t, { sideRandom = () => 0.25, adminSecret = null } = 
     await new Promise((resolve) => setTimeout(resolve, 10));
     await server.close();
   });
-  return { server, roomManager, x, o, storageX, storageO };
+  return { server, roomManager, x, o, storageX, storageO, createClient(storage = new MemoryStorage()) {
+    const client = new MultiplayerClient({ ...options, storage });
+    clients.push(client);
+    return client;
+  } };
 }
+
+test("reopening a room after disconnect confirms the new socket before accepting moves", async (t) => {
+  const { x, o, roomManager } = await makeFixture(t);
+  const events = eventLog(x);
+  const room = await x.createRoom();
+  await o.joinRoom(room.roomCode);
+  await events.waitFor(e => e.type === "room-ready");
+  const oldSocket = x.socket;
+  x.disconnect({ preserveSession: true });
+  const resumed = await x.joinRoom(room.roomCode.toLowerCase());
+  assert.equal(resumed.type, "room-resumed");
+  assert.notEqual(x.socket, oldSocket);
+  const update = events.waitFor(e => e.type === "state" && e.state.phase === "setup-o");
+  x.sendCommand({ type: "choose-start", row: 1, col: 1 });
+  await update;
+  assert.equal(roomManager.getSnapshot(room.roomCode, "X").state.phase, "setup-o");
+});
+
+test("repeated resume on a live socket returns a fresh confirmed snapshot at the same version", async (t) => {
+  const { x } = await makeFixture(t);
+  const room = await x.createRoom();
+  const socket = x.socket;
+  for (let i = 0; i < 4; i += 1) {
+    const resumed = await x.resumeSavedRoom();
+    assert.equal(resumed.version, room.version);
+    assert.equal(resumed.type, "room-resumed");
+    assert.equal(x.socket, socket);
+  }
+});
+
+test("a refreshed tab reclaims the token's seat without an old-tab reconnect fight or token deletion", async (t) => {
+  const { x, o, storageX, createClient } = await makeFixture(t);
+  const events = eventLog(x);
+  const room = await x.createRoom();
+  await o.joinRoom(room.roomCode);
+  const reloaded = createClient(storageX);
+  const resumed = await reloaded.joinRoom(room.roomCode);
+  assert.equal(resumed.type, "room-resumed");
+  assert.equal(resumed.side, "X");
+  await events.waitFor(e => e.type === "session-replaced");
+  assert.equal(x.connected, false);
+  assert.equal(x.savedSession, null);
+  x.leave();
+  assert.equal(JSON.parse(storageX.getItem("viruses.online-room")).playerToken, room.playerToken);
+  await new Promise(resolve => setTimeout(resolve, 90));
+  assert.equal(reloaded.connected, true);
+  assert.equal(events.events.some(e => e.type === "reconnected"), false);
+  const next = eventLog(reloaded).waitFor(e => e.type === "state" && e.state.phase === "setup-o");
+  reloaded.sendCommand({ type: "choose-start", row: 1, col: 1 });
+  await next;
+});
+
+test("closing an older room does not delete another room's credentials in shared storage", async (t) => {
+  const { x, storageX, createClient } = await makeFixture(t);
+  const first = await x.createRoom();
+  const secondClient = createClient(storageX);
+  const second = await secondClient.createRoom();
+  x.leave();
+  assert.equal(JSON.parse(storageX.getItem("viruses.online-room")).roomCode, second.roomCode);
+  assert.equal(storageX.getItem(`viruses.online-room:${first.roomCode}`), null);
+  const reload = createClient(storageX);
+  assert.equal((await reload.resumeSavedRoom()).roomCode, second.roomCode);
+});
+
+test("a transient reconnect failure retains the credential for a later manual resume", async (t) => {
+  const { x, server } = await makeFixture(t);
+  const room = await x.createRoom();
+  const events = eventLog(x);
+  class UnavailableSocket extends EventTarget {
+    static OPEN = 1; static CLOSING = 2;
+    readyState = 0;
+    constructor() { super(); queueMicrotask(() => { this.readyState = 3; this.dispatchEvent(new Event("close")); }); }
+    close() { this.readyState = 3; }
+  }
+  x.WebSocketImpl = UnavailableSocket;
+  [...server.webSocketServer.clients][0].terminate();
+  await events.waitFor(e => e.type === "reconnect-failed");
+  assert.equal(x.savedSession.playerToken, room.playerToken);
+  x.WebSocketImpl = BrowserLikeWebSocket;
+  assert.equal((await x.resumeSavedRoom()).roomCode, room.roomCode);
+});
+
+test("a close before transport open rejects connect instead of leaving it pending forever", async () => {
+  class ClosedSocket extends EventTarget {
+    static OPEN = 1; static CLOSING = 2;
+    readyState = 0;
+    constructor() { super(); queueMicrotask(() => { this.readyState = 3; this.dispatchEvent(new Event("close")); }); }
+    close() { this.readyState = 3; }
+  }
+  const client = new MultiplayerClient({ WebSocketImpl: ClosedSocket, storage: null, requestTimeoutMs: 100 });
+  await assert.rejects(client.connect(), { code: "connection-lost" });
+  assert.equal(client.connectPromise, null);
+  client.leave();
+});
+
+test("manual leave cancels the previous reconnect loop before another room is created", async (t) => {
+  const { x, server } = await makeFixture(t);
+  await x.createRoom();
+  const events = eventLog(x);
+  [...server.webSocketServer.clients][0].terminate();
+  await events.waitFor(e => e.type === "disconnected");
+  x.leave();
+  const next = await x.createRoom();
+  await new Promise(resolve => setTimeout(resolve, 90));
+  assert.equal(x.savedSession.roomCode, next.roomCode);
+  assert.equal(events.events.some(e => e.type === "reconnected"), false);
+});
+
+test("disabled browser storage does not discard the in-memory token during a network interruption", async (t) => {
+  const { x } = await makeFixture(t);
+  x.storage = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }, removeItem() { throw new Error("blocked"); } };
+  const room = await x.createRoom();
+  x.disconnect({ preserveSession: true });
+  assert.equal((await x.resumeSavedRoom()).roomCode, room.roomCode);
+});
 
 test("client creates and joins a room, then relays confirmed authoritative turns", async (t) => {
   const { x, o, storageX, storageO } = await makeFixture(t);

@@ -24,9 +24,10 @@ export function resolveMultiplayerUrl({
 }
 
 function getPersistentStorage() {
+  let legacySession = null;
+  try { legacySession = globalThis.sessionStorage; } catch { /* Browser storage may be restricted. */ }
   try {
     const persistent = globalThis.localStorage;
-    const legacySession = globalThis.sessionStorage;
     if (persistent) {
       if (!persistent.getItem(SESSION_STORAGE_KEY) && legacySession?.getItem(SESSION_STORAGE_KEY)) {
         persistent.setItem(SESSION_STORAGE_KEY, legacySession.getItem(SESSION_STORAGE_KEY));
@@ -36,14 +37,14 @@ function getPersistentStorage() {
     }
     return legacySession ?? null;
   } catch {
-    return null;
+    return legacySession;
   }
 }
 
-function safeParseSession(storage) {
+function safeParseSession(storage, key = SESSION_STORAGE_KEY) {
   if (!storage) return null;
   try {
-    const value = JSON.parse(storage.getItem(SESSION_STORAGE_KEY) || "null");
+    const value = JSON.parse(storage.getItem(key) || "null");
     if (typeof value?.roomCode !== "string" || typeof value?.playerToken !== "string"
       || (value.side !== null && !["X", "O"].includes(value.side))) return null;
     return { roomCode: value.roomCode, playerToken: value.playerToken, side: value.side ?? null };
@@ -74,6 +75,7 @@ export class MultiplayerClient {
     this.url = url;
     this.WebSocketImpl = WebSocketImpl;
     this.storage = storage;
+    this.session = safeParseSession(storage);
     this.requestTimeoutMs = requestTimeoutMs;
     this.reconnectDelayMs = reconnectDelayMs;
     this.maxReconnectAttempts = maxReconnectAttempts;
@@ -82,6 +84,8 @@ export class MultiplayerClient {
     this.socket = null;
     this.connectPromise = null;
     this.reconnectPromise = null;
+    this.resumePromise = null;
+    this.lifecycle = 0;
     this.intentionalClose = false;
     this.requestNumber = 0;
     this.lastVersion = -1;
@@ -96,7 +100,7 @@ export class MultiplayerClient {
   }
 
   get savedSession() {
-    return safeParseSession(this.storage);
+    return this.session ? { ...this.session } : null;
   }
 
   subscribe(listener) {
@@ -113,17 +117,31 @@ export class MultiplayerClient {
     this.socket = socket;
     this.connectPromise = new Promise((resolve, reject) => {
       let opened = false;
+      let settled = false;
+      const fail = (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (socket === this.socket) this.connectPromise = null;
+        reject(new MultiplayerError(code));
+      };
+      const timer = setTimeout(() => {
+        fail("connection-failed");
+        if (socket.readyState < this.WebSocketImpl.CLOSING) socket.close();
+      }, this.requestTimeoutMs);
       const onOpen = () => {
+        if (socket !== this.socket) { fail("left-room"); return; }
         opened = true;
+        settled = true;
+        clearTimeout(timer);
         this.connectPromise = null;
         this.#emit({ type: "transport-open" });
         resolve(socket);
       };
       const onError = () => {
         if (!opened) {
-          this.connectPromise = null;
-          reject(new MultiplayerError("connection-failed"));
-        } else {
+          fail("connection-failed");
+        } else if (socket === this.socket) {
           this.#emit({ type: "transport-error", code: "connection-failed" });
         }
       };
@@ -132,20 +150,24 @@ export class MultiplayerClient {
       socket.addEventListener("message", (event) => {
         if (socket === this.socket) this.#receive(event.data);
       });
-      socket.addEventListener("close", (event) => this.#handleClose(socket, event));
+      socket.addEventListener("close", (event) => {
+        if (!opened) fail("connection-lost");
+        this.#handleClose(socket, event);
+      });
     });
     return this.connectPromise;
   }
 
   async createRoom(settings, { publicRoom = false } = {}) {
+    if (this.lastRoomSnapshot || this.isObserving) this.disconnect({ preserveSession: true });
     await this.connect();
     return this.#request("create-room", { ...(settings ? { settings } : {}), publicRoom }, "room-created");
   }
 
   async observeRoom(roomId, adminSecret = undefined) {
     if (typeof roomId !== "string" || !roomId) throw new MultiplayerError("invalid-room-id");
+    if (this.lastRoomSnapshot || this.isObserving) this.disconnect({ preserveSession: true });
     await this.connect();
-    this.isObserving = true;
     return this.#request("observe-room", {
       roomId,
       ...(adminSecret ? { adminSecret } : {})
@@ -153,29 +175,48 @@ export class MultiplayerClient {
   }
 
   async joinRoom(code) {
+    const normalizedCode = String(code).trim().toUpperCase();
+    const saved = this.session?.roomCode === normalizedCode ? this.session
+      : safeParseSession(this.storage, `${SESSION_STORAGE_KEY}:${normalizedCode}`)
+        ?? safeParseSession(this.storage);
+    if (saved?.roomCode === normalizedCode) {
+      if ((this.lastRoomSnapshot && this.lastRoomSnapshot.roomCode !== normalizedCode) || this.isObserving) {
+        this.disconnect({ preserveSession: true });
+      }
+      this.session = saved;
+      return this.resumeSavedRoom();
+    }
+    if (this.lastRoomSnapshot || this.isObserving) this.disconnect({ preserveSession: true });
     await this.connect();
-    return this.#request("join-room", { code: String(code).trim().toUpperCase() }, "room-joined");
+    return this.#request("join-room", { code: normalizedCode }, "room-joined");
   }
 
   async joinPublicRoom(roomId) {
     if (typeof roomId !== "string" || !roomId) throw new MultiplayerError("invalid-room-id");
+    if (this.lastRoomSnapshot || this.isObserving) this.disconnect({ preserveSession: true });
     await this.connect();
     return this.#request("join-public-room", { roomId }, "room-joined");
   }
 
-  async resumeSavedRoom() {
+  resumeSavedRoom() {
+    if (this.resumePromise) return this.resumePromise;
+    if (this.isObserving) this.disconnect({ preserveSession: true });
     const session = this.savedSession;
-    if (!session) throw new MultiplayerError("no-saved-room");
-    await this.connect();
-    if (this.lastRoomSnapshot?.roomCode === session.roomCode) {
-      const resumed = { ...this.lastRoomSnapshot, type: "room-resumed" };
-      this.#emit(resumed);
-      return resumed;
-    }
-    return this.#request("resume-room", {
-      code: session.roomCode,
-      playerToken: session.playerToken
-    }, "room-resumed");
+    if (!session) return Promise.reject(new MultiplayerError("no-saved-room"));
+    const lifecycle = this.lifecycle;
+    const operation = (async () => {
+      await this.connect();
+      if (lifecycle !== this.lifecycle) throw new MultiplayerError("left-room");
+      // Even an open transport must confirm its seat on the server. A cached
+      // snapshot cannot authorize a new socket after refresh/disconnect.
+      return this.#request("resume-room", {
+        code: session.roomCode, playerToken: session.playerToken, replaceExisting: true
+      }, "room-resumed");
+    })().finally(() => {
+      if (this.resumePromise === operation) this.resumePromise = null;
+    });
+    this.resumePromise = operation;
+    return operation;
   }
 
   sendCommand(command) {
@@ -253,10 +294,16 @@ export class MultiplayerClient {
   }
 
   disconnect({ preserveSession = true } = {}) {
+    this.lifecycle += 1;
     this.intentionalClose = true;
+    this.resumePromise = null;
+    this.reconnectPromise = null;
+    this.lastRoomSnapshot = null;
+    this.lastVersion = -1;
+    this.lastVersionRoomCode = null;
+    this.isObserving = false;
     if (!preserveSession) {
       this.#clearSavedSession();
-      this.lastRoomSnapshot = null;
       this.seenVisualEventIds.clear();
     }
     this.#rejectPending(new MultiplayerError("left-room"));
@@ -346,6 +393,11 @@ export class MultiplayerClient {
       this.isObserving = true;
     } else if (message.type === "room-closed") {
       this.#clearSavedSession();
+    } else if (message.type === "session-replaced") {
+      // A newer tab owns this seat. Do not reconnect in a loop or erase its
+      // shared browser credentials when this old tab is later closed.
+      this.session = null;
+      this.disconnect({ preserveSession: true });
     } else if (["room-ready", "room-resumed", "state"].includes(message.type)) {
       this.#updateSavedSide(message);
     }
@@ -377,6 +429,7 @@ export class MultiplayerClient {
   #handleClose(socket, event) {
     if (socket !== this.socket) return;
     this.socket = null;
+    this.lastRoomSnapshot = null;
     this.connectPromise = null;
     this.#rejectPending(new MultiplayerError("connection-lost"));
     if (this.intentionalClose) {
@@ -389,68 +442,76 @@ export class MultiplayerClient {
 
   #reconnect() {
     if (this.reconnectPromise || !this.savedSession) return;
-    this.reconnectPromise = (async () => {
+    const lifecycle = this.lifecycle;
+    const operation = (async () => {
       for (let attempt = 0; attempt < this.maxReconnectAttempts; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, this.reconnectDelayMs));
-        if (this.intentionalClose || !this.savedSession) return;
+        if (lifecycle !== this.lifecycle || this.intentionalClose || !this.savedSession) return;
         try {
-          await this.connect();
-          const session = this.savedSession;
-          const resumed = await this.#request("resume-room", {
-            code: session.roomCode,
-            playerToken: session.playerToken
-          }, "room-resumed");
+          const resumed = await this.resumeSavedRoom();
+          if (lifecycle !== this.lifecycle) return;
           this.#emit({ type: "reconnected", room: resumed });
           return;
         } catch (error) {
+          if (lifecycle !== this.lifecycle || this.intentionalClose) return;
           if (TERMINAL_RESUME_ERRORS.has(error.code)) {
-            this.#clearSavedSession();
-            this.#emit({ type: "reconnect-failed", code: error.code });
             return;
           }
-          if (error.code === "seat-already-connected") {
+          if (error.code === "account-mismatch") {
             this.#emit({ type: "reconnect-failed", code: error.code });
             return;
           }
         }
       }
-      this.#clearSavedSession();
-      this.#emit({ type: "reconnect-failed", code: "reconnect-expired" });
+      // A failed transport is not proof that the server's grace period expired.
+      this.#emit({ type: "reconnect-failed", code: "connection-failed" });
     })().finally(() => {
-      this.reconnectPromise = null;
+      if (this.reconnectPromise === operation) this.reconnectPromise = null;
     });
+    this.reconnectPromise = operation;
   }
 
   #saveSession(message) {
-    if (!this.storage || typeof message.roomCode !== "string"
+    if (typeof message.roomCode !== "string"
       || typeof message.playerToken !== "string"
       || (message.side !== null && !["X", "O"].includes(message.side))) return;
-    try {
-      this.storage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+    this.session = {
         roomCode: message.roomCode,
         playerToken: message.playerToken,
         side: message.side ?? null
-      }));
+    };
+    try {
+      this.storage?.setItem(`${SESSION_STORAGE_KEY}:${message.roomCode}`, JSON.stringify(this.session));
+      this.storage?.setItem(SESSION_STORAGE_KEY, JSON.stringify(this.session));
     } catch {
       this.#emit({ type: "session-storage-unavailable" });
     }
   }
 
   #updateSavedSide(message) {
-    if (!this.storage || typeof message.roomCode !== "string"
+    if (typeof message.roomCode !== "string"
       || (message.side !== null && !["X", "O"].includes(message.side))) return;
-    const previous = safeParseSession(this.storage);
+    const previous = this.session;
     if (!previous || previous.roomCode !== message.roomCode) return;
+    this.session = { ...previous, side: message.side ?? null };
     try {
-      this.storage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ ...previous, side: message.side ?? null }));
+      this.storage?.setItem(`${SESSION_STORAGE_KEY}:${message.roomCode}`, JSON.stringify(this.session));
+      const latest = safeParseSession(this.storage);
+      if (latest?.playerToken === previous.playerToken) this.storage?.setItem(SESSION_STORAGE_KEY, JSON.stringify(this.session));
     } catch {
       this.#emit({ type: "session-storage-unavailable" });
     }
   }
 
   #clearSavedSession() {
+    const previous = this.session;
+    this.session = null;
+    if (!previous) return;
     try {
-      this.storage?.removeItem(SESSION_STORAGE_KEY);
+      const latest = safeParseSession(this.storage);
+      if (latest?.playerToken === previous.playerToken) this.storage?.removeItem(SESSION_STORAGE_KEY);
+      const key = `${SESSION_STORAGE_KEY}:${previous.roomCode}`;
+      if (safeParseSession(this.storage, key)?.playerToken === previous.playerToken) this.storage?.removeItem(key);
     } catch { /* Session can still end when storage is disabled. */ }
   }
 

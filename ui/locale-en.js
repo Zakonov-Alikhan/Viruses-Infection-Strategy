@@ -119,6 +119,8 @@ export default Object.freeze({ ...{
   "online.error.not-in-room": "Create a room or join with an invite code first.",
   "online.error.not-connected": "There is no active server connection.",
   "online.error.seat-already-connected": "This seat is already connected in another tab.",
+  "online.error.session-replaced": "This room was opened in another tab. Continue there or rejoin here using the room code.",
+  "online.leave": "Leave room",
   "online.error.invalid-resume-token": "Could not verify the saved session.",
   "online.error.reconnect-expired": "The reconnect window expired. Create a new room.",
   "online.error.room-not-ready": "Wait for the second player to join.",

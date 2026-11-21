@@ -30,11 +30,11 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-admin-lifetime1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=admin-wormhole-lifetime1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=room-recovery2";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
-import { MultiplayerClient } from "./multiplayer.js?v=restart-consensus1";
+import { MultiplayerClient } from "./multiplayer.js?v=room-recovery2";
 import { AccountsClient, logAccountDiagnostic, submitAccountCredentials } from "./accounts.js?v=account-fetch3";
 import { TurnUndoHistory } from "./turn-undo.js?v=turn-undo1";
 import { downloadBoardPng, downloadMapJson } from "./export.js?v=final-export1";
@@ -120,6 +120,7 @@ const onlineItemOptions = document.querySelector("#online-item-options");
 const onlineJoinForm = document.querySelector("#online-join-form");
 const onlineRoomCodeInput = document.querySelector("#online-room-code");
 const onlineResumeButton = document.querySelector("#online-resume-room");
+const onlineLeaveButton = document.querySelector("#online-leave-room");
 const onlineRoomEntry = document.querySelector("#online-room-entry");
 const onlineRoomLobby = document.querySelector("#online-room-lobby");
 const onlineRoomStatus = document.querySelector("#online-room-status");
@@ -1780,13 +1781,14 @@ function clearOnlinePresentation() {
   if (state) renderClock();
 }
 
-function leaveOnlineSession({ showMenu = false } = {}) {
+function leaveOnlineSession({ showMenu = false, preserveSession = false } = {}) {
   const wasObserver = onlineObserverMode;
   const fromGamesPage = !activeGamesPage.hidden;
   clearOnlinePresentation();
   remoteAim = null;
   lastSentAim = null;
   if (wasObserver) multiplayerClient.leaveObserver();
+  else if (preserveSession) multiplayerClient.disconnect({ preserveSession: true });
   else multiplayerClient.leave();
   if (resultModal.open) resultModal.close();
   if (restartConfirmModal.open) restartConfirmModal.close();
@@ -1812,6 +1814,7 @@ function openOnlineRoom(inviteCode = "") {
   onlineRoomLobby.hidden = true;
   const savedSession = multiplayerClient.savedSession;
   onlineResumeButton.hidden = !savedSession;
+  onlineLeaveButton.hidden = !savedSession;
   if (savedSession) onlineResumeButton.textContent = t("online.resume");
   onlineRoomModal.showModal();
   const requestedCode = inviteCode || new URLSearchParams(window.location.search).get("room") || "";
@@ -1892,6 +1895,7 @@ function collectOnlineRoomSettings() {
 }
 
 function showOnlineRoom(message) {
+  onlineLeaveButton.hidden = false;
   onlineRoomCode = message.roomCode;
   onlineSide = message.side;
   onlineRoomCodeValue.textContent = message.roomCode;
@@ -2238,7 +2242,7 @@ function handleMultiplayerEvent(event) {
     }
     return;
   }
-  if (event.type === "reconnect-failed" || event.type === "room-closed") {
+  if (["reconnect-failed", "room-closed", "session-replaced"].includes(event.type)) {
     onlineConnected = false;
     onlineAdminAuthenticated = false;
     boardEditorActive = false;
@@ -2251,7 +2255,7 @@ function handleMultiplayerEvent(event) {
     onlineUndoPending = false;
     incomingUndoProposal = null;
     if (undoProposalModal.open && !localUndoConfirmation) undoProposalModal.close();
-    onlineStatusError = event.code || event.reason;
+    onlineStatusError = event.type === "session-replaced" ? "session-replaced" : event.code || event.reason;
     onlineGameStatus.textContent = onlineErrorMessage(onlineStatusError);
     onlineGameStatus.hidden = false;
     if (onlineMode) render();
@@ -2279,7 +2283,7 @@ function handleMultiplayerEvent(event) {
 multiplayerClient.subscribe(handleMultiplayerEvent);
 
 function openLocalGame() {
-  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession({ preserveSession: true });
   leaveTraining(true);
   computerOpponent = { enabled: false, difficulty: "easy" };
   transitionScreens(true);
@@ -2294,7 +2298,7 @@ function openComputerDifficulty() {
 }
 
 function startComputerGame(difficulty) {
-  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession({ preserveSession: true });
   computerOpponent = { enabled: true, difficulty };
   computerDifficultyModal.close();
   leaveTraining(true);
@@ -2305,7 +2309,7 @@ function startComputerGame(difficulty) {
 
 function returnToMainMenu() {
   if (onlineMode || multiplayerClient.savedSession) {
-    leaveOnlineSession({ showMenu: true });
+    leaveOnlineSession({ showMenu: true, preserveSession: true });
     return;
   }
   beginGameSession();
@@ -2325,7 +2329,7 @@ function leaveTraining(restoreSettings) {
 }
 
 function startTraining(lessonIndex = 0) {
-  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession({ preserveSession: true });
   beginGameSession();
   moveHistory = [];
   historyViewId = null;
@@ -3683,6 +3687,11 @@ onlineResumeButton.addEventListener("click", async () => {
     onlineResumeButton.disabled = false;
   }
 });
+onlineLeaveButton.addEventListener("click", () => {
+  leaveOnlineSession();
+  onlineResumeButton.hidden = true;
+  onlineLeaveButton.hidden = true;
+});
 onlineCopyCodeButton.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(onlineRoomCode || onlineRoomCodeValue.textContent);
@@ -3702,7 +3711,7 @@ onlineCopyLinkButton.addEventListener("click", async () => {
   }
 });
 onlineReturnMenuButton.addEventListener("click", () => {
-  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession();
+  if (multiplayerClient.savedSession || onlineMode) leaveOnlineSession({ preserveSession: true });
   if (onlineRoomModal.open) onlineRoomModal.close();
   onlineRoomEntry.hidden = false;
   onlineRoomLobby.hidden = true;

@@ -1,5 +1,5 @@
-import ruLocale from "./locale-ru.js?v=active-games6";
-import enLocale from "./locale-en.js?v=active-games6";
+import ruLocale from "./locale-ru.js?v=room-recovery2";
+import enLocale from "./locale-en.js?v=room-recovery2";
 
 const dictionaries = Object.freeze({ ru: ruLocale, en: enLocale });
 const supportedLanguages = Object.keys(dictionaries);

@@ -81,7 +81,8 @@ function safeJsonSend(socket, message, connection = null) {
   if (socket.readyState !== WebSocket.OPEN) return false;
   if (connection && VERSIONED_MESSAGE_TYPES.has(message.type)) {
     if (!Number.isSafeInteger(message.version)
-      || (message.type !== "room-ready" && message.version <= connection.lastSentVersion)) return false;
+      || (!["room-ready", "room-resumed"].includes(message.type) && message.version <= connection.lastSentVersion)
+      || message.version < connection.lastSentVersion) return false;
   }
   try {
     socket.send(JSON.stringify(message));
@@ -89,6 +90,7 @@ function safeJsonSend(socket, message, connection = null) {
       connection.lastSentVersion = message.version;
     }
     if (message.type === "room-closed") socket.close(4001, message.reason);
+    if (message.type === "session-replaced") socket.close(4002, "session-replaced");
     return true;
   } catch {
     return false;
@@ -130,6 +132,7 @@ export function createMultiplayerServer({
   path = "/ws",
   maxPayload = 8 * 1024,
   cleanupIntervalMs = 30_000,
+  heartbeatIntervalMs = 30_000,
   allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   trustProxy = false,
   roomCreationRateLimit = DEFAULT_ROOM_CREATE_LIMIT,
@@ -189,6 +192,7 @@ export function createMultiplayerServer({
   const loginLimiter = new FixedWindowRateLimiter({ ...loginRateLimit, now });
   const registerLimiter = new FixedWindowRateLimiter({ ...registerRateLimit, now });
   let cleanupTimer = null;
+  let heartbeatTimer = null;
   let closing = false;
 
   async function handleAccountApi(request, response) {
@@ -281,6 +285,7 @@ export function createMultiplayerServer({
       try {
         const token = readSessionCookie(request.headers.cookie);
         const identity = token && accountStore ? await accountStore.getSession(token) : null;
+        if (socket.destroyed) return;
         webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
           webSocketServer.emit("connection", webSocket, request, identity);
         });
@@ -296,8 +301,11 @@ export function createMultiplayerServer({
 
   webSocketServer.on("connection", (socket, request, identity = null) => {
     socket.on("error", () => {});
+    socket.isAlive = true;
+    socket.on("pong", () => { socket.isAlive = true; });
     const clientAddress = getClientAddress(request, trustProxy);
     socket.on("message", async (raw, isBinary) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
       if (isBinary) {
         sendError(socket, "binary-message-not-supported");
         return;
@@ -318,6 +326,9 @@ export function createMultiplayerServer({
 
       const context = contexts.get(socket);
       if (context?.pending) return sendError(socket, "room-joining", message.requestId);
+      if (context?.connection && !roomManager.isCurrentConnection(context.roomCode, context.connection)) {
+        return sendError(socket, "session-replaced", message.requestId);
+      }
       if (context?.observer && !["command", "admin-time"].includes(message.type)) {
         return sendError(socket, "spectator-read-only", message.requestId);
       }
@@ -374,6 +385,7 @@ export function createMultiplayerServer({
           contexts.delete(socket);
           return sendError(socket, "account-service-unavailable", message.requestId);
         }
+        if (socket.readyState !== WebSocket.OPEN) { contexts.delete(socket); return; }
         const joined = roomManager.joinRoom(message.code, {
           accountId: identity?.id ?? null,
           ratingsByAccount
@@ -448,14 +460,22 @@ export function createMultiplayerServer({
       }
 
       if (message.type === "resume-room") {
-        if (!exactKeys(message, ["type", "code", "playerToken", "requestId"])
-          || typeof message.code !== "string" || typeof message.playerToken !== "string") {
+        if (!exactKeys(message, ["type", "code", "playerToken", "replaceExisting", "requestId"])
+          || typeof message.code !== "string" || typeof message.playerToken !== "string"
+          || (message.replaceExisting !== undefined && typeof message.replaceExisting !== "boolean")) {
           return sendError(socket, "invalid-message", message.requestId);
         }
-        if (context) return sendError(socket, "already-in-room", message.requestId);
+        if (context && (context.observer || context.roomCode !== message.code.trim().toUpperCase())) {
+          return sendError(socket, "already-in-room", message.requestId);
+        }
         const resumed = roomManager.resumeRoom(message.code, message.playerToken, (outgoing) => {
           safeJsonSend(socket, outgoing, resumed.connection);
-        }, { accountId: identity?.id ?? null });
+        }, {
+          accountId: identity?.id ?? null, connection: context?.connection,
+          // Legacy clients do not understand session-replaced and would
+          // otherwise reconnect forever, stealing the seat back and forth.
+          replaceExisting: message.replaceExisting === true
+        });
         if (!resumed.ok) return sendError(socket, resumed.error.code, message.requestId);
         contexts.set(socket, {
           roomCode: resumed.roomCode,
@@ -519,7 +539,8 @@ export function createMultiplayerServer({
         }
         roomManager.submitCommand(context.roomCode, context.observer ? null : context.connection.side, message.command, {
           isAdmin: context.isAdmin === true || context.isAdminObserver === true,
-          adminObserverId: context.isAdminObserver ? context.observerId : null
+          adminObserverId: context.isAdminObserver ? context.observerId : null,
+          connection: context.connection
         }).then((result) => {
           if (!result.ok && socket.readyState === WebSocket.OPEN) {
             safeJsonSend(socket, {
@@ -673,7 +694,8 @@ export function createMultiplayerServer({
     socket.on("close", () => {
       const context = contexts.get(socket);
       if (context?.observer) roomManager.detachObserver(context.roomId, context.observerId);
-      else if (context) roomManager.detachConnection(context.roomCode, context.connection.side, context.connection);
+      else if (context?.connection) roomManager.detachConnection(context.roomCode, context.connection.side, context.connection);
+      contexts.delete(socket);
     });
   });
 
@@ -697,6 +719,16 @@ export function createMultiplayerServer({
             cleanupTimer = setInterval(() => roomManager.sweepExpiredRooms(), cleanupIntervalMs);
             cleanupTimer.unref?.();
           }
+          if (heartbeatIntervalMs > 0) {
+            heartbeatTimer = setInterval(() => {
+              for (const socket of webSocketServer.clients) {
+                if (!socket.isAlive) { socket.terminate(); continue; }
+                socket.isAlive = false;
+                if (socket.readyState === WebSocket.OPEN) socket.ping();
+              }
+            }, heartbeatIntervalMs);
+            heartbeatTimer.unref?.();
+          }
           resolve(httpServer.address());
         };
         httpServer.once("error", onError);
@@ -707,6 +739,7 @@ export function createMultiplayerServer({
     close() {
       closing = true;
       if (cleanupTimer) clearInterval(cleanupTimer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       roomManager.stopAllClocks?.();
       for (const socket of webSocketServer.clients) socket.close(1001, "server-shutdown");
       return new Promise((resolve) => {

@@ -317,7 +317,9 @@ test("randomly assigns X and O after the second player joins and retains token o
     const joined = manager.joinRoom(created.roomCode);
     assert.equal(joined.side, expectedJoiner);
     assert.equal(creatorConnection.connection.side, expectedCreator);
-    assert.equal(manager.resumeRoom(created.roomCode, created.playerToken, () => {}).error.code, "seat-already-connected");
+    assert.equal(manager.resumeRoom(created.roomCode, created.playerToken, () => {}, {
+      connection: creatorConnection.connection
+    }).connection, creatorConnection.connection);
     manager.broadcastReady(created.roomCode);
     assert.equal(sentByCreator.at(-1).side, expectedCreator);
     manager.detachConnection(created.roomCode, expectedCreator, creatorConnection.connection);
@@ -582,10 +584,47 @@ test("supports reconnection only with the seat token and within the grace period
   const resumed = manager.resumeRoom(created.roomCode, created.playerToken, () => {});
   assert.equal(resumed.ok, true);
   assert.equal(resumed.side, "X");
-  assert.equal(manager.resumeRoom(created.roomCode, joined.playerToken, () => {}).error.code, "seat-already-connected");
+  assert.equal(manager.resumeRoom(created.roomCode, "invalid-test-token-12345678901234567890", () => {}).error.code, "invalid-resume-token");
   manager.detachConnection(created.roomCode, "X", resumed.connection);
   now += 500;
   assert.equal(manager.resumeRoom(created.roomCode, created.playerToken, () => {}).error.code, "reconnect-expired");
+});
+
+test("a valid token replaces a lingering socket atomically and its late close cannot detach the new seat", () => {
+  const manager = makeManager();
+  const room = manager.createRoom(undefined, { accountId: "owner" });
+  const notices = [];
+  const original = manager.attachConnection(room.roomCode, "X", m => notices.push(m)).connection;
+  assert.equal(manager.resumeRoom(room.roomCode, room.playerToken, () => {}, { accountId: "other" }).error.code, "account-mismatch");
+  assert.equal(manager.resumeRoom(room.roomCode, room.playerToken, null, { accountId: "owner" }).error.code, "invalid-connection");
+  assert.equal(manager.isCurrentConnection(room.roomCode, original), true);
+  const resumed = manager.resumeRoom(room.roomCode, room.playerToken, () => {}, { accountId: "owner" });
+  assert.equal(resumed.ok, true);
+  assert.deepEqual(notices, [{ type: "session-replaced", roomCode: room.roomCode }]);
+  assert.equal(manager.isCurrentConnection(room.roomCode, original), false);
+  assert.equal(manager.detachConnection(room.roomCode, "X", original), false);
+  assert.equal(manager.isCurrentConnection(room.roomCode, resumed.connection), true);
+});
+
+test("signing in after creating a guest room does not lock out its token or change its account/rating identity", () => {
+  const manager = makeManager();
+  const room = manager.createRoom();
+  manager.attachConnection(room.roomCode, "X", () => {});
+  assert.equal(manager.resumeRoom(room.roomCode, room.playerToken, () => {}, { accountId: "new-login" }).ok, true);
+  assert.equal(manager.rooms.get(room.roomCode).seats.X.accountId, null);
+});
+
+test("commands queued by a replaced connection cannot mutate the new owner's match", async () => {
+  const manager = makeManager();
+  const room = manager.createRoom();
+  manager.joinRoom(room.roomCode);
+  const connection = manager.attachConnection(room.roomCode, "X", () => {}).connection;
+  manager.attachConnection(room.roomCode, "O", () => {});
+  const before = structuredClone(manager.getSnapshot(room.roomCode, "X"));
+  const pending = manager.submitCommand(room.roomCode, "X", { type: "choose-start", row: 1, col: 1 }, { connection });
+  manager.resumeRoom(room.roomCode, room.playerToken, () => {});
+  assert.equal((await pending).error.code, "session-replaced");
+  assert.deepEqual(manager.getSnapshot(room.roomCode, "X"), before);
 });
 
 test("the room creator can reclaim X after disconnecting even after O joins, using only the private seat token", () => {
