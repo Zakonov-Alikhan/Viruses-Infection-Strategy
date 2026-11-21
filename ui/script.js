@@ -30,7 +30,7 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-admin-lifetime1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=account-availability4";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=leaderboard-page1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -157,8 +157,15 @@ const accountProfile = document.querySelector("#account-profile");
 const accountStatus = document.querySelector("#account-status");
 const accountHeaderName = document.querySelector("#account-header-name");
 const accountHeaderDetail = document.querySelector("#account-header-detail");
-const leaderboardList = document.querySelector("#leaderboard-list");
+const leaderboardPage = document.querySelector("#leaderboard-page");
+const leaderboardRows = document.querySelector("#leaderboard-rows");
 const leaderboardStatus = document.querySelector("#leaderboard-status");
+const leaderboardRefresh = document.querySelector("#leaderboard-refresh");
+const leaderboardLoading = document.querySelector("#leaderboard-loading");
+const leaderboardEmpty = document.querySelector("#leaderboard-empty");
+const leaderboardTableRegion = document.querySelector("#leaderboard-table-region");
+const leaderboardSpinner = document.querySelector("#leaderboard-spinner");
+let leaderboardRequestPending = false;
 const accountsClient = new AccountsClient();
 let currentAccount = null;
 let accountSubmitting = false;
@@ -438,6 +445,8 @@ let screenTransitionId = 0;
 const SCREEN_TRANSITION_MS = 170;
 
 function transitionScreens(showGame) {
+  leaderboardPage.hidden = true;
+  leaderboardPage.inert = true;
   if (showGame && activeGamesPage && !activeGamesPage.hidden) showActiveGamesPage(false);
   const target = showGame ? gameScreen : mainMenuScreen;
   const outgoing = showGame ? mainMenuScreen : gameScreen;
@@ -1696,15 +1705,20 @@ function showActiveGamesPage(show) {
 }
 
 function showRoute(pathname) {
+  const isLeaderboard = pathname === "/leaderboard";
+  leaderboardPage.hidden = !isLeaderboard;
+  leaderboardPage.inert = !isLeaderboard;
   showActiveGamesPage(pathname === "/games");
   if (pathname !== "/games") {
     if (screenTransitionTimer !== null) window.clearTimeout(screenTransitionTimer);
     screenTransitionTimer = null;
     gameScreen.hidden = true;
     gameScreen.inert = true;
-    mainMenuScreen.hidden = false;
-    mainMenuScreen.inert = false;
+    mainMenuScreen.hidden = isLeaderboard;
+    mainMenuScreen.inert = isLeaderboard;
   }
+  if (isLeaderboard) void refreshLeaderboard();
+  syncMenuAmbient();
   syncBackgroundMusic();
 }
 
@@ -1715,7 +1729,7 @@ document.addEventListener("click", (event) => {
   if (!link || link.target || link.hasAttribute("download")) return;
   const destination = new URL(link.href, window.location.href);
   if (destination.origin !== window.location.origin
-    || !["/", "/games"].includes(destination.pathname)
+    || !["/", "/games", "/leaderboard"].includes(destination.pathname)
     || destination.search || destination.hash) return;
   event.preventDefault();
   if (destination.pathname !== window.location.pathname) {
@@ -3799,26 +3813,43 @@ async function refreshAccount() {
 }
 
 async function refreshLeaderboard() {
+  if (leaderboardPage.hidden || leaderboardRequestPending) return;
+  leaderboardRequestPending = true;
+  leaderboardRefresh.disabled = true;
+  leaderboardRefresh.setAttribute("aria-busy", "true");
+  leaderboardSpinner.hidden = false;
+  leaderboardLoading.hidden = leaderboardRows.childElementCount > 0;
+  leaderboardEmpty.hidden = true;
+  leaderboardStatus.hidden = true;
+  leaderboardStatus.classList.remove("account-status-error");
   leaderboardStatus.textContent = "";
-  leaderboardList.replaceChildren();
   try {
     const { entries } = await accountsClient.leaderboard();
-    if (!entries.length) {
-      leaderboardStatus.textContent = t("account.emptyLeaderboard");
-      return;
-    }
+    leaderboardRows.replaceChildren();
+    leaderboardEmpty.hidden = entries.length > 0;
+    leaderboardTableRegion.hidden = entries.length === 0;
     for (const entry of entries) {
-      const row = document.createElement("li");
-      const name = document.createElement("span");
-      const score = document.createElement("span");
-      name.textContent = `${entry.rank}. ${entry.username} · ${t("account.wins")}: ${entry.wins} · ${t("account.losses")}: ${entry.losses}`;
-      score.textContent = String(entry.rating);
-      row.append(name, score);
-      leaderboardList.append(row);
+      const row = document.createElement("tr");
+      for (const [index, value] of [entry.rank, entry.username, entry.rating, entry.wins, entry.losses].entries()) {
+        const cell = document.createElement(index === 1 ? "th" : "td");
+        if (index === 1) cell.scope = "row";
+        cell.textContent = String(value);
+        row.append(cell);
+      }
+      if (entry.rank <= 3) row.dataset.podium = String(entry.rank);
+      leaderboardRows.append(row);
     }
   } catch (error) {
+    leaderboardTableRegion.hidden = leaderboardRows.childElementCount === 0;
     leaderboardStatus.textContent = accountErrorMessage(error);
     leaderboardStatus.classList.add("account-status-error");
+    leaderboardStatus.hidden = false;
+  } finally {
+    leaderboardRequestPending = false;
+    leaderboardLoading.hidden = true;
+    leaderboardRefresh.disabled = false;
+    leaderboardRefresh.setAttribute("aria-busy", "false");
+    leaderboardSpinner.hidden = true;
   }
 }
 
@@ -3875,7 +3906,6 @@ async function submitAccountForm(event, method) {
       renderAccount(result.account);
       form.reset();
       if (method === "register") accountStatus.textContent = `${t("account.registered")} ${accountStatus.textContent}`;
-      void refreshLeaderboard();
     },
     onError(error) {
       logAccountDiagnostic("ui-error-rendered", { method, errorCode: error instanceof Error ? error.message : "unknown" });
@@ -3888,7 +3918,6 @@ async function submitAccountForm(event, method) {
 accountActionButton.addEventListener("click", () => {
   accountModal.showModal();
   void refreshAccount();
-  void refreshLeaderboard();
 });
 accountModalClose.addEventListener("click", () => accountModal.close());
 accountModal.addEventListener("click", (event) => {
@@ -3926,7 +3955,7 @@ document.querySelector("#account-logout").addEventListener("click", async () => 
     accountStatus.textContent = accountErrorMessage(error);
   }
 });
-document.querySelector("#account-leaderboard-refresh").addEventListener("click", () => void refreshLeaderboard());
+leaderboardRefresh.addEventListener("click", () => void refreshLeaderboard());
 document.addEventListener("languagechange", () => renderAccount(currentAccount));
 void refreshAccount();
 document.querySelectorAll("[data-mode]").forEach((button) => {
@@ -4391,7 +4420,7 @@ if (typeof ResizeObserver === "function") {
 } else {
   window.addEventListener("resize", syncBoardGeometry);
 }
-if (window.location.pathname === "/games") showActiveGamesPage(true);
+if (["/games", "/leaderboard"].includes(window.location.pathname)) showRoute(window.location.pathname);
 else syncMenuAmbient();
 const inviteUrl = new URL(window.location.href);
 const inviteCode = inviteUrl.searchParams.get("room");

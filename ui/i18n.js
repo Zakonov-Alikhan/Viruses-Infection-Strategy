@@ -1,5 +1,5 @@
-import ruLocale from "./locale-ru.js?v=account-availability4";
-import enLocale from "./locale-en.js?v=account-availability4";
+import ruLocale from "./locale-ru.js?v=leaderboard-page1";
+import enLocale from "./locale-en.js?v=leaderboard-page1";
 
 const dictionaries = Object.freeze({ ru: ruLocale, en: enLocale });
 const supportedLanguages = Object.keys(dictionaries);

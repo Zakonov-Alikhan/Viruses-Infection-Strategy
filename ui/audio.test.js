@@ -130,7 +130,7 @@ test("match start cue fires only on transition into play, and duplicate snapshot
 
 test("global settings entry points and both persistent audio controls exist across site screens", async () => {
   const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
-  assert.equal((html.match(/data-open-general-settings/g) || []).length, 3);
+  assert.equal((html.match(/data-open-general-settings/g) || []).length, 4);
   assert.match(html, /id="sound-effects-volume"/);
   assert.match(html, /id="background-music-volume"/);
   assert.match(html, /aria-controls="menu-settings-modal"/);

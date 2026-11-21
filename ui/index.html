@@ -10,7 +10,7 @@
   <meta property="og:type" content="website">
   <title>Cascade Wars — стратегия для двух игроков</title>
   <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg?v=cascade-brand1">
-  <link rel="stylesheet" href="/ui/style.css?v=cascade-package12">
+  <link rel="stylesheet" href="/ui/style.css?v=leaderboard-page1">
 </head>
 <body>
   <div class="main-menu-screen" id="main-menu-screen">
@@ -22,7 +22,7 @@
         <span class="brand-wordmark"><span class="brand-cascade">CASCADE</span><span class="brand-wars">WARS</span></span>
       </a>
       <div class="menu-account-area">
-
+        <a class="leaderboard-nav" id="leaderboard-link" href="/leaderboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8v5a4 4 0 0 1-8 0V3Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4m-4 1v5m-4 4h8m-6-4h4v4h-4z"/></svg><span data-i18n="leaderboard.nav">Рейтинг</span></a>
         <button class="support-header-button" id="support-open-button" type="button" aria-haspopup="dialog" aria-controls="support-modal"><span class="support-header-icon" aria-hidden="true">♡</span><span data-i18n="support.open">Поддержать проект</span></button>
         <button class="account-chip is-guest" id="account-action" type="button" aria-haspopup="dialog" aria-controls="account-modal">
           <span class="account-avatar" aria-hidden="true">◉</span>
@@ -117,7 +117,7 @@
   <dialog id="account-modal" class="settings-modal account-modal" aria-labelledby="account-modal-title">
     <section class="settings-card">
       <header class="settings-header">
-        <div><p class="eyebrow" data-i18n="account.eyebrow">Cascade Wars</p><h2 id="account-modal-title" data-i18n="account.title">Профиль и рейтинг</h2></div>
+        <div><p class="eyebrow" data-i18n="account.eyebrow">Cascade Wars</p><h2 id="account-modal-title" data-i18n="account.title">Профиль</h2></div>
         <button id="account-modal-close" class="icon-button" type="button" aria-label="Закрыть" data-i18n-aria-label="online.close">×</button>
       </header>
       <p id="account-status" class="settings-summary" role="status" aria-live="polite"></p>
@@ -150,11 +150,6 @@
         <div class="account-rating-summary"><strong id="account-profile-name"></strong><span><b id="account-profile-rating">1200</b> <span data-i18n="account.rating">рейтинг</span></span></div>
         <p><span data-i18n="account.wins">Победы</span>: <b id="account-profile-wins">0</b> · <span data-i18n="account.losses">Поражения</span>: <b id="account-profile-losses">0</b></p>
         <button id="account-logout" class="button button-secondary" type="button" data-i18n="account.logout">Выйти</button>
-      </section>
-      <section class="leaderboard-section">
-        <div class="leaderboard-heading"><h3 data-i18n="account.leaderboard">Таблица лидеров</h3><button id="account-leaderboard-refresh" class="button button-secondary" type="button" data-i18n="account.refresh">Обновить</button></div>
-        <p id="leaderboard-status" class="settings-summary" role="status" aria-live="polite"></p>
-        <ol id="leaderboard-list" class="leaderboard-list"></ol>
       </section>
     </section>
   </dialog>
@@ -250,6 +245,26 @@
     <h2 id="active-room-tooltip-title" data-i18n="activeGames.settingsTitle">Настройки комнаты</h2>
     <div id="active-room-tooltip-groups" class="active-room-tooltip-groups"></div>
   </aside>
+
+  <main class="leaderboard-page" id="leaderboard-page" aria-labelledby="leaderboard-title" hidden>
+    <header class="leaderboard-page-heading">
+      <div><p class="eyebrow" data-i18n="leaderboard.eyebrow">СООБЩЕСТВО</p><h1 id="leaderboard-title" data-i18n="account.leaderboard">Таблица лидеров</h1><p class="leaderboard-subtitle" data-i18n="leaderboard.subtitle">Лучшие игроки Cascade Wars по рейтингу Elo</p></div>
+      <div class="leaderboard-page-actions">
+        <button id="leaderboard-refresh" class="button button-secondary" type="button"><span data-i18n="account.refresh">Обновить</span><span class="active-games-button-spinner" id="leaderboard-spinner" aria-hidden="true" hidden></span></button>
+        <a class="button button-secondary" href="/" data-i18n="menu.back">В главное меню</a>
+        <button class="global-settings-trigger" id="leaderboard-settings-button" data-open-general-settings type="button" aria-label="Общие настройки" data-i18n-aria-label="menu.settingsTitle" aria-haspopup="dialog" aria-controls="menu-settings-modal" title="Общие настройки" data-i18n-title="menu.settingsTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10.1 2.9-.5 2a7.4 7.4 0 0 0-1.7 1l-2-.7-1.8 3.2 1.5 1.4a7.7 7.7 0 0 0 0 2l-1.5 1.4 1.8 3.2 2-.7a7.4 7.4 0 0 0 1.7 1l.5 2h3.8l.5-2a7.4 7.4 0 0 0 1.7-1l2 .7 1.8-3.2-1.5-1.4a7.7 7.7 0 0 0 0-2l1.5-1.4-1.8-3.2-2 .7a7.4 7.4 0 0 0-1.7-1l-.5-2z"/><circle cx="12" cy="10.8" r="2.7"/></svg></button>
+      </div>
+    </header>
+    <p id="leaderboard-status" class="settings-summary" role="status" aria-live="polite" hidden></p>
+    <div id="leaderboard-loading" class="leaderboard-placeholder" role="status" aria-live="polite"><span class="leaderboard-loader" aria-hidden="true"></span><span data-i18n="leaderboard.loading">Загружаем рейтинг…</span></div>
+    <section id="leaderboard-empty" class="leaderboard-placeholder" aria-labelledby="leaderboard-empty-title" hidden>
+      <span class="leaderboard-empty-icon" aria-hidden="true">CW</span><h2 id="leaderboard-empty-title" data-i18n="leaderboard.emptyTitle">Рейтинг пока пуст</h2><p data-i18n="leaderboard.emptyHelp">Создайте аккаунт и сыграйте сетевую партию — здесь появятся результаты игроков.</p>
+    </section>
+    <div id="leaderboard-table-region" class="leaderboard-table-region" hidden>
+      <table class="leaderboard-table" aria-label="Таблица лидеров Cascade Wars" data-i18n-aria-label="leaderboard.tableLabel"><thead><tr><th scope="col" data-i18n="leaderboard.rank">Место</th><th scope="col" data-i18n="leaderboard.player">Игрок</th><th scope="col" data-i18n="leaderboard.rating">Рейтинг</th><th scope="col" data-i18n="account.wins">Победы</th><th scope="col" data-i18n="account.losses">Поражения</th></tr></thead><tbody id="leaderboard-rows"></tbody></table>
+    </div>
+    <p class="leaderboard-note" data-i18n="leaderboard.note">До 100 игроков. Рейтинг меняется в сетевых матчах двух разных аккаунтов; начальный рейтинг — 1200.</p>
+  </main>
 
   <dialog id="computer-difficulty-modal" class="settings-modal computer-difficulty-modal" aria-labelledby="computer-difficulty-title" aria-describedby="computer-difficulty-help">
     <section class="settings-card">
@@ -680,6 +695,6 @@
     </section>
   </dialog>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/ui/script.js?v=cascade-package17"></script>
+  <script type="module" src="/ui/script.js?v=cascade-package18"></script>
 </body>
 </html>
