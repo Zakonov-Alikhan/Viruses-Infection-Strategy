@@ -30,7 +30,7 @@ import {
   usePointDestroy
 } from "./game.js?v=wormhole-admin-lifetime1";
 import { chooseComputerAction, applyComputerAction } from "./ai.js?v=teleport-protection1";
-import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=leaderboard-page1";
+import { applyTranslations, getLanguage, pieceForm, setLanguage, t } from "./i18n.js?v=result-home1";
 import { resolveClockSettings } from "./settings.js?v=20261021-rulesfix1";
 import { resolveSettingsRestart } from "./restart.js?v=restart-consensus1";
 import { createTrainingBoard, TRAINING_BOARD_SIZE, TRAINING_LESSONS } from "./training.js?v=20261018-menu12";
@@ -197,6 +197,7 @@ const resultTitle = document.querySelector("#result-title");
 const resultDescription = document.querySelector("#result-description");
 const resultRoast = document.querySelector("#result-roast");
 const resultNewGameButton = document.querySelector("#result-new-game");
+const resultHomeButton = document.querySelector("#result-home");
 const resultRematchButton = document.querySelector("#result-rematch");
 const resultRematchStatus = document.querySelector("#result-rematch-status");
 const resultExportPngButton = document.querySelector("#result-export-png");
@@ -4004,6 +4005,13 @@ resultRematchButton.addEventListener("click", async () => {
 resultNewGameButton.addEventListener("click", () => {
   if (onlineMode) leaveOnlineSession({ showMenu: true });
   else setupGame();
+});
+resultHomeButton.addEventListener("click", () => {
+  resultModal.close();
+  returnToMainMenu();
+  if (window.location.pathname !== "/") window.history.pushState(null, "", "/");
+  window.scrollTo({ top: 0, behavior: "auto" });
+  mainMenuScreen.querySelector(".brand-home").focus();
 });
 resignButton.addEventListener("click", () => {
   if (state.phase !== "playing" || !canHumanAct()) return;

@@ -301,6 +301,7 @@ export default Object.freeze({ ...{
 }, ...{
   "account.eyebrow": "Cascade Wars",
   "account.title": "Profile",
+  "dialog.home": "Back to home",
   "account.loginTitle": "Sign in",
   "account.registerTitle": "Create an account",
   "account.loginTab": "Sign in",

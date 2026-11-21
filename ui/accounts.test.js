@@ -281,7 +281,7 @@ test("auth tabs are non-submitting controls and exactly one constrained form is 
   assert.equal((auth.match(/name="password"[^>]*minlength="10"[^>]*required/g) || []).length, 2);
   assert.match(script, /accountLoginForm\.addEventListener\("submit"/);
   assert.match(script, /accountRegisterForm\.addEventListener\("submit"/);
-  assert.match(html, /script\.js\?v=cascade-package18/);
+  assert.match(html, /script\.js\?v=cascade-package19/);
   assert.doesNotMatch(html, /script\.js\?v=account-entry1/);
 });
 

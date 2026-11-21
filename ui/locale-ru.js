@@ -272,6 +272,7 @@ export default Object.freeze({ ...{
 }, ...{
   "account.eyebrow": "Cascade Wars",
   "account.title": "Профиль",
+  "dialog.home": "На главную",
   "account.loginTitle": "Войти в аккаунт",
   "account.registerTitle": "Создать аккаунт",
   "account.loginTab": "Войти",

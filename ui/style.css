@@ -360,7 +360,8 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
   max-width: none;
   max-height: calc(100% - 32px);
   padding: 0;
-  overflow: visible;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--text);
   border: 0;
   background: transparent;
@@ -429,6 +430,7 @@ html[data-game-animations="off"] .game-board *, html[data-game-animations="off"]
 .result-rematch-status { margin: -2px 0 12px; color: #b9d8cc; font-size: 12px; line-height: 1.45; }
 .result-rematch-status[hidden] { display: none; }
 .result-card > button { display: block; width: 100%; }
+.result-home { margin-top: 10px; }
 
 .button-primary {
   min-height: 48px;
